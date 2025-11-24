@@ -15,30 +15,34 @@ import {
  * We keep keywords mostly as identifiers, except for a few special literals.
  */
 enum TokenType {
-  // Structural
-  LBrace,     // {
-  RBrace,     // }
-  LBracket,   // [
-  RBracket,   // ]
-  LParen,     // (
-  RParen,     // )
-  Comma,      // ,
-  Semicolon,  // ;
-  Colon,      // :
-  Equals,     // =
-  At,         // @
+    // Structural
+    LBrace,
+    RBrace,
+    LBracket,
+    RBracket,
+    LParen,
+    RParen,
+    Comma,
+    Semicolon,
+    Colon,
+    Equals,
+    At,
 
-  // Literals
-  Int,        // 123
-  Float,      // 123.45
-  String,     // "foo"
-  Bool,       // true | false
-  Inf,        // inf
+    // NEW:
+    Dot,     // .
+    Greater, // >
+    Less,    // <
+    Bang,    // ! (for != later)
 
-  // Identifier / keyword (document, meta, state, etc. are matched by value)
-  Identifier,
+    // Literals
+    Int,
+    Float,
+    String,
+    Bool,
+    Inf,
 
-  EOF,
+    Identifier,
+    EOF,
 }
 
 interface Token {
@@ -174,7 +178,46 @@ class Lexer {
           this.advanceChar();
           tokens.push({ type: TokenType.At, lexeme: "@", line: startLine, column: startCol });
           break;
-        default:
+          case ".":
+              this.advanceChar();
+              tokens.push({
+                  type: TokenType.Dot,
+                  lexeme: ".",
+                  line: startLine,
+                  column: startCol,
+              });
+              break;
+
+          case ">":
+              this.advanceChar();
+              tokens.push({
+                  type: TokenType.Greater,
+                  lexeme: ">",
+                  line: startLine,
+                  column: startCol,
+              });
+              break;
+
+          case "<":
+              this.advanceChar();
+              tokens.push({
+                  type: TokenType.Less,
+                  lexeme: "<",
+                  line: startLine,
+                  column: startCol,
+              });
+              break;
+
+          case "!":
+              this.advanceChar();
+              tokens.push({
+                  type: TokenType.Bang,
+                  lexeme: "!",
+                  line: startLine,
+                  column: startCol,
+              });
+              break;
+          default:
           throw this.error(`Unexpected character '${ch}'`, startLine, startCol);
       }
     }
