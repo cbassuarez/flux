@@ -1,4 +1,8 @@
 # Flux VS Code Extension
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/cbassuarez.flux-language-support)](https://marketplace.visualstudio.com/items?itemName=cbassuarez.flux-language-support)
+[![VS Code Installs](https://img.shields.io/visual-studio-marketplace/i/cbassuarez.flux-language-support)](https://marketplace.visualstudio.com/items?itemName=cbassuarez.flux-language-support)
+[![Flux IR v0.1](https://img.shields.io/badge/Flux%20IR-v0.1-00CDFE)](./docs/flux-v0_1.md)
+[![License: MIT](https://img.shields.io/github/license/cbassuarez/flux)](../../LICENSE)
 
 This extension adds first-class editor support for the **Flux** score language — a grid-based notation and rule language for spatial music and graphic scores.
 

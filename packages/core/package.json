@@ -3,13 +3,28 @@
   "version": "0.1.0",
   "description": "Core AST, parser, and evaluator for the Flux score language.",
   "license": "MIT",
+  "author": "Sebastian Suarez-Solis",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
+  "publishConfig": {
+    "access": "public"
+  },
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest"
+    "test": "vitest",
+    "prepublishOnly": "npm run build && npm test"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

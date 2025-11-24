@@ -1,0 +1,20 @@
+# Ignore git metadata
+**/.git*
+.gitignore
+
+# Ignore dependencies and build artifacts
+**/node_modules/**
+**/dist/**
+
+# Ignore TypeScript sources and tests
+**/src/**
+**/test/**
+
+# Ignore local VS Code/editor config
+.vscode/**
+.vscode-test/**
+
+# Ignore TS/build configs
+tsconfig.json
+esbuild.config.js
+

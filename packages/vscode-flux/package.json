@@ -4,6 +4,8 @@
   "publisher": "cbassuarez",
   "version": "0.1.0",
   "description": "Language support for the Flux score language (syntax + diagnostics).",
+  "license": "MIT",
+  "author": "Sebastian Suarez-Solis",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -15,6 +17,13 @@
     "onCommand:flux.showIR"
   ],
   "main": "./dist/extension.js",
+  "files": [
+    "dist",
+    "package.json",
+    "README.md",
+    "language-configuration.json",
+    "syntaxes"
+  ],
   "contributes": {
     "languages": [
       {
@@ -59,6 +68,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "npm run typecheck && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --external:@flux-lang/core --outfile=dist/extension.js",
+    "package": "vsce package",
+    "publish": "vsce publish",
     "test": "echo \"No tests yet\""
   },
   "dependencies": {

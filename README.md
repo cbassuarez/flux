@@ -1,3 +1,9 @@
+[![CI](https://img.shields.io/github/actions/workflow/status/cbassuarez/flux/ci.yml?branch=main&label=CI&logo=github)](https://github.com/cbassuarez/flux/actions/workflows/ci.yml)
+[![Flux IR v0.1](https://img.shields.io/badge/Flux%20IR-v0.1-00CDFE)](./packages/core/docs/flux-v0_1.md)
+[![License: MIT](https://img.shields.io/github/license/cbassuarez/flux)](./LICENSE)
+[![Node >= 20](https://img.shields.io/badge/node-%3E%3D%2020-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![TypeScript ^5.6](https://img.shields.io/badge/TypeScript-%5E5.6-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+
 # Flux
 
 Flux is a small domain-specific language for **grid-based musical scores and live systems**. It lets you describe pages of cells (grids), global parameters, and rule-based behaviors (docsteps, neighbors, events) in a compact, textual form.
@@ -281,6 +287,8 @@ Current v0.1 CLI behavior:
 NDJSON diagnostics via `--json` are planned and may appear in future versions.
 
 ### 3. VS Code: Flux language support
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/cbassuarez.flux-language-support)](https://marketplace.visualstudio.com/items?itemName=cbassuarez.flux-language-support)
+[![VS Code Installs](https://img.shields.io/visual-studio-marketplace/i/cbassuarez.flux-language-support)](https://marketplace.visualstudio.com/items?itemName=cbassuarez.flux-language-support)
 
 The **Flux VS Code extension** lives in:
 
@@ -356,6 +364,8 @@ This will:
     * `vscode-flux` currently has a placeholder `test` script.
 
 ### Working on individual packages
+[![npm version](https://img.shields.io/npm/v/%40flux-lang%2Fcore)](https://www.npmjs.com/package/@flux-lang/core)
+[![npm version](https://img.shields.io/npm/v/%40flux-lang%2Fcli)](https://www.npmjs.com/package/@flux-lang/cli)
 
 You can also work inside each package:
 

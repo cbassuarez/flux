@@ -1,6 +1,11 @@
 {
   "name": "flux-lang-monorepo",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cbassuarez/flux.git"
+  },
   "workspaces": [
     "packages/*"
   ],
