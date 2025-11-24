@@ -26,7 +26,7 @@ import {
     DocstepAdvanceTimer,
     EventsApplyPolicy,
     TimerUnit,
-} from "./ast";
+} from "./ast.js";
 
 /**
  * Token types for the Flux lexer.

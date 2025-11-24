@@ -1,0 +1,17 @@
+// packages/vscode-flux/tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": ["vscode", "node"]
+  },
+  "include": ["src"]
+}
+

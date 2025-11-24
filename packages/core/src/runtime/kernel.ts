@@ -1,5 +1,4 @@
-// src/runtime/kernel.ts
-import type { FluxDocument, FluxExpr, FluxRule, FluxStmt } from "../ast";
+import type { FluxDocument, FluxExpr, FluxRule, FluxStmt } from "../ast.js";
 import type {
     FluxEvent,
     GridRuntimeState,
@@ -7,7 +6,7 @@ import type {
     NeighborsNamespace,
     RuntimeCellState,
     RuntimeState,
-} from "./model";
+} from "./model.js";
 
 /**
  * Build an initial RuntimeState from a parsed FluxDocument.

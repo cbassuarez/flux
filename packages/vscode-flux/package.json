@@ -1,0 +1,73 @@
+{
+  "name": "@flux-lang/vscode-flux",
+  "displayName": "Flux Language Support",
+  "publisher": "cbassuarez",
+  "version": "0.1.0",
+  "description": "Language support for the Flux score language (syntax + diagnostics).",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:flux",
+    "onCommand:flux.showIR"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "flux",
+        "aliases": ["Flux", "flux"],
+        "extensions": [".flux"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "flux",
+        "scopeName": "source.flux",
+        "path": "./syntaxes/flux.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "flux.showIR",
+        "title": "Flux: Show IR JSON for Current File",
+        "category": "Flux"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "flux.showIR",
+          "when": "resourceLangId == flux",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cbassuarez/flux.git"
+  },
+  "galleryBanner": {
+    "color": "#111111",
+    "theme": "dark"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run typecheck && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --external:@flux-lang/core --outfile=dist/extension.js",
+    "test": "echo \"No tests yet\""
+  },
+  "dependencies": {
+    "@flux-lang/core": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}

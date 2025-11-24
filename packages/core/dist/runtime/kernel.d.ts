@@ -1,5 +1,5 @@
-import type { FluxDocument } from "../ast";
-import type { FluxEvent, RuntimeState } from "./model";
+import type { FluxDocument } from "../ast.js";
+import type { FluxEvent, RuntimeState } from "./model.js";
 /**
  * Build an initial RuntimeState from a parsed FluxDocument.
  * - Params are initialized from `state.params.initial`.

@@ -1,4 +1,4 @@
-import type { FluxDocument, FluxRuntimeConfig } from "../ast";
+import type { FluxDocument, FluxRuntimeConfig } from "../ast.js";
 /**
  * RuntimeCellState is the concrete, mutable-ish view of a Flux cell at runtime.
  *

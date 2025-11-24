@@ -1,0 +1,105 @@
+{
+  "scopeName": "source.flux",
+  "name": "Flux",
+  "fileTypes": ["flux"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#eventStrings" },
+    { "include": "#neighbors" },
+    { "include": "#keywords" },
+    { "include": "#logicalOperators" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.flux",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.flux",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.flux",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.flux",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "eventStrings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.flux constant.language.event-type.flux",
+          "match": "\"(click|hover|input)\""
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.flux",
+          "match": "\\b\\d+(?:\\.\\d+)?\\b"
+        }
+      ]
+    },
+    "neighbors": {
+      "patterns": [
+        {
+          "name": "support.class.neighbors.flux",
+          "match": "\\bneighbors\\b"
+        },
+        {
+          "name": "support.function.neighbors.flux",
+          "match": "(?<=neighbors\\.)\\b(all|orth)\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.flux",
+          "match": "\\b(document|meta|state|runtime|grid|cell|rule|when|then|else)\\b"
+        },
+        {
+          "name": "keyword.other.flux",
+          "match": "\\b(mode|on|grid|topology|size|tags|content|dynamic|param|eventsApply|docstepAdvance|timer)\\b"
+        }
+      ]
+    },
+    "logicalOperators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.logical.flux",
+          "match": "\\b(and|or|not)\\b"
+        },
+        {
+          "name": "keyword.operator.logical.flux",
+          "match": "&&|\\|\\||!"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.flux",
+          "match": "==|!=|===|!==|<=|>=|<|>|=|\\+|-|\\*|/"
+        }
+      ]
+    }
+  }
+}
