@@ -89,9 +89,11 @@ export interface FluxEvent {
 }
 export type EventsApplyPolicy = "immediate" | "deferred" | "cellImmediateParamsDeferred";
 export type DocstepAdvanceKind = "timer" | "transport" | "ruleRequest";
+export type TimerUnit = "s" | "sec" | "secs" | "second" | "seconds" | "ms" | "millisecond" | "milliseconds" | "m" | "min" | "mins" | "minute" | "minutes" | "h" | "hr" | "hrs" | "hour" | "hours" | "bar" | "bars" | "measure" | "measures" | "beat" | "beats" | "sub" | "subs" | "subdivision" | "subdivisions" | "tick" | "ticks";
 export interface DocstepAdvanceTimer {
     kind: "timer";
-    intervalSeconds: number;
+    amount: number;
+    unit: TimerUnit;
 }
 export interface DocstepAdvanceTransport {
     kind: "transport";
@@ -167,11 +169,16 @@ export interface ExpressionStmt {
     expr: FluxExpr;
 }
 export type FluxStmt = AssignmentStmt | LetStmt | AdvanceDocstepStmt | ExpressionStmt;
+export interface RuleBranch {
+    condition: FluxExpr;
+    thenBranch: FluxStmt[];
+}
 export interface FluxRule {
     name: string;
     mode: RuleMode;
     scope?: RuleScope;
     onEventType?: string;
+    branches: RuleBranch[];
     condition: FluxExpr;
     thenBranch: FluxStmt[];
     elseBranch?: FluxStmt[];

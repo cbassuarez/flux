@@ -127,9 +127,42 @@ export type EventsApplyPolicy =
 
 export type DocstepAdvanceKind = "timer" | "transport" | "ruleRequest";
 
+export type TimerUnit =
+    | "s"
+    | "sec"
+    | "secs"
+    | "second"
+    | "seconds"
+    | "ms"
+    | "millisecond"
+    | "milliseconds"
+    | "m"
+    | "min"
+    | "mins"
+    | "minute"
+    | "minutes"
+    | "h"
+    | "hr"
+    | "hrs"
+    | "hour"
+    | "hours"
+    | "bar"
+    | "bars"
+    | "measure"
+    | "measures"
+    | "beat"
+    | "beats"
+    | "sub"
+    | "subs"
+    | "subdivision"
+    | "subdivisions"
+    | "tick"
+    | "ticks";
+
 export interface DocstepAdvanceTimer {
-  kind: "timer";
-  intervalSeconds: number;
+    kind: "timer";
+    amount: number;
+    unit: TimerUnit;
 }
 
 export interface DocstepAdvanceTransport {
@@ -262,14 +295,25 @@ export type FluxStmt =
 
 // Rules
 
+export interface RuleBranch {
+    condition: FluxExpr;
+    thenBranch: FluxStmt[];
+}
+
 export interface FluxRule {
-  name: string;
-  mode: RuleMode;
-  scope?: RuleScope;
-  onEventType?: string; // for mode = "event"
-  condition: FluxExpr;
-  thenBranch: FluxStmt[];
-  elseBranch?: FluxStmt[];
+    name: string;
+    mode: RuleMode;
+    scope?: RuleScope;
+    onEventType?: string;
+
+    // v0.1 multi-branch structure
+    branches: RuleBranch[];
+
+    // Convenience mirrors of the first branch for callers that still expect single-branch rules.
+    condition: FluxExpr;
+    thenBranch: FluxStmt[];
+
+    elseBranch?: FluxStmt[];
 }
 
 // Document

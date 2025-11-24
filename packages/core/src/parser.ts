@@ -25,6 +25,7 @@ import {
     DocstepAdvanceSpec,
     DocstepAdvanceTimer,
     EventsApplyPolicy,
+    TimerUnit,
 } from "./ast";
 
 /**
@@ -1182,18 +1183,45 @@ class Parser {
 
         const { mode, scope, onEventType } = this.parseRuleHeader();
 
+        // Enforce event header constraints
+        if (mode === "event" && !onEventType) {
+            throw this.errorAtToken(
+                this.peek(),
+                "Event rules must specify an 'on=\"...\"' event type",
+            );
+        }
+
         this.consume(TokenType.LBrace, "Expected '{' to start rule body");
 
+        // First branch: when ... then { ... }
         this.expectIdentifier("when", "Expected 'when' in rule body");
-        const condition = this.parseExpr();
+        const firstCondition = this.parseExpr();
 
         this.expectIdentifier("then", "Expected 'then' after rule condition");
-        const thenBranch = this.parseStatementBlock();
+        const firstThen = this.parseStatementBlock();
+
+        const branches: { condition: FluxExpr; thenBranch: FluxStmt[] }[] = [
+            { condition: firstCondition, thenBranch: firstThen },
+        ];
 
         let elseBranch: FluxStmt[] | undefined;
-        if (this.checkIdentifier("else")) {
+
+        // Optional: else when ... { ... } chains and final else { ... }
+        while (this.checkIdentifier("else")) {
             this.advance(); // 'else'
-            elseBranch = this.parseStatementBlock();
+
+            if (this.checkIdentifier("when")) {
+                // else when ...
+                this.advance(); // 'when'
+                const cond = this.parseExpr();
+                this.expectIdentifier("then", "Expected 'then' after 'else when' condition");
+                const thenBlock = this.parseStatementBlock();
+                branches.push({ condition: cond, thenBranch: thenBlock });
+            } else {
+                // plain else { ... }
+                elseBranch = this.parseStatementBlock();
+                break;
+            }
         }
 
         this.consume(TokenType.RBrace, "Expected '}' after rule body");
@@ -1203,8 +1231,10 @@ class Parser {
             mode,
             scope,
             onEventType,
-            condition,
-            thenBranch,
+            branches,
+            // convenience mirrors of the first branch
+            condition: branches[0].condition,
+            thenBranch: branches[0].thenBranch,
             elseBranch,
         };
     }
@@ -1335,22 +1365,19 @@ class Parser {
                 this.advance(); // eventsApply
                 this.consume(TokenType.Equals, "Expected '=' after 'eventsApply'");
 
-                const tok = this.peek();
-                let raw: string;
-                if (tok.type === TokenType.String || tok.type === TokenType.Identifier) {
-                    this.advance();
-                    raw = String(tok.value ?? tok.lexeme);
-                } else {
-                    throw this.errorAtToken(tok, "Expected identifier or string value for eventsApply");
-                }
-
+                const valTok = this.consume(
+                    TokenType.String,
+                    "Expected string value for eventsApply",
+                );
+                const raw = String(valTok.value);
                 const value = raw as EventsApplyPolicy;
+
                 if (
                     value !== "immediate" &&
                     value !== "deferred" &&
                     value !== "cellImmediateParamsDeferred"
                 ) {
-                    throw this.errorAtToken(tok, `Invalid eventsApply policy '${value}'`);
+                    throw this.errorAtToken(valTok, `Invalid eventsApply policy '${value}'`);
                 }
 
                 config.eventsApply = value;
@@ -1385,59 +1412,57 @@ class Parser {
         // v0.1: only timer(...) supported
         this.expectIdentifier("timer", "Expected 'timer' in docstepAdvance spec");
         this.consume(TokenType.LParen, "Expected '(' after 'timer'");
-        const intervalSeconds = this.parseDurationSpec();
+        const { amount, unit } = this.parseDurationSpec();
         this.consume(TokenType.RParen, "Expected ')' after timer(...)");
 
         const spec: DocstepAdvanceTimer = {
             kind: "timer",
-            intervalSeconds,
+            amount,
+            unit,
         };
 
         return spec;
     }
 
-    private parseDurationSpec(): number {
+    private parseDurationSpec(): { amount: number; unit: TimerUnit } {
         const numTok = this.consumeNumber("Expected numeric duration");
         const amount = Number(numTok.value);
 
-        // Default: seconds
+        // Default unit if omitted: seconds
+        let unit: TimerUnit = "s";
+
         if (this.check(TokenType.Identifier)) {
             const unitTok = this.advance();
-            const raw = String(unitTok.value).toLowerCase();
+            const raw = String(unitTok.value);
+            const lowered = raw.toLowerCase();
 
-            // time units
-            if (raw === "s" || raw === "sec" || raw === "secs" || raw === "second" || raw === "seconds") {
-                return amount;
+            // seconds
+            if (
+                lowered === "s" ||
+                lowered === "sec" ||
+                lowered === "secs" ||
+                lowered === "second" ||
+                lowered === "seconds"
+            ) {
+                unit = "s";
             }
-            if (raw === "ms" || raw === "millisecond" || raw === "milliseconds") {
-                return amount / 1000;
+            // milliseconds
+            else if (
+                lowered === "ms" ||
+                lowered === "millisecond" ||
+                lowered === "milliseconds"
+            ) {
+                unit = "ms";
             }
-            if (raw === "m" || raw === "min" || raw === "mins" || raw === "minute" || raw === "minutes") {
-                return amount * 60;
+            // beats (musical)
+            else if (lowered === "beat" || lowered === "beats") {
+                unit = "beats";
+            } else {
+                throw this.errorAtToken(unitTok, `Unknown duration unit '${unitTok.lexeme}'`);
             }
-            if (raw === "h" || raw === "hr" || raw === "hrs" || raw === "hour" || raw === "hours") {
-                return amount * 3600;
-            }
-
-            // musical units – for now we keep them as abstract "seconds-like" quantities
-            if (raw === "bar" || raw === "bars" || raw === "measure" || raw === "measures") {
-                return amount;
-            }
-            if (raw === "beat" || raw === "beats") {
-                return amount;
-            }
-            if (raw === "sub" || raw === "subs" || raw === "subdivision" || raw === "subdivisions") {
-                return amount;
-            }
-            if (raw === "tick" || raw === "ticks") {
-                return amount;
-            }
-
-            throw this.errorAtToken(unitTok, `Unknown duration unit '${unitTok.lexeme}'`);
         }
 
-        // no unit → interpret as seconds
-        return amount;
+        return { amount, unit };
     }
 
     private skipRuleBlock(): void {
