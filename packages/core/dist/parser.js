@@ -16,15 +16,19 @@ var TokenType;
     TokenType[TokenType["Colon"] = 8] = "Colon";
     TokenType[TokenType["Equals"] = 9] = "Equals";
     TokenType[TokenType["At"] = 10] = "At";
+    // NEW:
+    TokenType[TokenType["Dot"] = 11] = "Dot";
+    TokenType[TokenType["Greater"] = 12] = "Greater";
+    TokenType[TokenType["Less"] = 13] = "Less";
+    TokenType[TokenType["Bang"] = 14] = "Bang";
     // Literals
-    TokenType[TokenType["Int"] = 11] = "Int";
-    TokenType[TokenType["Float"] = 12] = "Float";
-    TokenType[TokenType["String"] = 13] = "String";
-    TokenType[TokenType["Bool"] = 14] = "Bool";
-    TokenType[TokenType["Inf"] = 15] = "Inf";
-    // Identifier / keyword (document, meta, state, etc. are matched by value)
-    TokenType[TokenType["Identifier"] = 16] = "Identifier";
-    TokenType[TokenType["EOF"] = 17] = "EOF";
+    TokenType[TokenType["Int"] = 15] = "Int";
+    TokenType[TokenType["Float"] = 16] = "Float";
+    TokenType[TokenType["String"] = 17] = "String";
+    TokenType[TokenType["Bool"] = 18] = "Bool";
+    TokenType[TokenType["Inf"] = 19] = "Inf";
+    TokenType[TokenType["Identifier"] = 20] = "Identifier";
+    TokenType[TokenType["EOF"] = 21] = "EOF";
 })(TokenType || (TokenType = {}));
 /**
  * Simple lexer for Flux.
@@ -144,6 +148,42 @@ class Lexer {
                 case "@":
                     this.advanceChar();
                     tokens.push({ type: TokenType.At, lexeme: "@", line: startLine, column: startCol });
+                    break;
+                case ".":
+                    this.advanceChar();
+                    tokens.push({
+                        type: TokenType.Dot,
+                        lexeme: ".",
+                        line: startLine,
+                        column: startCol,
+                    });
+                    break;
+                case ">":
+                    this.advanceChar();
+                    tokens.push({
+                        type: TokenType.Greater,
+                        lexeme: ">",
+                        line: startLine,
+                        column: startCol,
+                    });
+                    break;
+                case "<":
+                    this.advanceChar();
+                    tokens.push({
+                        type: TokenType.Less,
+                        lexeme: "<",
+                        line: startLine,
+                        column: startCol,
+                    });
+                    break;
+                case "!":
+                    this.advanceChar();
+                    tokens.push({
+                        type: TokenType.Bang,
+                        lexeme: "!",
+                        line: startLine,
+                        column: startCol,
+                    });
                     break;
                 default:
                     throw this.error(`Unexpected character '${ch}'`, startLine, startCol);

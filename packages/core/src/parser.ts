@@ -28,11 +28,18 @@ enum TokenType {
     Equals,
     At,
 
-    // NEW:
+    // NEW (already added):
     Dot,     // .
     Greater, // >
     Less,    // <
     Bang,    // ! (for != later)
+
+    // NEW NOW:
+    Plus,    // +
+    Minus,   // - (when not part of a number literal)
+    Star,    // *
+    Slash,   // /
+    Percent, // % (future-proof if you ever want modulo)
 
     // Literals
     Int,
@@ -217,8 +224,62 @@ class Lexer {
                   column: startCol,
               });
               break;
+          // NEW:
+          case "+":
+              this.advanceChar();
+              tokens.push({
+                  type: TokenType.Plus,
+                  lexeme: "+",
+                  line: startLine,
+                  column: startCol,
+              });
+              break;
+
+          case "-":
+              // Note: we only get here when '-' is *not* part of a numeric literal,
+              // because readNumberToken() already handles the "-<digit>" case above.
+              this.advanceChar();
+              tokens.push({
+                  type: TokenType.Minus,
+                  lexeme: "-",
+                  line: startLine,
+                  column: startCol,
+              });
+              break;
+
+          case "*":
+              this.advanceChar();
+              tokens.push({
+                  type: TokenType.Star,
+                  lexeme: "*",
+                  line: startLine,
+                  column: startCol,
+              });
+              break;
+
+          case "/":
+              // We already handle '//' and '/*' earlier, so if we get here it's a bare '/'.
+              this.advanceChar();
+              tokens.push({
+                  type: TokenType.Slash,
+                  lexeme: "/",
+                  line: startLine,
+                  column: startCol,
+              });
+              break;
+
+          case "%":
+              this.advanceChar();
+              tokens.push({
+                  type: TokenType.Percent,
+                  lexeme: "%",
+                  line: startLine,
+                  column: startCol,
+              });
+              break;
+
           default:
-          throw this.error(`Unexpected character '${ch}'`, startLine, startCol);
+              throw this.error(`Unexpected character '${ch}'`, startLine, startCol);
       }
     }
 
