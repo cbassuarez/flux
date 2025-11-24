@@ -54,7 +54,7 @@ interface Token {
  * - Distinguishes Int vs Float.
  * - Handles "inf" as a dedicated keyword token.
  * - Handles true/false as Bool tokens.
- * - Supports // and /* */ comments.
+ * - Supports both line (//) and block comments.
  */
 class Lexer {
   private src: string;
