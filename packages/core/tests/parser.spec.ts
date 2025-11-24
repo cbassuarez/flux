@@ -133,7 +133,7 @@ describe("Flux parser v0.1", () => {
         }
 
         runtime {
-          eventsApply = deferred;
+          eventsApply = "deferred";
           docstepAdvance = [ timer(8s) ];
         }
       }

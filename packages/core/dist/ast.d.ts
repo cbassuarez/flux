@@ -87,7 +87,7 @@ export interface FluxEvent {
     payload?: any;
     timestamp: number;
 }
-export type EventsApplyPolicy = "immediate" | "deferred";
+export type EventsApplyPolicy = "immediate" | "deferred" | "cellImmediateParamsDeferred";
 export type DocstepAdvanceKind = "timer" | "transport" | "ruleRequest";
 export interface DocstepAdvanceTimer {
     kind: "timer";
@@ -110,7 +110,7 @@ export type RuleMode = "docstep" | "event" | "timer";
 export interface RuleScope {
     grid?: string;
 }
-export type BinaryOp = "==" | "!=" | "<" | "<=" | ">" | ">=" | "+" | "-" | "*" | "/" | "and" | "or";
+export type BinaryOp = "==" | "!=" | "===" | "!==" | "<" | "<=" | ">" | ">=" | "+" | "-" | "*" | "/" | "and" | "or";
 export type UnaryOp = "-" | "not";
 export type FluxLiteralValue = number | string | boolean;
 export interface LiteralExpr {
@@ -142,7 +142,13 @@ export interface BinaryExpr {
     left: FluxExpr;
     right: FluxExpr;
 }
-export type FluxExpr = LiteralExpr | IdentifierExpr | MemberExpr | CallExpr | UnaryExpr | BinaryExpr;
+export interface NeighborsCallExpr {
+    kind: "NeighborsCallExpression";
+    namespace: "neighbors";
+    method: string;
+    args: FluxExpr[];
+}
+export type FluxExpr = LiteralExpr | IdentifierExpr | MemberExpr | CallExpr | UnaryExpr | BinaryExpr | NeighborsCallExpr;
 export interface AssignmentStmt {
     kind: "AssignmentStatement";
     target: FluxExpr;
