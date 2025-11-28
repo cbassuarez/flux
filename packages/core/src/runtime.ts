@@ -1,99 +1,92 @@
 import type { FluxDocument, FluxExpr, DocstepAdvanceTimer } from "./ast.js";
 
-// A single cell in the runtime grid state
-export interface RuntimeCellState {
-  id: string; // matches IR cell id (e.g. "c1")
-  tags: string[]; // copied from document
-  content: string; // mutable
-  dynamic: number; // mutable
-}
+export type RuntimeOptions = {
+  clock?: "manual" | "internal";
+  timerOverrideMs?: number | null;
+  onEvent?: (event: RuntimeEvent) => void;
+};
 
-// Snapshot of a single grid
-export interface RuntimeGridSnapshot {
-  name: string; // grid name, e.g. "main"
-  rows: number;
-  cols: number;
-  cells: RuntimeCellState[]; // row-major order
-}
-
-// Snapshot of the whole document state at a docstep
-export interface RuntimeSnapshot {
+export type RuntimeSnapshot = {
   docstep: number;
   params: Record<string, number>;
-  grids: RuntimeGridSnapshot[];
-}
+  grids: Array<{
+    name: string;
+    rows: number;
+    cols: number;
+    cells: Array<{
+      id: string;
+      row: number;
+      col: number;
+      tags: string[];
+      content: string;
+      dynamic: number;
+    }>;
+  }>;
+};
 
-// Options for runtime creation
-export interface RuntimeOptions {
-  seed?: number; // deterministic random seed
-}
+export type RuntimeEvent =
+  | {
+      kind: "docstep";
+      docstep: number;
+      timestamp: number;
+    }
+  | {
+      kind: "cellChanged";
+      docstep: number;
+      grid: string;
+      cellId: string;
+      prevContent: string;
+      nextContent: string;
+      dynamic: number;
+    }
+  | {
+      kind: "materialTrigger";
+      docstep: number;
+      grid: string;
+      cellId: string;
+      materialKey: string;
+      dynamic: number;
+      params: Record<string, number>;
+    };
 
-export interface FluxRuntime {
-  /** Return the original parsed IR (whatever parseDocument returns). */
-  getDocument(): FluxDocument;
-
-  /** Get the current docstep index (starting at 0). */
-  getDocstep(): number;
-
-  /** Get a deep-cloned snapshot of the current runtime state. */
+export interface Runtime {
   getSnapshot(): RuntimeSnapshot;
-
-  /** Advance the document by one docstep, applying all docstep rules. */
-  stepDocstep(): RuntimeSnapshot;
-
-  /** Get current param values. */
-  getParams(): Record<string, number>;
-
-  /** Set one or more param values. Unknown names are ignored or rejected. */
-  setParams(values: Record<string, number>): void;
-
-  /** Convenience: set a single param. */
+  stepDocstep(): { snapshot: RuntimeSnapshot; events: RuntimeEvent[] };
+  start(): void;
+  stop(): void;
+  isRunning(): boolean;
   setParam(name: string, value: number): void;
 }
 
-export interface CreateRuntimeOptions extends RuntimeOptions {}
-
-export function createRuntime(doc: FluxDocument, options: CreateRuntimeOptions = {}): FluxRuntime {
+export function createRuntime(doc: FluxDocument, options: RuntimeOptions = {}): Runtime {
   const state: InternalRuntimeState = {
     doc,
     docstep: 0,
     params: buildParams(doc),
     grids: buildGrids(doc),
-    random: makeRandom(options.seed),
+    random: makeRandom(),
   };
+
+  const clock = options.clock ?? "manual";
+  const timerOverrideMs = options.timerOverrideMs ?? null;
+  const onEvent = options.onEvent;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const materialKeys = new Set((doc.materials?.materials ?? []).map((m) => m.name));
 
   function getSnapshot(): RuntimeSnapshot {
     return buildSnapshot(state);
   }
 
-  function setParam(name: string, value: number): void {
-    if (!state.params.has(name)) return;
-    state.params.set(name, value);
-  }
-
-  function setParams(values: Record<string, number>): void {
-    for (const [key, value] of Object.entries(values)) {
-      setParam(key, value);
+  function emit(events: RuntimeEvent[]): void {
+    if (!onEvent) return;
+    for (const ev of events) {
+      onEvent(ev);
     }
   }
 
-  function getParams(): Record<string, number> {
-    const result: Record<string, number> = {};
-    for (const [key, value] of state.params) {
-      result[key] = value;
-    }
-    return result;
-  }
-
-  function getDocstep(): number {
-    return state.docstep;
-  }
-
-  function getDocument(): FluxDocument {
-    return state.doc;
-  }
-
-  function stepDocstep(): RuntimeSnapshot {
+  function stepDocstep(): { snapshot: RuntimeSnapshot; events: RuntimeEvent[] } {
+    const prevSnapshot = buildSnapshot(state);
     const patches: CellPatch[] = [];
     const rules = (state.doc.rules ?? []).filter((rule) => rule.mode === "docstep");
 
@@ -140,42 +133,128 @@ export function createRuntime(doc: FluxDocument, options: CreateRuntimeOptions =
 
     applyPatches(state, patches);
     state.docstep += 1;
-    return buildSnapshot(state);
+
+    const snapshot = buildSnapshot(state);
+    const events: RuntimeEvent[] = [
+      { kind: "docstep", docstep: snapshot.docstep, timestamp: Date.now() },
+    ];
+
+    const prevGridMap = new Map(prevSnapshot.grids.map((g) => [g.name, g]));
+    for (const grid of snapshot.grids) {
+      const prevGrid = prevGridMap.get(grid.name);
+      for (const cell of grid.cells) {
+        const prevCell = prevGrid?.cells[cell.row * grid.cols + cell.col];
+        const prevContent = prevCell?.content ?? "";
+        if (prevContent !== cell.content) {
+          events.push({
+            kind: "cellChanged",
+            docstep: snapshot.docstep,
+            grid: grid.name,
+            cellId: cell.id,
+            prevContent,
+            nextContent: cell.content,
+            dynamic: cell.dynamic,
+          });
+
+          if (materialKeys.has(cell.content)) {
+            events.push({
+              kind: "materialTrigger",
+              docstep: snapshot.docstep,
+              grid: grid.name,
+              cellId: cell.id,
+              materialKey: cell.content,
+              dynamic: cell.dynamic,
+              params: { ...snapshot.params },
+            });
+          }
+        }
+      }
+    }
+
+    emit(events);
+    return { snapshot, events };
+  }
+
+  function start(): void {
+    if (clock !== "internal") return;
+    if (timer) return;
+    const hint = getDocstepIntervalHint(doc);
+    const interval = timerOverrideMs ?? hint?.millis ?? 1000;
+    timer = setInterval(() => {
+      stepDocstep();
+    }, interval);
+  }
+
+  function stop(): void {
+    if (!timer) return;
+    clearInterval(timer);
+    timer = null;
+  }
+
+  function isRunning(): boolean {
+    return timer !== null;
+  }
+
+  function setParam(name: string, value: number): void {
+    state.params.set(name, value);
   }
 
   return {
-    getDocument,
-    getDocstep,
     getSnapshot,
     stepDocstep,
-    getParams,
-    setParams,
+    start,
+    stop,
+    isRunning,
     setParam,
   };
 }
 
-interface InternalGrid {
+type InternalCellProperty = "content" | "dynamic";
+
+type InternalGrid = {
   name: string;
   rows: number;
   cols: number;
   cells: RuntimeCellState[];
   cellIndex: Map<string, number>;
-}
+};
 
-interface InternalRuntimeState {
+type InternalRuntimeState = {
   doc: FluxDocument;
   docstep: number;
   params: Map<string, number>;
   grids: Map<string, InternalGrid>;
   random: () => number;
-}
+};
 
-interface CellPatch {
+type CellPatch = {
   gridName: string;
   cellId: string;
-  property: "content" | "dynamic";
+  property: InternalCellProperty;
   value: string | number;
-}
+};
+
+type EvalContext = {
+  state: InternalRuntimeState;
+  grid: InternalGrid;
+  cell: RuntimeCellState;
+  row: number;
+  col: number;
+};
+
+export type RuntimeCellState = {
+  id: string;
+  tags: string[];
+  content: string;
+  dynamic: number;
+};
+
+type RuntimeGridSnapshot = {
+  name: string;
+  rows: number;
+  cols: number;
+  cells: RuntimeCellState[];
+};
 
 function buildParams(doc: FluxDocument): Map<string, number> {
   const params = new Map<string, number>();
@@ -216,22 +295,14 @@ function buildGrids(doc: FluxDocument): Map<string, InternalGrid> {
   return grids;
 }
 
-function makeRandom(seed: number | undefined): () => number {
-  let s = (seed ?? Date.now()) >>> 0;
+function makeRandom(): () => number {
+  let s = Date.now() >>> 0;
   return function next() {
     s ^= s << 13;
     s ^= s >>> 17;
     s ^= s << 5;
     return (s >>> 0) / 0xffffffff;
   };
-}
-
-interface EvalContext {
-  state: InternalRuntimeState;
-  grid: InternalGrid;
-  cell: RuntimeCellState;
-  row: number;
-  col: number;
 }
 
 function evalExpr(expr: FluxExpr, ctx: EvalContext): any {
@@ -403,7 +474,7 @@ const orthogonalOffsets: Array<[number, number]> = [
 function resolveAssignmentTarget(
   target: FluxExpr,
   _ctx: EvalContext,
-): CellPatch["property"] | null {
+): InternalCellProperty | null {
   if (target.kind === "MemberExpression" && target.object.kind === "Identifier" && target.object.name === "cell") {
     if (target.property === "content" || target.property === "dynamic") {
       return target.property;
@@ -427,13 +498,17 @@ function applyPatches(state: InternalRuntimeState, patches: CellPatch[]): void {
 function buildSnapshot(state: InternalRuntimeState): RuntimeSnapshot {
   const params: Record<string, number> = {};
   for (const [key, value] of state.params) {
-    params[key] = value;
+    if (typeof value === "number") {
+      params[key] = value;
+    }
   }
 
-  const grids: RuntimeGridSnapshot[] = [];
+  const grids: RuntimeSnapshot["grids"] = [];
   for (const grid of state.grids.values()) {
-    const cells = grid.cells.map((cell) => ({
+    const cells = grid.cells.map((cell, idx) => ({
       id: cell.id,
+      row: Math.floor(idx / grid.cols),
+      col: idx % grid.cols,
       tags: [...cell.tags],
       content: cell.content,
       dynamic: cell.dynamic,
@@ -489,4 +564,3 @@ function normalizeUnit(unit: string): "ms" | "s" | "m" | null {
       return null;
   }
 }
-

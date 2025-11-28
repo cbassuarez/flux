@@ -185,6 +185,43 @@ export interface FluxRuntimeConfig {
   docstepAdvance?: DocstepAdvanceSpec[];
 }
 
+// Materials (score / midi / video descriptors)
+
+export interface MaterialScore {
+    text?: string;
+    staff?: string;
+    clef?: string;
+}
+
+export interface MaterialMidi {
+    channel?: number;
+    pitch?: number;
+    velocity?: number;
+    durationSeconds?: number;
+}
+
+export interface MaterialVideo {
+    clip: string;
+    inSeconds?: number;
+    outSeconds?: number;
+    layer?: string;
+}
+
+export interface Material {
+    name: string;
+    tags: string[];
+    label?: string;
+    description?: string;
+    color?: string;
+    score?: MaterialScore;
+    midi?: MaterialMidi;
+    video?: MaterialVideo;
+}
+
+export interface MaterialsBlock {
+    materials: Material[];
+}
+
 // Rule calculus AST
 
 export type RuleMode = "docstep" | "event" | "timer";
@@ -325,4 +362,5 @@ export interface FluxDocument {
   grids: FluxGrid[];
   rules: FluxRule[];
   runtime?: FluxRuntimeConfig;
+  materials?: MaterialsBlock | null;
 }

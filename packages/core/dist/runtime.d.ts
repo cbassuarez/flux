@@ -1,43 +1,65 @@
 import type { FluxDocument } from "./ast.js";
-export interface RuntimeCellState {
+export type RuntimeOptions = {
+    clock?: "manual" | "internal";
+    timerOverrideMs?: number | null;
+    onEvent?: (event: RuntimeEvent) => void;
+};
+export type RuntimeSnapshot = {
+    docstep: number;
+    params: Record<string, number>;
+    grids: Array<{
+        name: string;
+        rows: number;
+        cols: number;
+        cells: Array<{
+            id: string;
+            row: number;
+            col: number;
+            tags: string[];
+            content: string;
+            dynamic: number;
+        }>;
+    }>;
+};
+export type RuntimeEvent = {
+    kind: "docstep";
+    docstep: number;
+    timestamp: number;
+} | {
+    kind: "cellChanged";
+    docstep: number;
+    grid: string;
+    cellId: string;
+    prevContent: string;
+    nextContent: string;
+    dynamic: number;
+} | {
+    kind: "materialTrigger";
+    docstep: number;
+    grid: string;
+    cellId: string;
+    materialKey: string;
+    dynamic: number;
+    params: Record<string, number>;
+};
+export interface Runtime {
+    getSnapshot(): RuntimeSnapshot;
+    stepDocstep(): {
+        snapshot: RuntimeSnapshot;
+        events: RuntimeEvent[];
+    };
+    start(): void;
+    stop(): void;
+    isRunning(): boolean;
+    setParam(name: string, value: number): void;
+}
+export declare function createRuntime(doc: FluxDocument, options?: RuntimeOptions): Runtime;
+export type RuntimeCellState = {
     id: string;
     tags: string[];
     content: string;
     dynamic: number;
-}
-export interface RuntimeGridSnapshot {
-    name: string;
-    rows: number;
-    cols: number;
-    cells: RuntimeCellState[];
-}
-export interface RuntimeSnapshot {
-    docstep: number;
-    params: Record<string, number>;
-    grids: RuntimeGridSnapshot[];
-}
-export interface RuntimeOptions {
-    seed?: number;
-}
-export interface FluxRuntime {
-    /** Return the original parsed IR (whatever parseDocument returns). */
-    getDocument(): FluxDocument;
-    /** Get the current docstep index (starting at 0). */
-    getDocstep(): number;
-    /** Get a deep-cloned snapshot of the current runtime state. */
-    getSnapshot(): RuntimeSnapshot;
-    /** Advance the document by one docstep, applying all docstep rules. */
-    stepDocstep(): RuntimeSnapshot;
-    /** Get current param values. */
-    getParams(): Record<string, number>;
-    /** Set one or more param values. Unknown names are ignored or rejected. */
-    setParams(values: Record<string, number>): void;
-    /** Convenience: set a single param. */
-    setParam(name: string, value: number): void;
-}
-export interface CreateRuntimeOptions extends RuntimeOptions {
-}
-export declare function createRuntime(doc: FluxDocument, options?: CreateRuntimeOptions): FluxRuntime;
+};
 export interface DocstepIntervalHint {
     millis: number;
     source?: string;

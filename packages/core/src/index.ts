@@ -14,15 +14,13 @@ export type { RuntimeState, GridRuntimeState, NeighborRef, NeighborsNamespace } 
 export { initRuntimeState, runDocstepOnce, handleEvent } from "./runtime/kernel.js";
 
 export {
-    createRuntime,
-    type FluxRuntime,
-    type RuntimeSnapshot,
-    type RuntimeGridSnapshot,
-    type RuntimeCellState,
-    type RuntimeOptions,
-    type CreateRuntimeOptions,
-    type DocstepIntervalHint,
-    getDocstepIntervalHint,
+  createRuntime,
+  type Runtime,
+  type RuntimeSnapshot,
+  type RuntimeEvent,
+  type RuntimeOptions,
+  type DocstepIntervalHint,
+  getDocstepIntervalHint,
 } from "./runtime.js";
 
 // Static checks
