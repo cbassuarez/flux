@@ -24,7 +24,7 @@
     "prepublishOnly": "npm run build && chmod +x dist/bin/flux.js"
   },
   "dependencies": {
-    "@flux-lang/core": "workspace:^0.1.6"
+    "@flux-lang/core": "^0.1.6"
   },
   "devDependencies": {
     "execa": "^8.0.0",
