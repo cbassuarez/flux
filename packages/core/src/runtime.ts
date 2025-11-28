@@ -1,565 +1,277 @@
-import type { FluxDocument, FluxExpr, DocstepAdvanceTimer } from "./ast.js";
+import type { FluxCell, FluxDocument, DocstepAdvanceTimer, TimerUnit } from "./ast.js";
+import { initRuntimeState, runDocstepOnce, handleEvent } from "./runtime/kernel.js";
+import type { RuntimeState } from "./runtime/model.js";
 
-export type RuntimeOptions = {
-  clock?: "manual" | "internal";
-  timerOverrideMs?: number | null;
-  onEvent?: (event: RuntimeEvent) => void;
-};
+export interface RuntimeOptions {
+  /**
+   * Clock mode:
+   * - "manual": docsteps are advanced only when the caller asks.
+   * - "timer": internal timer drives docsteps based on a hint.
+   */
+  clock?: "manual" | "timer";
 
-export type RuntimeSnapshot = {
-  docstep: number;
-  params: Record<string, number>;
-  grids: Array<{
-    name: string;
-    rows: number;
-    cols: number;
-    cells: Array<{
-      id: string;
-      row: number;
-      col: number;
-      tags: string[];
-      content: string;
-      dynamic: number;
-    }>;
-  }>;
-};
+  /**
+   * Optional fixed interval for "timer" mode in milliseconds.
+   * If omitted, we derive from the document's runtime.docstepAdvance
+   * via getDocstepIntervalHint.
+   */
+  docstepIntervalMs?: number;
 
-export type RuntimeEvent =
-  | {
-      kind: "docstep";
-      docstep: number;
-      timestamp: number;
-    }
-  | {
-      kind: "cellChanged";
-      docstep: number;
-      grid: string;
-      cellId: string;
-      prevContent: string;
-      nextContent: string;
-      dynamic: number;
-    }
-  | {
-      kind: "materialTrigger";
-      docstep: number;
-      grid: string;
-      cellId: string;
-      materialKey: string;
-      dynamic: number;
-      params: Record<string, number>;
-    };
-
-export interface Runtime {
-  getSnapshot(): RuntimeSnapshot;
-  stepDocstep(): { snapshot: RuntimeSnapshot; events: RuntimeEvent[] };
-  start(): void;
-  stop(): void;
-  isRunning(): boolean;
-  setParam(name: string, value: number): void;
+  /**
+   * Optional callback for each docstep.
+   * This is primarily for embedders, but not required for CLI.
+   */
+  onDocstep?: (snapshot: RuntimeSnapshot) => void;
 }
 
-export function createRuntime(doc: FluxDocument, options: RuntimeOptions = {}): Runtime {
-  const state: InternalRuntimeState = {
-    doc,
-    docstep: 0,
-    params: buildParams(doc),
-    grids: buildGrids(doc),
-    random: makeRandom(),
-  };
+export interface RuntimeEvent {
+  type: string;
+  source?: string;
+  location?: any;
+  payload?: any;
+  timestamp?: number;
+}
 
-  const clock = options.clock ?? "manual";
-  const timerOverrideMs = options.timerOverrideMs ?? null;
-  const onEvent = options.onEvent;
-  let timer: ReturnType<typeof setInterval> | null = null;
+/**
+ * A lightweight, viewer-friendly snapshot of the runtime state,
+ * suitable for UIs. This is not the same as RuntimeState; it's a
+ * distilled view for rendering.
+ */
+export interface RuntimeCellSnapshot {
+  id: string;
+  tags: string[];
+  content?: string;
+  mediaId?: string;
+  dynamic?: number;
+  density?: number;
+  salience?: number;
+  numericFields?: Record<string, number>;
+}
 
-  const materialKeys = new Set((doc.materials?.materials ?? []).map((m) => m.name));
+export interface RuntimeGridSnapshot {
+  name: string;
+  topology: import("./ast.js").Topology;
+  rows?: number;
+  cols?: number;
+  cells: RuntimeCellSnapshot[];
+}
 
-  function getSnapshot(): RuntimeSnapshot {
-    return buildSnapshot(state);
+export interface RuntimeSnapshot {
+  docstep: number;
+  params: Record<string, number | string | boolean>;
+  grids: RuntimeGridSnapshot[];
+}
+
+export interface Runtime {
+  /** The parsed document used to initialize the runtime. */
+  readonly doc: FluxDocument;
+
+  /** Underlying runtime state; mostly for internal or advanced use. */
+  readonly state: RuntimeState;
+
+  /** Current docstep (integer, starting at 0). */
+  readonly docstep: number;
+
+  /** Options used to create the runtime. */
+  readonly options: RuntimeOptions;
+
+  /**
+   * Advance the document by one docstep. Returns the new snapshot.
+   */
+  step(): RuntimeSnapshot;
+
+  /**
+   * Reset to docstep 0 with a fresh RuntimeState.
+   */
+  reset(): RuntimeSnapshot;
+
+  /**
+   * Apply an event (input/transport/sensor). Implementation should
+   * delegate to handleEvent(...) in the kernel.
+   */
+  applyEvent(event: RuntimeEvent): void;
+
+  /**
+   * Get a snapshot of the current runtime state without stepping.
+   */
+  snapshot(): RuntimeSnapshot;
+
+  /**
+   * If running in "timer" mode, start the internal timer.
+   * No-op for "manual" mode.
+   */
+  start(): void;
+
+  /**
+   * Stop/pause the internal timer if active.
+   */
+  stop(): void;
+}
+
+export interface DocstepIntervalHint {
+  /** If null, we couldn't derive a meaningful interval. */
+  ms: number | null;
+
+  /** Human-readable explanation; safe to show in UIs. */
+  reason: string;
+}
+
+export function getDocstepIntervalHint(doc: FluxDocument, state: RuntimeState): DocstepIntervalHint {
+  const spec = (doc.runtime?.docstepAdvance ?? []).find(
+    (advance): advance is DocstepAdvanceTimer => advance.kind === "timer",
+  );
+
+  if (!spec) {
+    return { ms: null, reason: "No timer-based docstepAdvance in runtime config." };
   }
 
-  function emit(events: RuntimeEvent[]): void {
-    if (!onEvent) return;
-    for (const ev of events) {
-      onEvent(ev);
-    }
-  }
-
-  function stepDocstep(): { snapshot: RuntimeSnapshot; events: RuntimeEvent[] } {
-    const prevSnapshot = buildSnapshot(state);
-    const patches: CellPatch[] = [];
-    const rules = (state.doc.rules ?? []).filter((rule) => rule.mode === "docstep");
-
-    for (const grid of state.grids.values()) {
-      const gridRules = rules.filter((rule) => rule.scope?.grid === grid.name);
-      if (gridRules.length === 0) continue;
-
-      for (let row = 0; row < grid.rows; row++) {
-        for (let col = 0; col < grid.cols; col++) {
-          const idx = row * grid.cols + col;
-          const cell = grid.cells[idx];
-          if (!cell) continue;
-
-          for (const rule of gridRules) {
-            const ctx: EvalContext = {
-              state,
-              grid,
-              cell,
-              row,
-              col,
-            };
-
-            const condition = evalExpr(rule.condition, ctx);
-            if (condition) {
-              const assignments = rule.thenBranch ?? [];
-              for (const stmt of assignments) {
-                if (stmt.kind !== "AssignmentStatement") continue;
-                const target = resolveAssignmentTarget(stmt.target, ctx);
-                if (!target) continue;
-
-                const value = evalExpr(stmt.value, ctx);
-                patches.push({
-                  gridName: grid.name,
-                  cellId: cell.id,
-                  property: target,
-                  value,
-                });
-              }
-            }
-          }
-        }
-      }
-    }
-
-    applyPatches(state, patches);
-    state.docstep += 1;
-
-    const snapshot = buildSnapshot(state);
-    const events: RuntimeEvent[] = [
-      { kind: "docstep", docstep: snapshot.docstep, timestamp: Date.now() },
-    ];
-
-    const prevGridMap = new Map(prevSnapshot.grids.map((g) => [g.name, g]));
-    for (const grid of snapshot.grids) {
-      const prevGrid = prevGridMap.get(grid.name);
-      for (const cell of grid.cells) {
-        const prevCell = prevGrid?.cells[cell.row * grid.cols + cell.col];
-        const prevContent = prevCell?.content ?? "";
-        if (prevContent !== cell.content) {
-          events.push({
-            kind: "cellChanged",
-            docstep: snapshot.docstep,
-            grid: grid.name,
-            cellId: cell.id,
-            prevContent,
-            nextContent: cell.content,
-            dynamic: cell.dynamic,
-          });
-
-          if (materialKeys.has(cell.content)) {
-            events.push({
-              kind: "materialTrigger",
-              docstep: snapshot.docstep,
-              grid: grid.name,
-              cellId: cell.id,
-              materialKey: cell.content,
-              dynamic: cell.dynamic,
-              params: { ...snapshot.params },
-            });
-          }
-        }
-      }
-    }
-
-    emit(events);
-    return { snapshot, events };
-  }
-
-  function start(): void {
-    if (clock !== "internal") return;
-    if (timer) return;
-    const hint = getDocstepIntervalHint(doc);
-    const interval = timerOverrideMs ?? hint?.millis ?? 1000;
-    timer = setInterval(() => {
-      stepDocstep();
-    }, interval);
-  }
-
-  function stop(): void {
-    if (!timer) return;
-    clearInterval(timer);
-    timer = null;
-  }
-
-  function isRunning(): boolean {
-    return timer !== null;
-  }
-
-  function setParam(name: string, value: number): void {
-    state.params.set(name, value);
+  const multiplier = timerUnitToMs(spec.unit);
+  if (multiplier == null) {
+    return {
+      ms: null,
+      reason: `Timer unit '${spec.unit}' is not supported for interval hinting.`,
+    };
   }
 
   return {
-    getSnapshot,
-    stepDocstep,
+    ms: spec.amount * multiplier,
+    reason: `Derived from runtime.docstepAdvance timer(${spec.amount} ${spec.unit})`,
+  };
+}
+
+export function createRuntime(doc: FluxDocument, options: RuntimeOptions = {}): Runtime {
+  let state = initRuntimeState(doc);
+  let docstep = state.docstepIndex ?? 0;
+  const opts: RuntimeOptions = { clock: "manual", ...options };
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const snapshot = (): RuntimeSnapshot => buildSnapshot(doc, state, docstep);
+
+  const step = (): RuntimeSnapshot => {
+    state = runDocstepOnce(doc, state);
+    docstep = state.docstepIndex;
+    const snap = snapshot();
+    return snap;
+  };
+
+  const reset = (): RuntimeSnapshot => {
+    state = initRuntimeState(doc);
+    docstep = 0;
+    return snapshot();
+  };
+
+  const applyEvent = (event: RuntimeEvent): void => {
+    const kernelEvent = {
+      type: event.type,
+      location: event.location,
+      payload: event.payload,
+    };
+    state = handleEvent(doc, state, kernelEvent as any);
+    docstep = state.docstepIndex ?? docstep;
+  };
+
+  const start = (): void => {
+    if (opts.clock !== "timer") return;
+    if (timer) return;
+    const hint = getDocstepIntervalHint(doc, state);
+    const interval = opts.docstepIntervalMs ?? hint.ms ?? 1000;
+    timer = setInterval(() => {
+      const snap = step();
+      opts.onDocstep?.(snap);
+    }, interval);
+  };
+
+  const stop = (): void => {
+    if (!timer) return;
+    clearInterval(timer);
+    timer = null;
+  };
+
+  return {
+    get doc() {
+      return doc;
+    },
+    get state() {
+      return state;
+    },
+    get docstep() {
+      return docstep;
+    },
+    get options() {
+      return opts;
+    },
+    step,
+    reset,
+    applyEvent,
+    snapshot,
     start,
     stop,
-    isRunning,
-    setParam,
   };
 }
 
-type InternalCellProperty = "content" | "dynamic";
+function buildSnapshot(doc: FluxDocument, state: RuntimeState, docstep: number): RuntimeSnapshot {
+  const params: Record<string, number | string | boolean> = { ...state.params };
+  const grids: RuntimeGridSnapshot[] = [];
 
-type InternalGrid = {
-  name: string;
-  rows: number;
-  cols: number;
-  cells: RuntimeCellState[];
-  cellIndex: Map<string, number>;
-};
+  for (const gridDef of doc.grids ?? []) {
+    const runtimeGrid = state.grids[gridDef.name];
+    const rows = runtimeGrid?.rows ?? gridDef.size?.rows;
+    const cols = runtimeGrid?.cols ?? gridDef.size?.cols;
+    const runtimeCells = runtimeGrid?.cells ?? [];
+    const cellCount = Math.max(runtimeCells.length, gridDef.cells.length);
+    const cells: RuntimeCellSnapshot[] = [];
 
-type InternalRuntimeState = {
-  doc: FluxDocument;
-  docstep: number;
-  params: Map<string, number>;
-  grids: Map<string, InternalGrid>;
-  random: () => number;
-};
+    for (let idx = 0; idx < cellCount; idx++) {
+      const def: FluxCell | undefined = gridDef.cells[idx];
+      const cellState = runtimeCells[idx];
+      const id = cellState?.id ?? def?.id ?? `cell${idx}`;
+      const tags = cellState?.tags ?? def?.tags ?? [];
+      const content = cellState?.content ?? def?.content;
+      const mediaId = def?.mediaId;
+      const dynamic = cellState?.dynamic ?? def?.dynamic;
+      const density = def?.density;
+      const salience = def?.salience;
+      const numericFields = def?.numericFields;
 
-type CellPatch = {
-  gridName: string;
-  cellId: string;
-  property: InternalCellProperty;
-  value: string | number;
-};
-
-type EvalContext = {
-  state: InternalRuntimeState;
-  grid: InternalGrid;
-  cell: RuntimeCellState;
-  row: number;
-  col: number;
-};
-
-export type RuntimeCellState = {
-  id: string;
-  tags: string[];
-  content: string;
-  dynamic: number;
-};
-
-type RuntimeGridSnapshot = {
-  name: string;
-  rows: number;
-  cols: number;
-  cells: RuntimeCellState[];
-};
-
-function buildParams(doc: FluxDocument): Map<string, number> {
-  const params = new Map<string, number>();
-  for (const param of doc.state.params ?? []) {
-    if (typeof param.initial === "number") {
-      params.set(param.name, param.initial);
-    }
-  }
-  return params;
-}
-
-function buildGrids(doc: FluxDocument): Map<string, InternalGrid> {
-  const grids = new Map<string, InternalGrid>();
-  for (const grid of doc.grids ?? []) {
-    const rows = grid.size?.rows ?? 0;
-    const cols = grid.size?.cols ?? 0;
-    const cells: RuntimeCellState[] = [];
-    const cellIndex = new Map<string, number>();
-
-    let idx = 0;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const cellDef = grid.cells[idx];
-        const cellState: RuntimeCellState = {
-          id: cellDef?.id ?? `r${r}c${c}`,
-          tags: [...(cellDef?.tags ?? [])],
-          content: cellDef?.content ?? "",
-          dynamic: typeof cellDef?.dynamic === "number" ? cellDef.dynamic : 0,
-        };
-        cells.push(cellState);
-        cellIndex.set(cellState.id, idx);
-        idx += 1;
-      }
+      cells.push({ id, tags, content, mediaId, dynamic, density, salience, numericFields });
     }
 
-    grids.set(grid.name, { name: grid.name, rows, cols, cells, cellIndex });
-  }
-  return grids;
-}
-
-function makeRandom(): () => number {
-  let s = Date.now() >>> 0;
-  return function next() {
-    s ^= s << 13;
-    s ^= s >>> 17;
-    s ^= s << 5;
-    return (s >>> 0) / 0xffffffff;
-  };
-}
-
-function evalExpr(expr: FluxExpr, ctx: EvalContext): any {
-  switch (expr.kind) {
-    case "Literal":
-      return expr.value;
-    case "Identifier":
-      return evalIdentifier(expr.name, ctx);
-    case "UnaryExpression":
-      return evalUnary(expr.op, expr.argument, ctx);
-    case "BinaryExpression":
-      return evalBinary(expr.op, expr.left, expr.right, ctx);
-    case "MemberExpression":
-      return evalMember(expr.object, expr.property, ctx);
-    case "CallExpression":
-      return evalCall(expr, ctx);
-    case "NeighborsCallExpression":
-      return evalNeighborsCall(expr, ctx);
-    default:
-      return undefined;
-  }
-}
-
-function evalIdentifier(name: string, ctx: EvalContext): any {
-  if (name === "cell") return ctx.cell;
-  if (name === "neighbors") return neighborsNamespace;
-  if (name === "random") return ctx.state.random;
-  if (ctx.state.params.has(name)) return ctx.state.params.get(name);
-  return undefined;
-
-  function neighborsNamespace(method?: string) {
-    if (method === "all" || method === "orth") {
-      return evalNeighborsCall({ kind: "NeighborsCallExpression", namespace: "neighbors", method, args: [] }, ctx);
-    }
-    return [];
-  }
-}
-
-function evalUnary(op: string, argument: FluxExpr, ctx: EvalContext): any {
-  const value = evalExpr(argument, ctx);
-  switch (op) {
-    case "not":
-      return !value;
-    case "-":
-      return -(value as number);
-    default:
-      return undefined;
-  }
-}
-
-function evalBinary(op: string, left: FluxExpr, right: FluxExpr, ctx: EvalContext): any {
-  switch (op) {
-    case "and":
-      return Boolean(evalExpr(left, ctx)) && Boolean(evalExpr(right, ctx));
-    case "or":
-      return Boolean(evalExpr(left, ctx)) || Boolean(evalExpr(right, ctx));
-    case "==":
-      return evalExpr(left, ctx) === evalExpr(right, ctx);
-    case "!=":
-      return evalExpr(left, ctx) !== evalExpr(right, ctx);
-    case "<":
-      return (evalExpr(left, ctx) as any) < (evalExpr(right, ctx) as any);
-    case "<=":
-      return (evalExpr(left, ctx) as any) <= (evalExpr(right, ctx) as any);
-    case ">":
-      return (evalExpr(left, ctx) as any) > (evalExpr(right, ctx) as any);
-    case ">=":
-      return (evalExpr(left, ctx) as any) >= (evalExpr(right, ctx) as any);
-    case "+":
-      return (evalExpr(left, ctx) as any) + (evalExpr(right, ctx) as any);
-    case "-":
-      return (evalExpr(left, ctx) as any) - (evalExpr(right, ctx) as any);
-    case "*":
-      return (evalExpr(left, ctx) as any) * (evalExpr(right, ctx) as any);
-    case "/":
-      return (evalExpr(left, ctx) as any) / (evalExpr(right, ctx) as any);
-    default:
-      return undefined;
-  }
-}
-
-function evalMember(objectExpr: FluxExpr, property: string, ctx: EvalContext): any {
-  if (objectExpr.kind === "NeighborsCallExpression") {
-    const neighbors = evalNeighborsCall(objectExpr, ctx);
-    if (property === "dynamic") {
-      let max = 0;
-      for (const cell of neighbors) {
-        if (typeof cell.dynamic === "number" && cell.dynamic > max) {
-          max = cell.dynamic;
-        }
-      }
-      return max;
-    }
-    return undefined;
-  }
-
-  const obj = evalExpr(objectExpr, ctx) as any;
-  if (obj == null) return undefined;
-  return obj[property];
-}
-
-function evalCall(expr: Extract<FluxExpr, { kind: "CallExpression" }>, ctx: EvalContext): any {
-  if (expr.callee.kind === "Identifier" && expr.callee.name === "random") {
-    return ctx.state.random();
-  }
-
-  if (expr.callee.kind === "Identifier" && expr.callee.name === "max") {
-    const [a, b] = expr.args;
-    return Math.max(Number(evalExpr(a, ctx)), Number(evalExpr(b, ctx)));
-  }
-
-  if (
-    expr.callee.kind === "MemberExpression" &&
-    expr.callee.property === "contains"
-  ) {
-    const target = evalExpr(expr.callee.object, ctx);
-    const arg = expr.args[0] ? evalExpr(expr.args[0], ctx) : undefined;
-    if (Array.isArray(target)) {
-      return target.includes(arg as any);
-    }
-  }
-
-  const callee = evalExpr(expr.callee, ctx);
-  if (typeof callee === "function") {
-    const args = expr.args.map((a) => evalExpr(a, ctx));
-    return callee(...args);
-  }
-
-  return undefined;
-}
-
-function evalNeighborsCall(
-  expr: Extract<FluxExpr, { kind: "NeighborsCallExpression" }>,
-  ctx: EvalContext,
-): RuntimeCellState[] {
-  const offsets = expr.method === "orth" ? orthogonalOffsets : allOffsets;
-  const neighbors: RuntimeCellState[] = [];
-
-  for (const [dr, dc] of offsets) {
-    const rr = ctx.row + dr;
-    const cc = ctx.col + dc;
-    if (rr < 0 || rr >= ctx.grid.rows || cc < 0 || cc >= ctx.grid.cols) continue;
-    const idx = rr * ctx.grid.cols + cc;
-    const neighbor = ctx.grid.cells[idx];
-    if (neighbor) neighbors.push(neighbor);
-  }
-
-  return neighbors;
-}
-
-const allOffsets: Array<[number, number]> = [
-  [-1, -1],
-  [-1, 0],
-  [-1, 1],
-  [0, -1],
-  [0, 1],
-  [1, -1],
-  [1, 0],
-  [1, 1],
-];
-
-const orthogonalOffsets: Array<[number, number]> = [
-  [-1, 0],
-  [1, 0],
-  [0, -1],
-  [0, 1],
-];
-
-function resolveAssignmentTarget(
-  target: FluxExpr,
-  _ctx: EvalContext,
-): InternalCellProperty | null {
-  if (target.kind === "MemberExpression" && target.object.kind === "Identifier" && target.object.name === "cell") {
-    if (target.property === "content" || target.property === "dynamic") {
-      return target.property;
-    }
-  }
-  return null;
-}
-
-function applyPatches(state: InternalRuntimeState, patches: CellPatch[]): void {
-  for (const patch of patches) {
-    const grid = state.grids.get(patch.gridName);
-    if (!grid) continue;
-    const idx = grid.cellIndex.get(patch.cellId);
-    if (idx === undefined) continue;
-    const cell = grid.cells[idx];
-    if (!cell) continue;
-    (cell as any)[patch.property] = patch.value as any;
-  }
-}
-
-function buildSnapshot(state: InternalRuntimeState): RuntimeSnapshot {
-  const params: Record<string, number> = {};
-  for (const [key, value] of state.params) {
-    if (typeof value === "number") {
-      params[key] = value;
-    }
-  }
-
-  const grids: RuntimeSnapshot["grids"] = [];
-  for (const grid of state.grids.values()) {
-    const cells = grid.cells.map((cell, idx) => ({
-      id: cell.id,
-      row: Math.floor(idx / grid.cols),
-      col: idx % grid.cols,
-      tags: [...cell.tags],
-      content: cell.content,
-      dynamic: cell.dynamic,
-    }));
     grids.push({
-      name: grid.name,
-      rows: grid.rows,
-      cols: grid.cols,
+      name: gridDef.name,
+      topology: gridDef.topology,
+      rows,
+      cols,
       cells,
     });
   }
 
-  return { docstep: state.docstep, params, grids };
+  return { docstep, params, grids };
 }
 
-export interface DocstepIntervalHint {
-  millis: number;
-  source?: string;
-}
-
-export function getDocstepIntervalHint(doc: FluxDocument): DocstepIntervalHint | null {
-  const spec = doc.runtime?.docstepAdvance?.find((advance) => advance.kind === "timer") as
-    | DocstepAdvanceTimer
-    | undefined;
-  if (!spec) return null;
-
-  const unit = normalizeUnit(spec.unit);
-  if (!unit) return null;
-
-  const multiplier = unit === "ms" ? 1 : unit === "s" ? 1000 : 60000;
-  return { millis: spec.amount * multiplier, source: `timer(${spec.amount} ${spec.unit})` };
-}
-
-function normalizeUnit(unit: string): "ms" | "s" | "m" | null {
+function timerUnitToMs(unit: TimerUnit): number | null {
   switch (unit) {
     case "ms":
     case "millisecond":
     case "milliseconds":
-      return "ms";
+      return 1;
     case "s":
     case "sec":
     case "secs":
     case "second":
     case "seconds":
-      return "s";
+      return 1000;
     case "m":
     case "min":
     case "mins":
     case "minute":
     case "minutes":
-      return "m";
+      return 60_000;
+    case "h":
+    case "hr":
+    case "hrs":
+    case "hour":
+    case "hours":
+      return 3_600_000;
     default:
       return null;
   }
