@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 
 import fs from "node:fs/promises";
+import path from "node:path";
 import { stdin as nodeStdin } from "node:process";
-import {
-    parseDocument,
-    initRuntimeState,
-    checkDocument,
-} from "@flux-lang/core";
+import { createRuntime, parseDocument, initRuntimeState, checkDocument } from "@flux-lang/core";
 import type { FluxDocument } from "@flux-lang/core";
+import { runViewer } from "../view/runViewer.js";
 
 
 type ExitCode = 0 | 1 | 2;
@@ -85,6 +83,10 @@ async function main(argv: string[]): Promise<ExitCode> {
         return runCheck(rest);
     }
 
+    if (cmd === "view") {
+        return runView(rest);
+    }
+
     console.error(`Unknown command '${cmd}'.`);
     printGlobalHelp();
     return 1;
@@ -102,10 +104,12 @@ function printGlobalHelp(): void {
             "Usage:",
             "  flux parse [options] <files...>",
             "  flux check [options] <files...>",
+            "  flux view <file>",
             "",
             "Commands:",
             "  parse   Parse Flux source files and print their IR as JSON.",
             "  check   Parse and run basic static checks.",
+            "  view    View a Flux document in a simple docstep viewer.",
             "",
             "Global options:",
             "  -h, --help      Show this help message.",
@@ -345,6 +349,36 @@ async function runCheck(args: string[]): Promise<ExitCode> {
 
     console.log(`✓ ${results.length} files OK`);
     return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  flux view                                 */
+/* -------------------------------------------------------------------------- */
+
+async function runView(args: string[]): Promise<ExitCode> {
+    if (args.length === 0) {
+        console.error("flux view: No input file specified.");
+        return 1;
+    }
+
+    const docPath = path.resolve(args[0]);
+
+    try {
+        const source = await fs.readFile(docPath, "utf8");
+        const doc = parseDocument(source);
+        const runtime = createRuntime(doc, { clock: "manual" });
+
+        const labels = new Map<string, string>();
+        for (const mat of doc.materials?.materials ?? []) {
+            labels.set(mat.name, mat.label ?? mat.name);
+        }
+
+        await runViewer(runtime, { docPath, title: doc.meta.title, materialLabels: labels });
+        return 0;
+    } catch (error) {
+        console.error(`flux view: ${String((error as Error)?.message ?? error)}`);
+        return 1;
+    }
 }
 
 /* -------------------------------------------------------------------------- */

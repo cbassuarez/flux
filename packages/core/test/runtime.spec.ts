@@ -53,7 +53,7 @@ document {
 describe("Flux runtime", () => {
   it("creates a runtime and initial snapshot from the landing example", () => {
     const doc = parseDocument(LANDING_EXAMPLE_SOURCE);
-    const runtime = createRuntime(doc, { seed: 1234 });
+    const runtime = createRuntime(doc, { clock: "manual" });
 
     const snapshot = runtime.getSnapshot();
 
@@ -73,10 +73,10 @@ describe("Flux runtime", () => {
 
   it("applies growNoise rule based on neighbors", () => {
     const doc = parseDocument(LANDING_EXAMPLE_SOURCE);
-    const runtime = createRuntime(doc, { seed: 1234 });
+    const runtime = createRuntime(doc, { clock: "manual" });
 
     const snap0 = runtime.getSnapshot();
-    const snap1 = runtime.stepDocstep();
+    const { snapshot: snap1 } = runtime.stepDocstep();
 
     expect(snap1.docstep).toBe(1);
 
@@ -95,8 +95,8 @@ describe("Flux runtime", () => {
     const doc1 = parseDocument(LANDING_EXAMPLE_SOURCE);
     const doc2 = parseDocument(LANDING_EXAMPLE_SOURCE);
 
-    const r1 = createRuntime(doc1, { seed: 42 });
-    const r2 = createRuntime(doc2, { seed: 42 });
+    const r1 = createRuntime(doc1, { clock: "manual" });
+    const r2 = createRuntime(doc2, { clock: "manual" });
 
     for (let i = 0; i < 5; i++) {
       r1.stepDocstep();

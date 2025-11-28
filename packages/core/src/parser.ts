@@ -8,6 +8,11 @@ import {
     PageSize,
     FluxGrid,
     FluxCell,
+    MaterialsBlock,
+    Material,
+    MaterialScore,
+    MaterialMidi,
+    MaterialVideo,
     // rules / expressions / statements
     FluxRule,
     RuleMode,
@@ -592,6 +597,7 @@ class Parser {
       const grids: FluxGrid[] = [];
       const rules: FluxRule[] = [];
       let runtime: FluxRuntimeConfig | undefined;
+      let materials: MaterialsBlock | undefined;
 
       while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
       if (this.checkIdentifier("meta")) {
@@ -608,6 +614,8 @@ class Parser {
           rules.push(this.parseRuleDecl());
       } else if (this.checkIdentifier("runtime")) {
           runtime = this.parseRuntimeBlock();
+      } else if (this.checkIdentifier("materials")) {
+          materials = this.parseMaterialsBlock();
       } else {
         const tok = this.peek();
         throw this.errorAtToken(tok, `Unexpected top-level construct '${tok.lexeme}'`);
@@ -623,6 +631,7 @@ class Parser {
           grids,
           rules,
           runtime,
+          materials,
       };
 
       return doc;
@@ -919,6 +928,205 @@ class Parser {
 
     this.consume(TokenType.RBrace, "Expected '}' after cell block");
     return cell;
+  }
+
+  // --- Materials ---
+
+  private parseMaterialsBlock(): MaterialsBlock {
+    this.expectIdentifier("materials", "Expected 'materials'");
+    this.consume(TokenType.LBrace, "Expected '{' after 'materials'");
+
+    const materials: Material[] = [];
+
+    while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+      if (this.checkIdentifier("material")) {
+        materials.push(this.parseMaterialDecl());
+      } else {
+        this.skipStatement();
+      }
+    }
+
+    this.consume(TokenType.RBrace, "Expected '}' after materials block");
+    return { materials };
+  }
+
+  private parseMaterialDecl(): Material {
+    this.expectIdentifier("material", "Expected 'material'");
+    const nameTok = this.consume(TokenType.Identifier, "Expected material name");
+    const name = String(nameTok.value);
+
+    this.consume(TokenType.LBrace, "Expected '{' after material name");
+
+    const material: Material = { name, tags: [] };
+
+    while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+      if (this.checkIdentifier("tags")) {
+        material.tags = this.parseIdentifierList();
+      } else if (this.checkIdentifier("label")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'label'");
+        const tok = this.consume(TokenType.String, "Expected string for label");
+        material.label = String(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("description")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'description'");
+        const tok = this.consume(TokenType.String, "Expected string for description");
+        material.description = String(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("color")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'color'");
+        const tok = this.consume(TokenType.String, "Expected string for color");
+        material.color = String(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("score")) {
+        material.score = this.parseMaterialScoreBlock();
+      } else if (this.checkIdentifier("midi")) {
+        material.midi = this.parseMaterialMidiBlock();
+      } else if (this.checkIdentifier("video")) {
+        material.video = this.parseMaterialVideoBlock();
+      } else {
+        this.skipStatement();
+      }
+    }
+
+    this.consume(TokenType.RBrace, "Expected '}' after material block");
+    return material;
+  }
+
+  private parseMaterialScoreBlock(): MaterialScore {
+    this.expectIdentifier("score", "Expected 'score'");
+    this.consume(TokenType.LBrace, "Expected '{' after 'score'");
+
+    const score: MaterialScore = {};
+
+    while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+      if (this.checkIdentifier("text")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'text'");
+        const tok = this.consume(TokenType.String, "Expected string for text");
+        score.text = String(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("staff")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'staff'");
+        const tok = this.consume(TokenType.String, "Expected string for staff");
+        score.staff = String(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("clef")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'clef'");
+        const tok = this.consume(TokenType.String, "Expected string for clef");
+        score.clef = String(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else {
+        this.skipStatement();
+      }
+    }
+
+    this.consume(TokenType.RBrace, "Expected '}' after score block");
+    return score;
+  }
+
+  private parseMaterialMidiBlock(): MaterialMidi {
+    this.expectIdentifier("midi", "Expected 'midi'");
+    this.consume(TokenType.LBrace, "Expected '{' after 'midi'");
+
+    const midi: MaterialMidi = {};
+
+    while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+      if (this.checkIdentifier("channel")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'channel'");
+        const tok = this.consumeNumber("Expected numeric channel");
+        midi.channel = Number(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("pitch")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'pitch'");
+        const tok = this.consumeNumber("Expected numeric pitch");
+        midi.pitch = Number(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("velocity")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'velocity'");
+        const tok = this.consumeNumber("Expected numeric velocity");
+        midi.velocity = Number(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("durationSeconds")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'durationSeconds'");
+        const tok = this.consumeNumber("Expected numeric durationSeconds");
+        midi.durationSeconds = Number(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else {
+        this.skipStatement();
+      }
+    }
+
+    this.consume(TokenType.RBrace, "Expected '}' after midi block");
+    return midi;
+  }
+
+  private parseMaterialVideoBlock(): MaterialVideo {
+    this.expectIdentifier("video", "Expected 'video'");
+    this.consume(TokenType.LBrace, "Expected '{' after 'video'");
+
+    const video: MaterialVideo = { clip: "" };
+
+    while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+      if (this.checkIdentifier("clip")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'clip'");
+        const tok = this.consume(TokenType.String, "Expected string for clip");
+        video.clip = String(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("inSeconds")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'inSeconds'");
+        const tok = this.consumeNumber("Expected numeric inSeconds");
+        video.inSeconds = Number(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("outSeconds")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'outSeconds'");
+        const tok = this.consumeNumber("Expected numeric outSeconds");
+        video.outSeconds = Number(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else if (this.checkIdentifier("layer")) {
+        this.advance();
+        this.consume(TokenType.Equals, "Expected '=' after 'layer'");
+        const tok = this.consume(TokenType.String, "Expected string for layer");
+        video.layer = String(tok.value);
+        this.consumeOptional(TokenType.Semicolon);
+      } else {
+        this.skipStatement();
+      }
+    }
+
+    this.consume(TokenType.RBrace, "Expected '}' after video block");
+    return video;
+  }
+
+  private parseIdentifierList(): string[] {
+    this.advance(); // identifier keyword already checked
+    this.consume(TokenType.Equals, "Expected '=' after identifier list key");
+    this.consume(TokenType.LBracket, "Expected '[' to start identifier list");
+
+    const values: string[] = [];
+    if (!this.check(TokenType.RBracket)) {
+      const first = this.consume(TokenType.Identifier, "Expected identifier");
+      values.push(String(first.value));
+      while (this.match(TokenType.Comma)) {
+        const t = this.consume(TokenType.Identifier, "Expected identifier");
+        values.push(String(t.value));
+      }
+    }
+
+    this.consume(TokenType.RBracket, "Expected ']' after identifier list");
+    this.consumeOptional(TokenType.Semicolon);
+    return values;
   }
 
     // --- Expressions ---
