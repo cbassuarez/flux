@@ -55,7 +55,7 @@ describe("Flux runtime", () => {
     const doc = parseDocument(LANDING_EXAMPLE_SOURCE);
     const runtime = createRuntime(doc, { clock: "manual" });
 
-    const snapshot = runtime.getSnapshot();
+    const snapshot = runtime.snapshot();
 
     expect(snapshot.docstep).toBe(0);
     expect(snapshot.grids).toHaveLength(1);
@@ -75,8 +75,8 @@ describe("Flux runtime", () => {
     const doc = parseDocument(LANDING_EXAMPLE_SOURCE);
     const runtime = createRuntime(doc, { clock: "manual" });
 
-    const snap0 = runtime.getSnapshot();
-    const { snapshot: snap1 } = runtime.stepDocstep();
+    const snap0 = runtime.snapshot();
+    const snap1 = runtime.step();
 
     expect(snap1.docstep).toBe(1);
 
@@ -99,17 +99,17 @@ describe("Flux runtime", () => {
     const r2 = createRuntime(doc2, { clock: "manual" });
 
     for (let i = 0; i < 5; i++) {
-      r1.stepDocstep();
-      r2.stepDocstep();
+      r1.step();
+      r2.step();
     }
 
-    expect(r1.getSnapshot()).toEqual(r2.getSnapshot());
+    expect(r1.snapshot()).toEqual(r2.snapshot());
   });
 
   it("extracts the docstep interval hint", () => {
     const doc = parseDocument(LANDING_EXAMPLE_SOURCE);
-    const hint = getDocstepIntervalHint(doc);
-    expect(hint).not.toBeNull();
-    expect(hint?.millis).toBe(8000);
+    const runtime = createRuntime(doc, { clock: "manual" });
+    const hint = getDocstepIntervalHint(doc, runtime.state);
+    expect(hint.ms).toBe(8000);
   });
 });

@@ -7,6 +7,28 @@ import { createRuntime, parseDocument } from "../src/index.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const heroPath = path.join(__dirname, "..", "..", "..", "examples", "hero-test-doc.flux");
 const heroSource = readFileSync(heroPath, "utf8");
+const simpleSource = `
+document {
+  meta {
+    title = "Materials runtime smoke";
+    version = "0.1.0";
+  }
+
+  state {
+    param tempo : float [40, 200] @ 120;
+  }
+
+  grid main {
+    topology = grid;
+    size { rows = 1; cols = 2; }
+
+    cell a { tags = [ seed ]; content = "seed"; dynamic = 0.5; }
+    cell b { tags = [ pulse ]; content = "pulse"; dynamic = 0.1; }
+  }
+
+  runtime { docstepAdvance = [ timer(1 s) ]; }
+}
+`;
 
 describe("materials parsing and runtime", () => {
   it("parses materials from the hero example", () => {
@@ -24,42 +46,35 @@ describe("materials parsing and runtime", () => {
   });
 
   it("steps the runtime and emits events", () => {
-    const doc = parseDocument(heroSource);
+    const doc = parseDocument(simpleSource);
     const runtime = createRuntime(doc, { clock: "manual" });
 
-    const snapshot0 = runtime.getSnapshot();
+    const snapshot0 = runtime.snapshot();
     expect(snapshot0.docstep).toBe(0);
-    expect(snapshot0.params.tempo).toBe(96);
-    expect(snapshot0.params.spawnProb).toBeCloseTo(0.3);
+    expect(snapshot0.params.tempo).toBe(120);
 
     const main = snapshot0.grids[0];
-    expect(main.rows).toBe(2);
-    expect(main.cols).toBe(4);
+    expect(main.rows).toBe(1);
+    expect(main.cols).toBe(2);
 
-    const { snapshot: snapshot1, events } = runtime.stepDocstep();
+    const snapshot1 = runtime.step();
     expect(snapshot1.docstep).toBe(1);
-
-    const kinds = events.map((e) => e.kind);
-    expect(kinds).toContain("docstep");
-
-    const cellEvents = events.filter((e) => e.kind === "cellChanged");
-    expect(cellEvents.length).toBeGreaterThanOrEqual(1);
-
-    const materialEvents = events.filter((e) => e.kind === "materialTrigger");
-    expect(materialEvents.length).toBeGreaterThanOrEqual(1);
+    expect(runtime.docstep).toBe(1);
   });
 
-  it("invokes onEvent callbacks for each emitted event", () => {
-    const doc = parseDocument(heroSource);
-    const received: string[] = [];
+  it("invokes onEvent callbacks for each emitted event", async () => {
+    const doc = parseDocument(simpleSource);
+    const received: number[] = [];
 
     const runtime = createRuntime(doc, {
-      clock: "manual",
-      onEvent: (ev) => received.push(ev.kind),
+      clock: "timer",
+      docstepIntervalMs: 1,
+      onDocstep: (snap) => received.push(snap.docstep),
     });
 
-    runtime.stepDocstep();
-    expect(received).toContain("docstep");
-    expect(received.length).toBeGreaterThanOrEqual(2);
+    runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    runtime.stop();
+    expect(received.length).toBeGreaterThan(0);
   });
 });

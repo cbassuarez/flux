@@ -3,7 +3,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { stdin as nodeStdin } from "node:process";
-import { createRuntime, parseDocument, initRuntimeState, checkDocument } from "@flux-lang/core";
+import {
+    parseDocument,
+    initRuntimeState,
+    checkDocument,
+    createRuntime,
+    type Runtime,
+} from "@flux-lang/core";
 import type { FluxDocument } from "@flux-lang/core";
 import { runViewer } from "../view/runViewer.js";
 

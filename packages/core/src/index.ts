@@ -13,15 +13,20 @@ export type { RuntimeState, GridRuntimeState, NeighborRef, NeighborsNamespace } 
 // Runtime kernel entry points
 export { initRuntimeState, runDocstepOnce, handleEvent } from "./runtime/kernel.js";
 
-export {
-  createRuntime,
-  type Runtime,
-  type RuntimeSnapshot,
-  type RuntimeEvent,
-  type RuntimeOptions,
-  type DocstepIntervalHint,
-  getDocstepIntervalHint,
+// Runtime types & API
+export type {
+  Runtime,
+  RuntimeSnapshot,
+  RuntimeEvent,
+  RuntimeOptions,
 } from "./runtime.js";
+
+export { createRuntime, getDocstepIntervalHint } from "./runtime.js";
+export type { DocstepIntervalHint } from "./runtime.js";
+
+// Layout model
+export type { GridLayoutModel, GridView, GridCellView } from "./layout.js";
+export { computeGridLayout } from "./layout.js";
 
 // Static checks
 export { checkDocument } from "./checks.js";
