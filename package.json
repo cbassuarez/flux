@@ -12,6 +12,6 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces"
-  }
+  },
+  "version": "0.0.1"
 }
-
