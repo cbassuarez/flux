@@ -1,30 +1,28 @@
 {
-  "name": "@flux-lang/core",
-  "version": "0.1.1",
-  "description": "Core AST, parser, and evaluator for the Flux score language.",
+  "name": "@flux-lang/cli",
+  "version": "0.1.6",
+  "description": "Command-line interface for the Flux score language.",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",
   "type": "module",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
-  "publishConfig": {
-    "access": "public"
+  "bin": {
+    "flux": "dist/bin/flux.js"
   },
-  "types": "dist/index.d.ts",
+  "main": "dist/bin/flux.js",
+  "module": "dist/bin/flux.js",
+  "types": "dist/bin/flux.d.ts",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
-  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest",
     "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@flux-lang/core": "^0.1.6"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
