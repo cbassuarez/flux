@@ -6,3 +6,7 @@ export * from "./ast.js";
 export { parseDocument } from "./parser.js";
 // Runtime kernel entry points
 export { initRuntimeState, runDocstepOnce, handleEvent } from "./runtime/kernel.js";
+// In-memory runtime
+export { createRuntime, getDocstepIntervalHint } from "./runtime.js";
+// Static checks
+export { checkDocument } from "./checks.js";
