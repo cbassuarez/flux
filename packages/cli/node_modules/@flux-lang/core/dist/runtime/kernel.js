@@ -227,6 +227,8 @@ function evalExpr(expr, ctx) {
     switch (expr.kind) {
         case "Literal":
             return expr.value;
+        case "ListExpression":
+            return expr.items.map((item) => evalExpr(item, ctx));
         case "Identifier":
             return evalIdentifier(expr.name, ctx);
         case "UnaryExpression":

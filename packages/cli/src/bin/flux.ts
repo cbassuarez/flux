@@ -8,6 +8,8 @@ import {
     initRuntimeState,
     checkDocument,
     createRuntime,
+    createDocumentRuntime,
+    renderDocument,
     type Runtime,
 } from "@flux-lang/core";
 import type { FluxDocument } from "@flux-lang/core";
@@ -16,7 +18,7 @@ import { runViewer } from "../view/runViewer.js";
 
 type ExitCode = 0 | 1 | 2;
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 interface ParseOptions {
     ndjson: boolean;
@@ -67,6 +69,12 @@ async function main(argv: string[]): Promise<ExitCode> {
             printParseHelp();
         } else if (cmd === "check") {
             printCheckHelp();
+        } else if (cmd === "render") {
+            printRenderHelp();
+        } else if (cmd === "tick") {
+            printTickHelp();
+        } else if (cmd === "step") {
+            printStepHelp();
         } else {
             printGlobalHelp();
         }
@@ -87,6 +95,18 @@ async function main(argv: string[]): Promise<ExitCode> {
 
     if (cmd === "check") {
         return runCheck(rest);
+    }
+
+    if (cmd === "render") {
+        return runRender(rest);
+    }
+
+    if (cmd === "tick") {
+        return runTick(rest);
+    }
+
+    if (cmd === "step") {
+        return runStep(rest);
     }
 
     if (cmd === "view") {
@@ -110,11 +130,17 @@ function printGlobalHelp(): void {
             "Usage:",
             "  flux parse [options] <files...>",
             "  flux check [options] <files...>",
+            "  flux render [options] <file>",
+            "  flux tick [options] <file>",
+            "  flux step [options] <file>",
             "  flux view <file>",
             "",
             "Commands:",
             "  parse   Parse Flux source files and print their IR as JSON.",
             "  check   Parse and run basic static checks.",
+            "  render  Render a Flux document to canonical Render IR JSON.",
+            "  tick    Advance time and render the updated document.",
+            "  step    Advance docsteps and render the updated document.",
             "  view    View a Flux document in a simple docstep viewer.",
             "",
             "Global options:",
@@ -156,6 +182,62 @@ function printCheckHelp(): void {
             "",
             "Options:",
             "  --json      Emit NDJSON diagnostics to stdout.",
+            "  -h, --help  Show this message.",
+            "",
+        ].join("\n"),
+    );
+}
+
+function printRenderHelp(): void {
+    console.log(
+        [
+            "Usage:",
+            "  flux render [options] <file>",
+            "",
+            "Description:",
+            "  Render a Flux document to canonical Render IR JSON.",
+            "",
+            "Options:",
+            "  --format ir   Output format. (required; currently only 'ir')",
+            "  --seed N      Deterministic RNG seed (default: 0).",
+            "  --time T      Render time in seconds (default: 0).",
+            "  --docstep D   Render at docstep D (default: 0).",
+            "  -h, --help    Show this message.",
+            "",
+        ].join("\n"),
+    );
+}
+
+function printTickHelp(): void {
+    console.log(
+        [
+            "Usage:",
+            "  flux tick [options] <file>",
+            "",
+            "Description:",
+            "  Advance time by a number of seconds and render the updated IR.",
+            "",
+            "Options:",
+            "  --seconds S  Seconds to advance time by.",
+            "  --seed N     Deterministic RNG seed (default: 0).",
+            "  -h, --help   Show this message.",
+            "",
+        ].join("\n"),
+    );
+}
+
+function printStepHelp(): void {
+    console.log(
+        [
+            "Usage:",
+            "  flux step [options] <file>",
+            "",
+            "Description:",
+            "  Advance docsteps and render the updated IR.",
+            "",
+            "Options:",
+            "  --n N       Docsteps to advance by (default: 1).",
+            "  --seed N    Deterministic RNG seed (default: 0).",
             "  -h, --help  Show this message.",
             "",
         ].join("\n"),
@@ -358,6 +440,216 @@ async function runCheck(args: string[]): Promise<ExitCode> {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                                 flux render                                */
+/* -------------------------------------------------------------------------- */
+
+async function runRender(args: string[]): Promise<ExitCode> {
+    let format = "ir";
+    let seed: number | undefined;
+    let time: number | undefined;
+    let docstep: number | undefined;
+    let file: string | undefined;
+
+    try {
+        for (let i = 0; i < args.length; i += 1) {
+            const arg = args[i];
+            if (arg === "--format") {
+                format = args[i + 1] ?? "";
+                i += 1;
+            } else if (arg.startsWith("--format=")) {
+                format = arg.slice("--format=".length);
+            } else if (arg === "--seed") {
+                seed = parseNumberFlag("--seed", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--seed=")) {
+                seed = parseNumberFlag("--seed", arg.slice("--seed=".length));
+            } else if (arg === "--time") {
+                time = parseNumberFlag("--time", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--time=")) {
+                time = parseNumberFlag("--time", arg.slice("--time=".length));
+            } else if (arg === "--docstep") {
+                docstep = parseNumberFlag("--docstep", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--docstep=")) {
+                docstep = parseNumberFlag("--docstep", arg.slice("--docstep=".length));
+            } else if (!arg.startsWith("-")) {
+                file = arg;
+            }
+        }
+    } catch (error) {
+        console.error(`flux render: ${(error as Error)?.message ?? error}`);
+        return 1;
+    }
+
+    if (!file) {
+        console.error("flux render: No input file specified.");
+        printRenderHelp();
+        return 1;
+    }
+
+    if (format !== "ir") {
+        console.error(`flux render: Unsupported format '${format}'.`);
+        return 1;
+    }
+
+    let source: string;
+    try {
+        source = await readSource(file);
+    } catch (error) {
+        console.error(formatIoError(file, error));
+        return 1;
+    }
+
+    let doc: FluxDocument;
+    try {
+        doc = parseDocument(source);
+    } catch (error) {
+        console.error(formatParseOrLexerError(file, error));
+        return 1;
+    }
+
+    const dir = file === "-" ? process.cwd() : path.dirname(path.resolve(file));
+    const rendered = renderDocument(doc, {
+        seed,
+        time,
+        docstep,
+        assetCwd: dir,
+    });
+
+    process.stdout.write(JSON.stringify(rendered, null, 2) + "\n");
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  flux tick                                 */
+/* -------------------------------------------------------------------------- */
+
+async function runTick(args: string[]): Promise<ExitCode> {
+    let seconds: number | undefined;
+    let seed: number | undefined;
+    let file: string | undefined;
+
+    try {
+        for (let i = 0; i < args.length; i += 1) {
+            const arg = args[i];
+            if (arg === "--seconds") {
+                seconds = parseNumberFlag("--seconds", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--seconds=")) {
+                seconds = parseNumberFlag("--seconds", arg.slice("--seconds=".length));
+            } else if (arg === "--seed") {
+                seed = parseNumberFlag("--seed", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--seed=")) {
+                seed = parseNumberFlag("--seed", arg.slice("--seed=".length));
+            } else if (!arg.startsWith("-")) {
+                file = arg;
+            }
+        }
+    } catch (error) {
+        console.error(`flux tick: ${(error as Error)?.message ?? error}`);
+        return 1;
+    }
+
+    if (!file) {
+        console.error("flux tick: No input file specified.");
+        printTickHelp();
+        return 1;
+    }
+
+    if (seconds === undefined) {
+        console.error("flux tick: --seconds is required.");
+        printTickHelp();
+        return 1;
+    }
+
+    let source: string;
+    try {
+        source = await readSource(file);
+    } catch (error) {
+        console.error(formatIoError(file, error));
+        return 1;
+    }
+
+    let doc: FluxDocument;
+    try {
+        doc = parseDocument(source);
+    } catch (error) {
+        console.error(formatParseOrLexerError(file, error));
+        return 1;
+    }
+
+    const dir = file === "-" ? process.cwd() : path.dirname(path.resolve(file));
+    const runtime = createDocumentRuntime(doc, { seed, assetCwd: dir });
+    const rendered = runtime.tick(seconds);
+    process.stdout.write(JSON.stringify(rendered, null, 2) + "\n");
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  flux step                                 */
+/* -------------------------------------------------------------------------- */
+
+async function runStep(args: string[]): Promise<ExitCode> {
+    let count: number | undefined;
+    let seed: number | undefined;
+    let file: string | undefined;
+
+    try {
+        for (let i = 0; i < args.length; i += 1) {
+            const arg = args[i];
+            if (arg === "--n") {
+                count = parseNumberFlag("--n", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--n=")) {
+                count = parseNumberFlag("--n", arg.slice("--n=".length));
+            } else if (arg === "--seed") {
+                seed = parseNumberFlag("--seed", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--seed=")) {
+                seed = parseNumberFlag("--seed", arg.slice("--seed=".length));
+            } else if (!arg.startsWith("-")) {
+                file = arg;
+            }
+        }
+    } catch (error) {
+        console.error(`flux step: ${(error as Error)?.message ?? error}`);
+        return 1;
+    }
+
+    if (!file) {
+        console.error("flux step: No input file specified.");
+        printStepHelp();
+        return 1;
+    }
+
+    const steps = count ?? 1;
+
+    let source: string;
+    try {
+        source = await readSource(file);
+    } catch (error) {
+        console.error(formatIoError(file, error));
+        return 1;
+    }
+
+    let doc: FluxDocument;
+    try {
+        doc = parseDocument(source);
+    } catch (error) {
+        console.error(formatParseOrLexerError(file, error));
+        return 1;
+    }
+
+    const dir = file === "-" ? process.cwd() : path.dirname(path.resolve(file));
+    const runtime = createDocumentRuntime(doc, { seed, assetCwd: dir });
+    const rendered = runtime.step(steps);
+    process.stdout.write(JSON.stringify(rendered, null, 2) + "\n");
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
 /*                                  flux view                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -435,4 +727,15 @@ function formatParseOrLexerError(file: string, error: unknown): string {
     }
 
     return `${file}:0:0: ${message}`;
+}
+
+function parseNumberFlag(flag: string, raw: string | undefined): number {
+    if (raw == null || raw.length === 0) {
+        throw new Error(`Expected numeric value after ${flag}`);
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+        throw new Error(`Invalid number for ${flag}: '${raw}'`);
+    }
+    return value;
 }

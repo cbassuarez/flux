@@ -1,12 +1,13 @@
 # @flux-lang/core
 
-Core library for the **Flux** score language: AST types, parser, canonical IR, and the v0.1 runtime kernel.
+Core library for the **Flux** evolving document language: AST types, parser, Render IR, and the legacy v0.1 runtime kernel.
 
-Flux is a small, declarative language for **procedurally evolving music scores and parts**. The `@flux-lang/core` package is the reference implementation of:
+Flux is a small, declarative language for **deterministically evolving documents**. The `@flux-lang/core` package is the reference implementation of:
 
-- The **Flux v0.1 grammar**.
-- The **FluxDocument IR** (canonical JSON representation).
-- A minimal **runtime kernel** with `docstep` rules and `neighbors.*` semantics.
+- The **Flux v0.2 grammar** (with v0.1 compatibility).
+- The **FluxDocument AST IR** (parse output).
+- The **RenderDocument IR** (resolved render output).
+- A minimal **v0.1 runtime kernel** with `docstep` rules and `neighbors.*` semantics.
 
 ---
 
@@ -24,7 +25,7 @@ yarn add @flux-lang/core
 
 ## Basic usage
 
-### Parse source → IR
+### Parse source → AST IR
 
 ```ts
 import { parseDocument } from "@flux-lang/core";
@@ -43,10 +44,20 @@ document {
 `;
 
 const doc = parseDocument(source);
-// doc is a FluxDocument (Flux v0.1 IR)
+// doc is a FluxDocument (AST IR)
 ```
 
-### Runtime kernel: docstep + neighbors
+### Render IR (v0.2)
+
+```ts
+import { parseDocument, renderDocument } from "@flux-lang/core";
+
+const doc = parseDocument(source);
+const ir = renderDocument(doc, { seed: 123, time: 10, docstep: 2 });
+// ir is a RenderDocument (resolved, deterministic Render IR)
+```
+
+### Runtime kernel: docstep + neighbors (legacy v0.1)
 
 ```ts
 import {

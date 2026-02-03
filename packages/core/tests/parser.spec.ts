@@ -895,3 +895,89 @@ describe("Flux parser v0.1", () => {
         });
     });
 });
+
+// ──────────────────────────────────────────────────────────────
+// NEW: v0.2 assets + body + dynamic props
+// ──────────────────────────────────────────────────────────────
+
+describe("Flux parser v0.2", () => {
+    it("parses assets, body nodes, refresh policies, and @ expressions", () => {
+        const src = `
+      document {
+        meta { version = "0.2.0"; }
+
+        state {
+          param name : string @ "Flux";
+        }
+
+        assets {
+          asset hero {
+            kind = image;
+            path = "img/hero.png";
+            tags = [ hero, cover ];
+            weight = 2;
+            meta { credit = "studio"; }
+          }
+
+          bank textures {
+            kind = image;
+            root = "assets";
+            include = "*.png";
+            tags = [ texture ];
+            strategy = uniform;
+          }
+        }
+
+        body {
+          page p1 {
+            refresh = onLoad;
+
+            text t1 {
+              content = @"Hello " + params.name;
+            }
+
+            image heroImg {
+              src = @assets.pick(tags=[hero], strategy=weighted, seed=7).path;
+            }
+
+            section s1 {
+              refresh = every(30s);
+              text t2 { content = "Static"; }
+            }
+
+            text t3 { items = @[1, 2, 3]; }
+          }
+        }
+      }
+    `;
+
+        const doc = parseDocument(src) as FluxDocument;
+
+        expect(doc.assets?.assets.length).toBe(1);
+        expect(doc.assets?.banks.length).toBe(1);
+        expect(doc.assets?.assets[0].meta?.credit).toBe("studio");
+
+        const page = doc.body?.nodes[0];
+        expect(page?.kind).toBe("page");
+        expect(page?.refresh?.kind).toBe("onLoad");
+
+        const t1: any = page?.children[0];
+        expect(t1.kind).toBe("text");
+        expect(t1.props.content.kind).toBe("DynamicValue");
+
+        const srcExpr: any = page?.children[1].props.src;
+        expect(srcExpr.kind).toBe("DynamicValue");
+        expect(srcExpr.expr.kind).toBe("MemberExpression");
+        expect(srcExpr.expr.object.kind).toBe("CallExpression");
+        expect(srcExpr.expr.object.args.length).toBeGreaterThan(0);
+
+        const section: any = page?.children[2];
+        expect(section.refresh.kind).toBe("every");
+        expect(section.refresh.amount).toBe(30);
+        expect(section.refresh.unit).toBe("s");
+
+        const t3: any = page?.children[3];
+        expect(t3.props.items.kind).toBe("DynamicValue");
+        expect(t3.props.items.expr.kind).toBe("ListExpression");
+    });
+});

@@ -1,8 +1,71 @@
-# Flux Semantics (v0.1.0)
+# Flux Semantics (v0.2.0)
 
-This document defines the evaluation semantics of Flux v0.1, including docstep evaluation, event handling, conflict resolution, parameter clamping, `advanceDocstep`, and error/warning categories.
+This document defines Flux v0.2 document rendering semantics and preserves the v0.1 rule/runtime kernel semantics for compatibility.
 
-## 1. State model
+## 0. Document rendering (v0.2)
+
+Flux v0.2 introduces a **document body tree** and **assets**. Rendering produces a canonical **Render IR** that is deterministic for a given document, seed, time, and docstep.
+
+### 0.1 Render inputs
+
+Rendering is parameterized by:
+
+- `seed`: deterministic RNG seed (integer).
+- `time`: seconds since load (floating-point).
+- `docstep`: document step index (integer).
+
+### 0.2 Refresh policies
+
+Each node has an optional `refresh` policy:
+
+- `onLoad` (default): evaluate once at load.
+- `onDocstep`: refresh when docstep changes.
+- `every(30s)`: refresh on a time interval.
+- `never`: evaluate once and never refresh.
+
+If a node omits `refresh`, it **inherits** the nearest ancestor refresh policy. If no ancestor defines one, the default is `onLoad`.
+
+`every(...)` is defined for time units (`ms`, `s`, `m`, `h`). Other units are implementation-defined.
+
+For each node, the runtime computes a **refresh key**:
+
+- `onLoad` / `never`: key = `0`
+- `onDocstep`: key = current `docstep`
+- `every(T)`: key = `floor(time / T)`
+
+When the key changes, the node re-evaluates its dynamic properties. Otherwise, its last resolved values are retained.
+
+### 0.3 Evaluation window (time/docstep freezing)
+
+Dynamic expressions are evaluated in a **refresh window**:
+
+- `onLoad` / `never`: `time = 0`, `docstep = 0`
+- `onDocstep`: `time = current time`, `docstep = current docstep`
+- `every(T)`: `time = floor(time / T) * T`, `docstep = current docstep`
+
+When a node does **not** refresh, its last evaluation window is reused (time/docstep are effectively frozen), ensuring that unrelated changes do not leak into unchanged subtrees.
+
+### 0.4 Deterministic randomness
+
+All randomness is deterministic and scoped:
+
+- `choose(list)` selects an element using a RNG derived from `(seed, node id/path, prop name, refresh key)`.
+- `assets.pick(...)` uses the same deterministic RNG unless an explicit seed is provided.
+- `stableHash(...)` returns a deterministic integer hash for use in expressions.
+
+### 0.5 Render IR
+
+Rendering produces a `RenderDocument` JSON object:
+
+- `meta`, `seed`, `time`, `docstep`
+- `assets`: resolved assets with stable IDs and paths
+- `body`: resolved node tree (all dynamic props resolved to literals)
+
+Ordering is stable: node order follows source order; assets are sorted by stable ID.
+
+---
+
+## 1. State model (legacy v0.1)
 
 A Flux document is parsed into a `FluxDocument`:
 

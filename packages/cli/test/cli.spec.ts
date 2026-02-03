@@ -70,5 +70,65 @@ it("flux check reports a missing grid reference and non-zero exit code", async (
       ),
     ).toBe(true);
   });
-});
 
+    it("flux render outputs Render IR with seed/time/docstep", async () => {
+        const fixture = resolve(CLI_ROOT, "test", "fixtures", "doc-v0_2.flux");
+
+        const { stdout, stderr, exitCode } = await execa(
+            "node",
+            [CLI_BIN, "render", "--format", "ir", "--seed", "5", "--time", "3", "--docstep", "2", fixture],
+            {
+                reject: false,
+                stripFinalNewline: false,
+            },
+        );
+
+        expect(exitCode).toBe(0);
+        expect(stderr).toBe("");
+
+        const rendered = JSON.parse(stdout) as any;
+        expect(rendered.meta.title).toBe("Render Test");
+        expect(rendered.seed).toBe(5);
+        expect(rendered.time).toBe(3);
+        expect(rendered.docstep).toBe(2);
+        expect(rendered.body.length).toBeGreaterThan(0);
+    });
+
+    it("flux tick advances time and renders", async () => {
+        const fixture = resolve(CLI_ROOT, "test", "fixtures", "doc-v0_2.flux");
+
+        const { stdout, stderr, exitCode } = await execa(
+            "node",
+            [CLI_BIN, "tick", "--seconds", "5", fixture],
+            {
+                reject: false,
+                stripFinalNewline: false,
+            },
+        );
+
+        expect(exitCode).toBe(0);
+        expect(stderr).toBe("");
+
+        const rendered = JSON.parse(stdout) as any;
+        expect(rendered.time).toBe(5);
+    });
+
+    it("flux step advances docsteps and renders", async () => {
+        const fixture = resolve(CLI_ROOT, "test", "fixtures", "doc-v0_2.flux");
+
+        const { stdout, stderr, exitCode } = await execa(
+            "node",
+            [CLI_BIN, "step", "--n", "3", fixture],
+            {
+                reject: false,
+                stripFinalNewline: false,
+            },
+        );
+
+        expect(exitCode).toBe(0);
+        expect(stderr).toBe("");
+
+        const rendered = JSON.parse(stdout) as any;
+        expect(rendered.docstep).toBe(3);
+    });
+});
