@@ -47,6 +47,7 @@ class PlaywrightBackend {
             await page.addStyleTag({
                 content: `*{animation:none !important;transition:none !important;}`,
             });
+            await applySlotFits(page);
             const pdf = await page.pdf({
                 printBackground: true,
                 preferCSSPageSize: options.preferCssPageSize ?? true,
@@ -110,6 +111,70 @@ function buildHtmlDocument(html, css, baseUrl) {
         "</body>",
         "</html>",
     ].join("");
+}
+async function applySlotFits(page) {
+    await page.evaluate(() => {
+        const fitsWithin = (container, inner) => {
+            return inner.scrollWidth <= container.clientWidth && inner.scrollHeight <= container.clientHeight;
+        };
+        const applyFit = (slot) => {
+            const fit = slot.getAttribute("data-flux-fit");
+            const inner = slot.querySelector("[data-flux-slot-inner]") || slot.querySelector(".flux-slot-inner");
+            if (!inner || !(inner instanceof HTMLElement) || !(slot instanceof HTMLElement))
+                return;
+            const isInline = slot.getAttribute("data-flux-inline") === "true";
+            inner.style.transform = "";
+            inner.style.fontSize = "";
+            inner.style.whiteSpace = "";
+            inner.style.textOverflow = "";
+            inner.style.webkitLineClamp = "";
+            inner.style.webkitBoxOrient = "";
+            inner.style.display = "";
+            if (fit === "shrink") {
+                const style = window.getComputedStyle(inner);
+                const base = parseFloat(style.fontSize) || 14;
+                let lo = 6;
+                let hi = base;
+                let best = base;
+                for (let i = 0; i < 10; i += 1) {
+                    const mid = (lo + hi) / 2;
+                    inner.style.fontSize = `${mid}px`;
+                    if (fitsWithin(slot, inner)) {
+                        best = mid;
+                        lo = mid + 0.1;
+                    }
+                    else {
+                        hi = mid - 0.1;
+                    }
+                }
+                inner.style.fontSize = `${best}px`;
+            }
+            else if (fit === "scaleDown") {
+                inner.style.transformOrigin = "top left";
+                const scaleX = slot.clientWidth / inner.scrollWidth;
+                const scaleY = slot.clientHeight / inner.scrollHeight;
+                const scale = Math.min(1, scaleX, scaleY);
+                inner.style.transform = `scale(${scale})`;
+            }
+            else if (fit === "ellipsis") {
+                if (isInline) {
+                    inner.style.display = "inline-block";
+                    inner.style.whiteSpace = "nowrap";
+                    inner.style.textOverflow = "ellipsis";
+                    inner.style.overflow = "hidden";
+                }
+                else {
+                    const lineHeight = parseFloat(window.getComputedStyle(inner).lineHeight) || 16;
+                    const maxLines = Math.max(1, Math.floor(slot.clientHeight / lineHeight));
+                    inner.style.display = "-webkit-box";
+                    inner.style.webkitBoxOrient = "vertical";
+                    inner.style.webkitLineClamp = String(maxLines);
+                    inner.style.overflow = "hidden";
+                }
+            }
+        };
+        document.querySelectorAll("[data-flux-fit]").forEach((slot) => applyFit(slot));
+    });
 }
 function which(cmd) {
     const pathEntries = process.env.PATH?.split(path.delimiter) ?? [];

@@ -7,6 +7,17 @@ import { runViewer } from "../view/runViewer.js";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 const VERSION = "0.2.0";
+function parseFlux(source, filePath) {
+    if (!filePath || filePath === "-") {
+        return parseDocument(source);
+    }
+    const resolved = path.resolve(filePath);
+    return parseDocument(source, {
+        sourcePath: resolved,
+        docRoot: path.dirname(resolved),
+        resolveIncludes: true,
+    });
+}
 // Entry
 void (async () => {
     try {
@@ -286,7 +297,7 @@ async function runParse(args) {
             return 1;
         }
         try {
-            const doc = parseDocument(source);
+            const doc = parseFlux(source, file);
             docs.push({ file: file === "-" ? "<stdin>" : file, doc });
         }
         catch (error) {
@@ -348,7 +359,7 @@ async function runCheck(args) {
         }
         let doc;
         try {
-            doc = parseDocument(source);
+            doc = parseFlux(source, file);
         }
         catch (error) {
             const diagnostic = formatParseOrLexerError(file, error);
@@ -475,11 +486,14 @@ async function runRender(args) {
     }
     let doc;
     try {
-        doc = parseDocument(source);
+        doc = parseFlux(source, file);
     }
     catch (error) {
         console.error(formatParseOrLexerError(file, error));
         return 1;
+    }
+    if (!doc.meta?.target) {
+        doc = { ...doc, meta: { ...doc.meta, target: "print" } };
     }
     const dir = file === "-" ? process.cwd() : path.dirname(path.resolve(file));
     const rendered = renderDocument(doc, {
@@ -544,7 +558,7 @@ async function runTick(args) {
     }
     let doc;
     try {
-        doc = parseDocument(source);
+        doc = parseFlux(source, file);
     }
     catch (error) {
         console.error(formatParseOrLexerError(file, error));
@@ -605,7 +619,7 @@ async function runStep(args) {
     }
     let doc;
     try {
-        doc = parseDocument(source);
+        doc = parseFlux(source, file);
     }
     catch (error) {
         console.error(formatParseOrLexerError(file, error));
@@ -689,7 +703,7 @@ async function runView(args) {
     if (useTty) {
         try {
             const source = await fs.readFile(docPath, "utf8");
-            const doc = parseDocument(source);
+            const doc = parseFlux(source, docPath);
             const runtime = createRuntime(doc, { clock: "manual" });
             const labels = new Map();
             for (const mat of doc.materials?.materials ?? []) {
@@ -792,7 +806,7 @@ async function runPdf(args) {
     }
     let doc;
     try {
-        doc = parseDocument(source);
+        doc = parseFlux(source, file);
     }
     catch (error) {
         console.error(formatParseOrLexerError(file, error));

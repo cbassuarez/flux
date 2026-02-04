@@ -42,7 +42,13 @@ exports[`Flux render IR v0.2 > resolves assets.pick to stable asset refs 1`] = `
           "id": "i1",
           "kind": "image",
           "props": {
-            "asset": null,
+            "asset": {
+              "assetKind": "image",
+              "id": "asset_51bbf7e7",
+              "kind": "asset",
+              "name": "alt",
+              "path": "img/alt.png",
+            },
           },
         },
       ],

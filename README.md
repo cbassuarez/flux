@@ -17,6 +17,20 @@ At its core, Flux is both:
 
 ---
 
+## v0.3 document features (preview)
+
+Flux v0.3 extends the document renderer with:
+
+* **Rich text nodes** (inline and block), lists, tables, figures, callouts, and basic footnotes.
+* **Named styles + tokens** with inheritance and a minimal **print/screen theme** switch.
+* **Deterministic helpers** (`choose`, `cycle`, `hashpick`, `phase`, `lerp`, `shuffle`, `sample`) and stricter sandboxing.
+* **Cross-refs + counters** (`label` + `ref()` for sections/figures/tables/footnotes).
+* **Sandboxed includes** (`include` nodes resolved within the document root).
+
+See `examples/viewer-demo.flux` for a 6-page LaTeX-like demo showing the new primitives: title/abstract roles, rich inline formatting, figure refs, slot-driven evolution, callouts and tables, typography stress, and screen-only appendix content.
+
+---
+
 ## Monorepo layout
 
 This repository is organized as a small monorepo:
