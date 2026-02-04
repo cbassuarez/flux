@@ -233,6 +233,13 @@ body {
   height: 100%;
 }
 
+.flux-slot-inner > .flux-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
 .flux-fit-ellipsis .flux-slot-inner {
   overflow: hidden;
   text-overflow: ellipsis;

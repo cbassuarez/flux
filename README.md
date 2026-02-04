@@ -47,6 +47,19 @@ The `cli` package provides the `flux` binary:
 * `flux parse` – parse `.flux` files and print their IR as JSON.
 * `flux check` – parse + basic static checks (grid references, neighbors usage, runtime shape).
 
+### Viewer demo smoke test
+
+```bash
+npm run build
+node packages/cli/dist/bin/flux.js view examples/viewer-demo.flux --docstep-ms 700 --seed 1
+node packages/cli/dist/bin/flux.js step examples/viewer-demo.flux --n 0 --seed 1 > /tmp/ir0.json
+node packages/cli/dist/bin/flux.js step examples/viewer-demo.flux --n 1 --seed 1 > /tmp/ir1.json
+diff /tmp/ir0.json /tmp/ir1.json
+node packages/cli/dist/bin/flux.js tick examples/viewer-demo.flux --seconds 2 --seed 1
+node packages/cli/dist/bin/flux.js pdf examples/viewer-demo.flux --docstep 0 --seed 1 --out /tmp/demo-0.pdf
+node packages/cli/dist/bin/flux.js pdf examples/viewer-demo.flux --docstep 50 --seed 1 --out /tmp/demo-50.pdf
+```
+
 ### `@flux-lang/vscode-flux` – VS Code language support
 
 The `vscode-flux` package is a VS Code extension that adds:

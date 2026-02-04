@@ -48,4 +48,31 @@ describe("render-html", () => {
     expect(html).toContain('class="flux-slot');
     expect(html).toContain('class="flux-inline-slot');
   });
+
+  it("sizes slot-contained images to fill reserved geometry", () => {
+    const src = `
+      document {
+        meta { version = "0.2.0"; }
+        assets {
+          asset hero { kind = image; path = "img/hero.png"; tags = [ hero ]; }
+        }
+        body {
+          page p1 {
+            slot hero {
+              reserve = fixed(200, 80, px);
+              fit = clip;
+              image heroImg { asset = @assets.pick(tags=["hero"]); }
+            }
+          }
+        }
+      }
+    `;
+    const doc = parseDocument(src);
+    const ir = renderDocumentIR(doc, { seed: 1 });
+    const { html, css } = renderHtml(ir);
+    expect(html).toContain('class="flux-slot');
+    expect(html).toContain('class="flux-image"');
+    expect(css).toContain(".flux-slot-inner > .flux-image");
+    expect(css).toContain("object-fit: contain");
+  });
 });

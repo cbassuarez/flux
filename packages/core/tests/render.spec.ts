@@ -7,6 +7,15 @@ import { createDocumentRuntime, renderDocument } from "../src/render";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const findNodeById = (nodes: any[], id: string): any | undefined => {
+  for (const node of nodes ?? []) {
+    if (node?.id === id) return node;
+    const child = findNodeById(node?.children ?? [], id);
+    if (child) return child;
+  }
+  return undefined;
+};
+
 describe("Flux render IR v0.2", () => {
   it("is deterministic for the same seed/time/docstep", () => {
     const src = `
@@ -106,5 +115,32 @@ describe("Flux render IR v0.2", () => {
     const rendered = renderDocument(doc, { seed: 0, docstep: 1 });
     expect(rendered.body.length).toBeGreaterThan(0);
     expect(rendered.body[0].children.length).toBeGreaterThan(0);
+  });
+
+  it("renders the viewer demo with stable assets and slot updates", () => {
+    const demoPath = path.join(__dirname, "..", "..", "..", "examples", "viewer-demo.flux");
+    const demoSource = readFileSync(demoPath, "utf8");
+    const doc = parseDocument(demoSource);
+    const assetCwd = path.dirname(demoPath);
+
+    const step0 = renderDocument(doc, { seed: 1, docstep: 0, assetCwd });
+    const step1 = renderDocument(doc, { seed: 1, docstep: 1, assetCwd });
+
+    const hero0 = findNodeById(step0.body, "heroImg");
+    const hero1 = findNodeById(step1.body, "heroImg");
+    expect(hero0?.props?.asset).not.toBeNull();
+    expect(hero1?.props?.asset).not.toBeNull();
+
+    const slot0 = findNodeById(step0.body, "t1");
+    const slot1 = findNodeById(step1.body, "t1");
+    expect(slot0?.props?.content).not.toBe(slot1?.props?.content);
+
+    const assetIds = Array.from({ length: 6 }, (_, index) => {
+      const rendered = renderDocument(doc, { seed: 1, docstep: index, assetCwd });
+      const hero = findNodeById(rendered.body, "heroImg");
+      return hero?.props?.asset?.id ?? null;
+    });
+    const distinct = new Set(assetIds);
+    expect(distinct.size).toBeGreaterThan(1);
   });
 });

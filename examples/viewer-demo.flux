@@ -38,7 +38,7 @@ document {
           reserve = fixed(320, 200, px);
           fit = scaleDown;
           refresh = onDocstep;
-          image heroImg { asset = @assets.pick(tags=[swap]); }
+          image heroImg { asset = @assets.pick(tags=["swap"]); }
         }
         text caption {
           content = "Image slot swaps per docstep without changing layout.";

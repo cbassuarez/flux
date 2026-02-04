@@ -3,9 +3,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { stdin as nodeStdin } from "node:process";
 import { parseDocument, initRuntimeState, checkDocument, createRuntime, createDocumentRuntime, renderDocument, renderDocumentIR, } from "@flux-lang/core";
-import { renderHtml } from "@flux-lang/render-html";
-import { createTypesetterBackend } from "@flux-lang/typesetter";
-import { startViewerServer } from "@flux-lang/viewer";
 import { runViewer } from "../view/runViewer.js";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -217,6 +214,7 @@ function printViewHelp() {
         "  --docstep-ms <n>    Docstep interval in milliseconds.",
         "  --seed <n>          Seed for deterministic rendering.",
         "  --allow-net <orig>  Allow remote assets for origin (repeatable or comma-separated).",
+        "  --no-time           Disable automatic time advancement.",
         "  --tty              Use the legacy TTY grid viewer.",
         "  -h, --help          Show this message.",
         "",
@@ -629,11 +627,15 @@ async function runView(args) {
     let useTty = false;
     const allowNet = [];
     let file;
+    let advanceTime = true;
     try {
         for (let i = 0; i < args.length; i += 1) {
             const arg = args[i];
             if (arg === "--tty") {
                 useTty = true;
+            }
+            else if (arg === "--no-time") {
+                advanceTime = false;
             }
             else if (arg === "--port") {
                 port = parseNumberFlag("--port", args[i + 1]);
@@ -702,12 +704,14 @@ async function runView(args) {
         }
     }
     try {
+        const { startViewerServer } = await import("@flux-lang/viewer");
         const server = await startViewerServer({
             docPath,
             port,
             docstepMs,
             seed,
             allowNet,
+            advanceTime,
         });
         console.log(`Flux viewer running at ${server.url}`);
         console.log("Press Ctrl+C to stop.");
@@ -811,6 +815,8 @@ async function runPdf(args) {
         const resolved = path.isAbsolute(raw) ? raw : path.resolve(dir, raw);
         return pathToFileURL(resolved).toString();
     };
+    const { renderHtml } = await import("@flux-lang/render-html");
+    const { createTypesetterBackend } = await import("@flux-lang/typesetter");
     const { html, css } = renderHtml(ir, { assetUrl, rawUrl });
     const typesetter = createTypesetterBackend();
     const pdf = await typesetter.pdf(html, css, { allowFile: true });

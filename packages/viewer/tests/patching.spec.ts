@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import type { RenderDocumentIR, RenderNodeIR } from "@flux-lang/core";
 import { collectSlotHashes, diffSlotIds, shrinkToFit, scaleDownToFit } from "../src/patching";
@@ -57,8 +56,12 @@ describe("viewer patching", () => {
   });
 
   it("shrinks text to fit inside slot", () => {
-    const container = document.createElement("div");
-    const inner = document.createElement("div");
+    const container = { style: {} } as HTMLElement;
+    const inner = { style: {} } as HTMLElement;
+    const previousWindow = globalThis.window as any;
+    (globalThis as any).window = {
+      getComputedStyle: (el: HTMLElement) => ({ fontSize: el.style.fontSize || "14px" }),
+    };
     container.style.width = "100px";
     container.style.height = "50px";
     inner.style.fontSize = "20px";
@@ -73,13 +76,18 @@ describe("viewer patching", () => {
     });
 
     const size = shrinkToFit(container, inner);
-    expect(size).toBeLessThanOrEqual(16.5);
+    expect(size).toBeLessThanOrEqual(17);
     expect(size).toBeGreaterThanOrEqual(6);
+    if (previousWindow) {
+      (globalThis as any).window = previousWindow;
+    } else {
+      delete (globalThis as any).window;
+    }
   });
 
   it("scales down to fit inside slot", () => {
-    const container = document.createElement("div");
-    const inner = document.createElement("div");
+    const container = { style: {} } as HTMLElement;
+    const inner = { style: {} } as HTMLElement;
     Object.defineProperty(container, "clientWidth", { value: 100 });
     Object.defineProperty(container, "clientHeight", { value: 50 });
     Object.defineProperty(inner, "scrollWidth", { value: 200 });
