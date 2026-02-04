@@ -594,14 +594,19 @@ function renderNode(
   },
   inlineContext = false,
   footnotes?: FootnoteContext,
+  inlineSlotContext = false,
 ): string {
   const isInlineKind = isInlineNode(node.kind);
   const childrenInline = inlineContext || isInlineKind || node.kind === "text";
   const attrs = buildAttrs(node, inlineContext);
   const styleAttr = buildInlineStyle(mergeInlineStyles(node, inlineContext));
 
-  const renderChildren = (inline = childrenInline, context = footnotes): string =>
-    node.children.map((child) => renderNode(child, options, inline, context)).join("");
+  const renderChildren = (inline = childrenInline, context = footnotes, slotContext = inlineSlotContext): string =>
+    node.children.map((child) => renderNode(child, options, inline, context, slotContext)).join("");
+
+  if (inlineSlotContext && inlineContext && isBlockLike(node.kind)) {
+    return renderChildren(true, footnotes, inlineSlotContext);
+  }
 
   switch (node.kind) {
     case "page": {
@@ -689,7 +694,7 @@ function renderNode(
     case "slot":
       return renderSlot(node, attrs, false, renderChildren(false), options.slots, styleAttr);
     case "inline_slot":
-      return renderSlot(node, attrs, true, renderChildren(true), options.slots, styleAttr);
+      return renderSlot(node, attrs, true, renderChildren(true, footnotes, true), options.slots, styleAttr);
     default:
       return `<div class="${buildClassName("flux-node", node)}" ${attrs}${styleAttr}>${renderChildren()}</div>`;
   }
@@ -707,6 +712,25 @@ function isInlineNode(kind: string): boolean {
     kind === "link" ||
     kind === "quote" ||
     kind === "footnote"
+  );
+}
+
+function isBlockLike(kind: string): boolean {
+  return (
+    kind === "page" ||
+    kind === "section" ||
+    kind === "row" ||
+    kind === "column" ||
+    kind === "blockquote" ||
+    kind === "codeblock" ||
+    kind === "callout" ||
+    kind === "table" ||
+    kind === "ul" ||
+    kind === "ol" ||
+    kind === "li" ||
+    kind === "figure" ||
+    kind === "grid" ||
+    kind === "slot"
   );
 }
 

@@ -153,4 +153,29 @@ describe("flux CLI", () => {
         const rendered = JSON.parse(stdout) as any;
         expect(rendered.docstep).toBe(3);
     });
+
+    it("flux with no args prints help in non-tty", async () => {
+        const { stdout, exitCode } = await execa("node", [CLI_BIN], {
+            reject: false,
+            stripFinalNewline: false,
+        });
+
+        expect(exitCode).toBe(0);
+        expect(stdout).toContain("Usage:");
+    });
+
+    it("flux check --json emits NDJSON", async () => {
+        const fixture = resolve(CLI_ROOT, "..", "..", "examples", "viewer-demo.flux");
+        const { stdout, exitCode } = await execa("node", [CLI_BIN, "check", "--json", fixture], {
+            reject: false,
+            stripFinalNewline: false,
+        });
+
+        expect(exitCode).toBe(0);
+        const lines = stdout.trim().split("\n");
+        expect(lines.length).toBeGreaterThan(0);
+        const parsed = JSON.parse(lines[0]);
+        expect(parsed.ok).toBeDefined();
+        expect(parsed.file).toBeDefined();
+    });
 });
