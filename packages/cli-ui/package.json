@@ -25,11 +25,7 @@
     "react": "^18.3.1"
   },
   "devDependencies": {
-<<<<<<< HEAD
     "@types/node": "^22.0.0",
-=======
-       "@types/node": "^22.0.0",
->>>>>>> 58e111dcbb5ecd45198678a7d2cffb01dc7e3053
     "@types/react": "^18.3.0",
     "typescript": "^5.6.0"
   }
