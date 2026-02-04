@@ -189,6 +189,25 @@ export function App(props: AppProps) {
   const [listBounds, setListBounds] = useState<{ y: number; height: number } | null>(null);
   const [cols, setCols] = useState(() => process.stdout.columns ?? 80);
 
+  const navItems = useMemo<NavItem[]>(() => {
+    const items: NavItem[] = [];
+    items.push({ type: "section", label: "Recent" });
+    items.push(...recents);
+    items.push({ type: "section", label: "Open" });
+    items.push({ type: "action", id: "open", label: "Open..." });
+    items.push({ type: "section", label: "New" });
+    items.push({ type: "action", id: "new", label: "New..." });
+    items.push({ type: "section", label: "Actions" });
+    items.push({ type: "action", id: "view", label: "View" });
+    items.push({ type: "action", id: "export", label: "Export PDF" });
+    items.push({ type: "action", id: "check", label: "Check" });
+    items.push({ type: "action", id: "format", label: "Format" });
+    items.push({ type: "action", id: "add", label: "Add..." });
+    items.push({ type: "section", label: "Settings" });
+    items.push({ type: "action", id: "settings", label: "Settings" });
+    return items;
+  }, [recents]);
+
   const handleMouseInput = useCallback((input: string) => {
     if (!listBounds) return;
     if (wizardOpen || paletteOpen || prompt || helpOpen || versionOpen) return;
@@ -579,25 +598,6 @@ export function App(props: AppProps) {
     }
 
   });
-
-  const navItems = useMemo<NavItem[]>(() => {
-    const items: NavItem[] = [];
-    items.push({ type: "section", label: "Recent" });
-    items.push(...recents);
-    items.push({ type: "section", label: "Open" });
-    items.push({ type: "action", id: "open", label: "Open..." });
-    items.push({ type: "section", label: "New" });
-    items.push({ type: "action", id: "new", label: "New..." });
-    items.push({ type: "section", label: "Actions" });
-    items.push({ type: "action", id: "view", label: "View" });
-    items.push({ type: "action", id: "export", label: "Export PDF" });
-    items.push({ type: "action", id: "check", label: "Check" });
-    items.push({ type: "action", id: "format", label: "Format" });
-    items.push({ type: "action", id: "add", label: "Add..." });
-    items.push({ type: "section", label: "Settings" });
-    items.push({ type: "action", id: "settings", label: "Settings" });
-    return items;
-  }, [recents]);
 
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const items: PaletteItem[] = [];
