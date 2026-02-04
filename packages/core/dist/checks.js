@@ -58,7 +58,12 @@ function checkExpr(expr, file, errors) {
                 errors.push(`${file}:0:0: Check error: Unsupported neighbors method '${expr.method}'`);
             }
             for (const arg of expr.args) {
-                checkExpr(arg, file, errors);
+                if (arg.kind === "NamedArg") {
+                    checkExpr(arg.value, file, errors);
+                }
+                else {
+                    checkExpr(arg, file, errors);
+                }
             }
             break;
         case "BinaryExpression":
@@ -74,7 +79,17 @@ function checkExpr(expr, file, errors) {
         case "CallExpression":
             checkExpr(expr.callee, file, errors);
             for (const arg of expr.args) {
-                checkExpr(arg, file, errors);
+                if (arg.kind === "NamedArg") {
+                    checkExpr(arg.value, file, errors);
+                }
+                else {
+                    checkExpr(arg, file, errors);
+                }
+            }
+            break;
+        case "ListExpression":
+            for (const item of expr.items) {
+                checkExpr(item, file, errors);
             }
             break;
         default:

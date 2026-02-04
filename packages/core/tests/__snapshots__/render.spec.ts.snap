@@ -1,0 +1,62 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Flux render IR v0.2 > resolves assets.pick to stable asset refs 1`] = `
+{
+  "assets": [
+    {
+      "id": "asset_172cc1b1",
+      "kind": "image",
+      "meta": undefined,
+      "name": "hero",
+      "path": "img/hero.png",
+      "source": {
+        "name": "hero",
+        "type": "asset",
+      },
+      "tags": [
+        "hero",
+      ],
+      "weight": 1,
+    },
+    {
+      "id": "asset_51bbf7e7",
+      "kind": "image",
+      "meta": undefined,
+      "name": "alt",
+      "path": "img/alt.png",
+      "source": {
+        "name": "alt",
+        "type": "asset",
+      },
+      "tags": [
+        "hero",
+      ],
+      "weight": 1,
+    },
+  ],
+  "body": [
+    {
+      "children": [
+        {
+          "children": [],
+          "id": "i1",
+          "kind": "image",
+          "props": {
+            "asset": null,
+          },
+        },
+      ],
+      "id": "p1",
+      "kind": "page",
+      "props": {},
+    },
+  ],
+  "docstep": 0,
+  "meta": {
+    "version": "0.2.0",
+  },
+  "pageConfig": undefined,
+  "seed": 7,
+  "time": 0,
+}
+`;

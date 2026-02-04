@@ -1,13 +1,16 @@
 # @flux-lang/cli
 
-Command-line tools for the **Flux** score language.
+Command-line tools for the **Flux** evolving document language.
 
 This package provides the `flux` binary, built on top of `@flux-lang/core`, with:
 
 - `flux parse` – parse Flux source files and print their IR as JSON.
 - `flux check` – parse + run basic static checks (grids, neighbors, timers).
+- `flux render` – render a Flux document to canonical Render IR.
+- `flux tick` – advance time and render updated IR.
+- `flux step` – advance docsteps and render updated IR.
 
-Flux is a small, declarative language for **procedurally evolving music scores and parts**. See the main repo for the full IR and language spec.
+Flux is a small, declarative language for **deterministically evolving documents**. See the main repo for the full IR and language spec.
 
 ---
 
@@ -118,6 +121,41 @@ This emits one JSON line per input file:
 
 ---
 
+### `flux render`
+
+Render a `.flux` file to the canonical Render IR JSON:
+
+```bash
+flux render --format ir --seed 123 --time 10 --docstep 2 example.flux
+```
+
+Key options:
+
+* `--format ir` – output the Render IR (required, only format today).
+* `--seed N` – deterministic RNG seed (default: `0`).
+* `--time T` – render time in seconds (default: `0`).
+* `--docstep D` – render docstep index (default: `0`).
+
+---
+
+### `flux tick`
+
+Advance time and render updated IR:
+
+```bash
+flux tick --seconds 5 example.flux
+```
+
+---
+
+### `flux step`
+
+Advance docsteps and render updated IR:
+
+```bash
+flux step --n 3 example.flux
+```
+
 ## Using with npm scripts / CI
 
 Example `package.json` snippets:
@@ -145,7 +183,8 @@ and treat a non-zero exit code as a failure.
 
 `@flux-lang/cli` is a thin wrapper around `@flux-lang/core`:
 
-* `flux parse` calls `parseDocument` and prints the `FluxDocument` IR.
+* `flux parse` calls `parseDocument` and prints the `FluxDocument` AST IR.
+* `flux render` uses `renderDocument` and prints the `RenderDocument` IR.
 * `flux check` uses both the parser and `checkDocument` to validate documents.
 
 If you want to embed Flux directly in a tool or runtime, prefer `@flux-lang/core`. If you want to wire Flux into scripts, CI, or quick local checks, use `@flux-lang/cli`.

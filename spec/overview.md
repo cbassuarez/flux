@@ -1,10 +1,10 @@
-# Flux Language Overview (v0.1.0)
+# Flux Language Overview (v0.2.0)
 
-Flux is a domain-specific language for **live, evolving scores**.
+Flux is a domain-specific language for **evolving documents** (scores, instructions, media layouts, and performance artifacts).
 
-A Flux document describes a score as a **stateful system** rather than a fixed artifact. The score’s visible notation, instructions, and media references emerge from an internal state that updates over **document steps (docsteps)** and **events** (performer input, sensors, transport, etc.). Performers read the current “frame” of the score while their actions can, in turn, modify that score.
+A Flux document describes a document as a **stateful system** rather than a fixed artifact. The document’s visible content and media references can re-evaluate on load and over time, producing a sequence of deterministic “frames” without arbitrary code execution.
 
-Flux v0.1.0 is intentionally small and opinionated: a compact semantic kernel with a neutral, text-based DSL and a clear runtime model. It is designed to be embedded in tools and viewers, exported to other notations (e.g. LaTeX/PDF), and analyzed as a language in its own right.
+Flux v0.2.0 keeps the v0.1 kernel for backward compatibility while adding a **document body tree**, an **assets system**, and **refresh policies** for controlled re-evaluation. It is designed to be embedded in tools and viewers, exported to other notations (e.g. LaTeX/PDF), and analyzed as a language in its own right.
 
 ## Core concepts
 
@@ -13,11 +13,11 @@ Flux v0.1.0 is intentionally small and opinionated: a compact semantic kernel wi
 A Flux document is a single `.flux` file parsed into a `FluxDocument` AST. It contains:
 
 - **Meta**: human-readable metadata and the **language version** (semver).
-- **State**: a set of typed parameters (`param`) that describe global score state (tempo, density, docstep, etc.).
+- **State**: a set of typed parameters (`param`) that describe global document state (tempo, density, docstep, etc.).
 - **Page configuration**: page size and units.
-- **Grids**: collections of **cells** arranged in a chosen topology (grid, linear, graph, spatial).
-- **Rules**: local transformation rules that update cells and global params over time.
-- **Runtime config**: how docsteps advance and how events are applied.
+- **Assets**: named assets and banks (e.g. images, audio, videos).
+- **Body**: a document tree of pages and layout/content nodes.
+- **Legacy grids/rules/runtime**: v0.1 score mechanics preserved for compatibility.
 
 ### State and parameters
 
@@ -32,7 +32,46 @@ Parameters live in a single global map (`params`) accessible from rules. When ru
 
 A special parameter `docstep` is typically used to track document time, but it is not reserved by the language; it is declared like any other param.
 
-### Grids and cells
+### Assets
+
+The `assets` block declares individual assets and banks:
+
+- **asset**: `asset <name> { kind=...; path="..."; tags=[...]; weight=...; meta { ... } }`
+- **bank**: `bank <name> { kind=...; root="..."; include="glob"; tags=[...]; strategy="weighted|uniform" }`
+
+Assets are resolved deterministically. `assets.pick(...)` selects an asset based on tags and a deterministic seed.
+
+The legacy `materials` block remains supported and is mapped into the assets catalog.
+
+### Body tree
+
+The `body` block defines the document structure:
+
+- **page** is the top-level node type inside `body`.
+- Supported node kinds: `page`, `section`, `row`, `column`, `spacer`, `text`, `image`, `figure`, `table`, `grid`, `slot`, `inline_slot`.
+
+- Live-refresh nodes must be layout-locked inside slots/inline slots with declared `reserve` and `fit` policies to prevent reflow.
+- Each node has an `id`, `props`, optional `refresh`, and child nodes.
+
+### Dynamic properties and refresh
+
+Node properties are **literals** by default, or **dynamic expressions** when prefixed with `@`:
+
+```
+text.content = @"Hello " + params.name;
+image.asset  = @assets.pick(tags=[hero]);
+```
+
+Refresh policies control when a node re-evaluates:
+
+- `onLoad` (default): evaluate once at load.
+- `onDocstep`: re-evaluate when docstep advances.
+- `every(30s)`: re-evaluate on a time interval.
+- `never`: evaluate once and never refresh.
+
+If a node omits `refresh`, it inherits the nearest ancestor refresh policy. If no ancestor sets a policy, the default is `onLoad`.
+
+### Grids and cells (legacy v0.1)
 
 A **grid** is a collection of **cells** with a specified topology:
 
@@ -53,7 +92,7 @@ Each cell has:
 
 Flux treats notation and layout as **surface concerns**. The language focuses on semantic cell behavior; a viewer or backend decides how to engrave or render `content` and media.
 
-### Rules and the rule calculus
+### Rules and the rule calculus (legacy v0.1)
 
 Flux rules describe **local transformations** over cells and parameters. They are:
 
@@ -77,7 +116,7 @@ The rule calculus supports:
 
 There is no looping or recursion; all rules are single-pass local transforms.
 
-### Docsteps and evaluation
+### Docsteps and evaluation (legacy v0.1)
 
 Flux uses **document steps (docsteps)** as the primary time axis for structural changes.
 

@@ -520,6 +520,8 @@ class Parser {
         const rules = [];
         let runtime;
         let materials;
+        let assets;
+        let body;
         while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
             if (this.checkIdentifier("meta")) {
                 const blockMeta = this.parseMetaBlock();
@@ -541,8 +543,14 @@ class Parser {
             else if (this.checkIdentifier("runtime")) {
                 runtime = this.parseRuntimeBlock();
             }
+            else if (this.checkIdentifier("assets")) {
+                assets = this.parseAssetsBlock();
+            }
             else if (this.checkIdentifier("materials")) {
                 materials = this.parseMaterialsBlock();
+            }
+            else if (this.checkIdentifier("body")) {
+                body = this.parseBodyBlock();
             }
             else {
                 const tok = this.peek();
@@ -558,6 +566,8 @@ class Parser {
             rules,
             runtime,
             materials,
+            assets,
+            body,
         };
         return doc;
     }
@@ -994,6 +1004,244 @@ class Parser {
         this.consume(TokenType.RBrace, "Expected '}' after video block");
         return video;
     }
+    // --- Assets (v0.2) ---
+    parseAssetsBlock() {
+        this.expectIdentifier("assets", "Expected 'assets'");
+        this.consume(TokenType.LBrace, "Expected '{' after 'assets'");
+        const assets = [];
+        const banks = [];
+        while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+            if (this.checkIdentifier("asset")) {
+                assets.push(this.parseAssetDecl());
+            }
+            else if (this.checkIdentifier("bank")) {
+                banks.push(this.parseAssetBankDecl());
+            }
+            else {
+                this.skipStatement();
+            }
+        }
+        this.consume(TokenType.RBrace, "Expected '}' after assets block");
+        return { assets, banks };
+    }
+    parseAssetDecl() {
+        this.expectIdentifier("asset", "Expected 'asset'");
+        const nameTok = this.consume(TokenType.Identifier, "Expected asset name");
+        const name = String(nameTok.value);
+        this.consume(TokenType.LBrace, "Expected '{' after asset name");
+        const asset = {
+            name,
+            kind: "",
+            path: "",
+            tags: [],
+        };
+        while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+            if (this.checkIdentifier("kind")) {
+                this.advance();
+                this.consume(TokenType.Equals, "Expected '=' after 'kind'");
+                const tok = this.peek();
+                if (tok.type === TokenType.String || tok.type === TokenType.Identifier) {
+                    this.advance();
+                    asset.kind = String(tok.value ?? tok.lexeme);
+                }
+                else {
+                    throw this.errorAtToken(tok, "Expected kind identifier or string");
+                }
+                this.consumeOptional(TokenType.Semicolon);
+            }
+            else if (this.checkIdentifier("path")) {
+                this.advance();
+                this.consume(TokenType.Equals, "Expected '=' after 'path'");
+                const tok = this.consume(TokenType.String, "Expected string for path");
+                asset.path = String(tok.value);
+                this.consumeOptional(TokenType.Semicolon);
+            }
+            else if (this.checkIdentifier("tags")) {
+                asset.tags = this.parseIdentifierList();
+            }
+            else if (this.checkIdentifier("weight")) {
+                this.advance();
+                this.consume(TokenType.Equals, "Expected '=' after 'weight'");
+                const tok = this.consumeNumber("Expected numeric weight");
+                asset.weight = Number(tok.value);
+                this.consumeOptional(TokenType.Semicolon);
+            }
+            else if (this.checkIdentifier("meta")) {
+                asset.meta = this.parseMetaMapBlock();
+            }
+            else {
+                this.skipStatement();
+            }
+        }
+        this.consume(TokenType.RBrace, "Expected '}' after asset block");
+        return asset;
+    }
+    parseAssetBankDecl() {
+        this.expectIdentifier("bank", "Expected 'bank'");
+        const nameTok = this.consume(TokenType.Identifier, "Expected bank name");
+        const name = String(nameTok.value);
+        this.consume(TokenType.LBrace, "Expected '{' after bank name");
+        const bank = {
+            name,
+            kind: "",
+            root: "",
+            include: "",
+            tags: [],
+        };
+        while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+            if (this.checkIdentifier("kind")) {
+                this.advance();
+                this.consume(TokenType.Equals, "Expected '=' after 'kind'");
+                const tok = this.peek();
+                if (tok.type === TokenType.String || tok.type === TokenType.Identifier) {
+                    this.advance();
+                    bank.kind = String(tok.value ?? tok.lexeme);
+                }
+                else {
+                    throw this.errorAtToken(tok, "Expected kind identifier or string");
+                }
+                this.consumeOptional(TokenType.Semicolon);
+            }
+            else if (this.checkIdentifier("root")) {
+                this.advance();
+                this.consume(TokenType.Equals, "Expected '=' after 'root'");
+                const tok = this.consume(TokenType.String, "Expected string for root");
+                bank.root = String(tok.value);
+                this.consumeOptional(TokenType.Semicolon);
+            }
+            else if (this.checkIdentifier("include")) {
+                this.advance();
+                this.consume(TokenType.Equals, "Expected '=' after 'include'");
+                const tok = this.consume(TokenType.String, "Expected string for include");
+                bank.include = String(tok.value);
+                this.consumeOptional(TokenType.Semicolon);
+            }
+            else if (this.checkIdentifier("tags")) {
+                bank.tags = this.parseIdentifierList();
+            }
+            else if (this.checkIdentifier("strategy")) {
+                this.advance();
+                this.consume(TokenType.Equals, "Expected '=' after 'strategy'");
+                const tok = this.peek();
+                if (tok.type !== TokenType.Identifier && tok.type !== TokenType.String) {
+                    throw this.errorAtToken(tok, "Expected strategy identifier or string");
+                }
+                this.advance();
+                const raw = String(tok.value ?? tok.lexeme);
+                if (raw !== "weighted" && raw !== "uniform") {
+                    throw this.errorAtToken(tok, `Unknown asset strategy '${raw}'`);
+                }
+                bank.strategy = raw;
+                this.consumeOptional(TokenType.Semicolon);
+            }
+            else {
+                this.skipStatement();
+            }
+        }
+        this.consume(TokenType.RBrace, "Expected '}' after bank block");
+        return bank;
+    }
+    parseMetaMapBlock() {
+        this.expectIdentifier("meta", "Expected 'meta'");
+        this.consume(TokenType.LBrace, "Expected '{' after 'meta'");
+        const meta = {};
+        while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+            const keyTok = this.consume(TokenType.Identifier, "Expected meta field name");
+            const key = String(keyTok.value);
+            this.consume(TokenType.Equals, "Expected '=' after meta field name");
+            const value = this.parseValueLiteral();
+            meta[key] = value;
+            this.consumeOptional(TokenType.Semicolon);
+        }
+        this.consume(TokenType.RBrace, "Expected '}' after meta block");
+        return meta;
+    }
+    // --- Body (v0.2) ---
+    parseBodyBlock() {
+        this.expectIdentifier("body", "Expected 'body'");
+        this.consume(TokenType.LBrace, "Expected '{' after 'body'");
+        const nodes = [];
+        while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+            const node = this.parseDocumentNode();
+            if (node.kind !== "page") {
+                throw this.errorAtToken(this.peek(), "Body block must contain page nodes at the top level");
+            }
+            nodes.push(node);
+        }
+        this.consume(TokenType.RBrace, "Expected '}' after body block");
+        return { nodes };
+    }
+    parseDocumentNode() {
+        const kindTok = this.consume(TokenType.Identifier, "Expected node kind");
+        const kind = String(kindTok.value);
+        const idTok = this.consume(TokenType.Identifier, "Expected node id");
+        const id = String(idTok.value);
+        this.consume(TokenType.LBrace, "Expected '{' after node id");
+        const props = {};
+        const children = [];
+        let refresh;
+        while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+            if (this.checkIdentifier("refresh")) {
+                refresh = this.parseRefreshPolicy();
+                continue;
+            }
+            if (this.looksLikeNodeDecl()) {
+                children.push(this.parseDocumentNode());
+                continue;
+            }
+            if (this.check(TokenType.Identifier)) {
+                const keyTok = this.advance();
+                const key = String(keyTok.value);
+                this.consume(TokenType.Equals, "Expected '=' after property name");
+                if (this.match(TokenType.At)) {
+                    const expr = this.parseExpr();
+                    props[key] = { kind: "DynamicValue", expr };
+                }
+                else {
+                    const value = this.parseValueLiteral();
+                    props[key] = { kind: "LiteralValue", value };
+                }
+                this.consumeOptional(TokenType.Semicolon);
+                continue;
+            }
+            this.skipStatement();
+        }
+        this.consume(TokenType.RBrace, "Expected '}' after node block");
+        return { id, kind, props, children, refresh };
+    }
+    parseRefreshPolicy() {
+        this.expectIdentifier("refresh", "Expected 'refresh'");
+        this.consume(TokenType.Equals, "Expected '=' after 'refresh'");
+        if (this.checkIdentifier("onLoad")) {
+            this.advance();
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "onLoad" };
+        }
+        if (this.checkIdentifier("onDocstep")) {
+            this.advance();
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "onDocstep" };
+        }
+        if (this.checkIdentifier("never")) {
+            this.advance();
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "never" };
+        }
+        if (this.checkIdentifier("every")) {
+            this.advance();
+            this.consume(TokenType.LParen, "Expected '(' after 'every'");
+            const { amount, unit } = this.parseDurationSpec();
+            this.consume(TokenType.RParen, "Expected ')' after every(...)");
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "every", amount, unit };
+        }
+        throw this.errorAtToken(this.peek(), "Invalid refresh policy");
+    }
+    looksLikeNodeDecl() {
+        return (this.check(TokenType.Identifier) &&
+            this.peek(1).type === TokenType.Identifier &&
+            this.peek(2).type === TokenType.LBrace);
+    }
     parseIdentifierList() {
         this.advance(); // identifier keyword already checked
         this.consume(TokenType.Equals, "Expected '=' after identifier list key");
@@ -1193,6 +1441,21 @@ class Parser {
                     value: tok.value,
                 };
             }
+            case TokenType.LBracket: {
+                this.advance(); // '['
+                const items = [];
+                if (!this.check(TokenType.RBracket)) {
+                    items.push(this.parseExpr());
+                    while (this.match(TokenType.Comma)) {
+                        items.push(this.parseExpr());
+                    }
+                }
+                this.consume(TokenType.RBracket, "Expected ']' after list literal");
+                return {
+                    kind: "ListExpression",
+                    items,
+                };
+            }
             case TokenType.Identifier: {
                 this.advance();
                 return {
@@ -1224,12 +1487,22 @@ class Parser {
             this.consume(TokenType.RParen, "Expected ')' after argument list");
             return args;
         }
-        args.push(this.parseExpr());
+        args.push(this.parseCallArg());
         while (this.match(TokenType.Comma)) {
-            args.push(this.parseExpr());
+            args.push(this.parseCallArg());
         }
         this.consume(TokenType.RParen, "Expected ')' after argument list");
         return args;
+    }
+    parseCallArg() {
+        if (this.check(TokenType.Identifier) && this.peek(1).type === TokenType.Equals) {
+            const nameTok = this.advance();
+            const name = String(nameTok.value);
+            this.consume(TokenType.Equals, "Expected '=' after argument name");
+            const value = this.parseExpr();
+            return { kind: "NamedArg", name, value };
+        }
+        return this.parseExpr();
     }
     maybeNeighborsCall(callee, args) {
         if (callee.kind === "MemberExpression" &&
@@ -1465,27 +1738,43 @@ class Parser {
             const unitTok = this.advance();
             const raw = String(unitTok.value);
             const lowered = raw.toLowerCase();
-            // seconds
-            if (lowered === "s" ||
-                lowered === "sec" ||
-                lowered === "secs" ||
-                lowered === "second" ||
-                lowered === "seconds") {
-                unit = "s";
-            }
-            // milliseconds
-            else if (lowered === "ms" ||
-                lowered === "millisecond" ||
-                lowered === "milliseconds") {
-                unit = "ms";
-            }
-            // beats (musical)
-            else if (lowered === "beat" || lowered === "beats") {
-                unit = "beats";
-            }
-            else {
+            const unitMap = {
+                s: "s",
+                sec: "s",
+                secs: "s",
+                second: "s",
+                seconds: "s",
+                ms: "ms",
+                millisecond: "ms",
+                milliseconds: "ms",
+                m: "m",
+                min: "m",
+                mins: "m",
+                minute: "m",
+                minutes: "m",
+                h: "h",
+                hr: "h",
+                hrs: "h",
+                hour: "h",
+                hours: "h",
+                beat: "beats",
+                beats: "beats",
+                bar: "bars",
+                bars: "bars",
+                measure: "bars",
+                measures: "bars",
+                sub: "subs",
+                subs: "subs",
+                subdivision: "subs",
+                subdivisions: "subs",
+                tick: "ticks",
+                ticks: "ticks",
+            };
+            const mapped = unitMap[lowered];
+            if (!mapped) {
                 throw this.errorAtToken(unitTok, `Unknown duration unit '${unitTok.lexeme}'`);
             }
+            unit = mapped;
         }
         return { amount, unit };
     }
@@ -1566,6 +1855,38 @@ class Parser {
                 return tok.lexeme;
             default:
                 throw this.errorAtToken(tok, "Expected literal");
+        }
+    }
+    parseValueLiteral() {
+        const tok = this.peek();
+        switch (tok.type) {
+            case TokenType.Int:
+            case TokenType.Float:
+                this.advance();
+                return tok.value;
+            case TokenType.String:
+                this.advance();
+                return tok.value;
+            case TokenType.Bool:
+                this.advance();
+                return tok.value;
+            case TokenType.Identifier:
+                this.advance();
+                return tok.lexeme;
+            case TokenType.LBracket: {
+                this.advance();
+                const items = [];
+                if (!this.check(TokenType.RBracket)) {
+                    items.push(this.parseValueLiteral());
+                    while (this.match(TokenType.Comma)) {
+                        items.push(this.parseValueLiteral());
+                    }
+                }
+                this.consume(TokenType.RBracket, "Expected ']' after list literal");
+                return items;
+            }
+            default:
+                throw this.errorAtToken(tok, "Expected literal value");
         }
     }
     consumeNumber(message) {

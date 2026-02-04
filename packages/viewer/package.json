@@ -1,0 +1,35 @@
+{
+  "name": "@flux-lang/viewer",
+  "version": "0.1.0",
+  "description": "Local web viewer for Flux documents.",
+  "license": "MIT",
+  "author": "Sebastian Suarez-Solis",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "static",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@flux-lang/core": "^0.1.6",
+    "@flux-lang/render-html": "^0.1.0",
+    "@flux-lang/typesetter": "^0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

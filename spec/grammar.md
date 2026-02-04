@@ -1,4 +1,4 @@
-# Flux Grammar (v0.1.0)
+# Flux Grammar (v0.2.0)
 
 This document specifies a minimal grammar for the Flux language using an EBNF-like notation.
 
@@ -32,12 +32,14 @@ Numbers:
 Keywords (reserved):
 
 ```text
-document, meta, state, pageConfig, grid, size, cell, tags, content,
-mediaId, payload, dynamic, density, salience, numericFields,
+document, meta, state, pageConfig, assets, asset, bank, body,
+page, section, row, column, spacer, text, image, figure, table, grid, slot, inline_slot,
+refresh, onLoad, onDocstep, every, never,
+size, cell, tags, content, mediaId, payload, dynamic, density, salience, numericFields,
 param, int, float, bool, string, enum, rule, when, then, else,
-runtime, eventsApply, docstepAdvance, timer, onTransport,
-onRuleRequest, true, false, and, or, not, let, advanceDocstep,
-mode, event, docstep, timer, topology, page, input, transport, sensor
+runtime, eventsApply, docstepAdvance, timer, onTransport, onRuleRequest,
+true, false, and, or, not, let, advanceDocstep, mode, event, docstep, timer,
+topology, input, transport, sensor
 ````
 
 Operators and punctuation:
@@ -61,7 +63,8 @@ Operators and punctuation:
 Document      ::= "document" "{" DocumentBody "}"
 
 DocumentBody  ::= { MetaBlock | StateBlock | PageConfigBlock
-                   | GridBlock | RuleDecl | RuntimeBlock }
+                   | AssetsBlock | BodyBlock
+                   | GridBlock | RuleDecl | RuntimeBlock | MaterialsBlock }
 
 MetaBlock     ::= "meta" "{" { MetaField } "}"
 MetaField     ::= IDENT "=" STRING ";"
@@ -98,7 +101,79 @@ PageSizeField   ::= "width"  "=" NUMBER ";"
 
 Units are implementation-defined strings (e.g. `"mm"`, `"pt"`, `"px"`).
 
-## 5. Grids and cells
+## 5. Assets (v0.2)
+
+```ebnf
+AssetsBlock ::= "assets" "{" { AssetDecl | BankDecl } "}"
+
+AssetDecl   ::= "asset" IDENT "{" { AssetField } "}"
+AssetField  ::= "kind" "=" IDENT ";"
+             | "path" "=" STRING ";"
+             | "tags" "=" "[" IdentList? "]" ";"
+             | "weight" "=" NUMBER ";"
+             | MetaMap
+
+BankDecl    ::= "bank" IDENT "{" { BankField } "}"
+BankField   ::= "kind" "=" IDENT ";"
+             | "root" "=" STRING ";"
+             | "include" "=" STRING ";"
+             | "tags" "=" "[" IdentList? "]" ";"
+             | "strategy" "=" IDENT ";"  // "weighted" | "uniform"
+
+MetaMap     ::= "meta" "{" { IDENT "=" Literal ";" } "}"
+```
+
+`materials { ... }` is a legacy alias that is preserved for compatibility. See §11.
+
+## 6. Document body (v0.2)
+
+```ebnf
+BodyBlock   ::= "body" "{" { PageNode } "}"
+
+PageNode    ::= "page" IDENT NodeBlock
+
+NodeBlock   ::= "{" { NodeItem } "}"
+NodeItem    ::= NodeDecl | RefreshField | PropField
+
+NodeDecl    ::= NodeKind IDENT NodeBlock
+NodeKind    ::= "page" | "section" | "row" | "column" | "spacer"
+             | "text" | "image" | "figure" | "table" | "grid" | "slot" | "inline_slot"
+
+RefreshField ::= "refresh" "=" RefreshPolicy ";"
+RefreshPolicy ::= "onLoad" | "onDocstep" | "never" | "every" "(" Duration ")"
+
+PropField   ::= IDENT "=" Value ";"
+Value       ::= Literal | ListLiteral | "@" Expr
+```
+
+If a node omits `refresh`, it inherits the nearest ancestor refresh policy.
+If no ancestor defines a refresh policy, the default is `onLoad`.
+
+### Slot constraints (layout-locked)
+
+Slots and inline slots reserve geometry and must declare a fit policy:
+
+```ebnf
+SlotReserve ::= "fixed" "(" NUMBER "," NUMBER "," IDENT ")"
+InlineSlotReserve ::= "fixedWidth" "(" NUMBER "," IDENT ")"
+SlotFit ::= "clip" | "ellipsis" | "shrink" | "scaleDown"
+```
+
+Slots are expected to provide:
+
+```
+slot mySlot {
+  reserve = fixed(200, 80, px);
+  fit = clip;
+}
+
+inline_slot word {
+  reserve = fixedWidth(120, px);
+  fit = ellipsis;
+}
+```
+
+## 7. Grids and cells (v0.1 legacy)
 
 ```ebnf
 GridBlock    ::= "grid" IDENT "{" GridBody "}"
@@ -178,7 +253,7 @@ StringList         ::= STRING { "," STRING }
 NumberList         ::= NUMBER { "," NUMBER }
 ```
 
-## 6. Rules
+## 8. Rules
 
 ```ebnf
 RuleDecl    ::= "rule" IDENT "(" RuleHeaderArgs? ")" "{" RuleBody "}"
@@ -193,17 +268,17 @@ RuleMode    ::= "docstep" | "event" | "timer"
 RuleBody    ::= "when" BoolExpr "then" Block [ "else" Block ]
 ```
 
-`Block` and expressions/statements are defined in §7.
+`Block` and expressions/statements are defined in §9.
 
-## 7. Expressions and statements
+## 9. Expressions and statements
 
-### 7.1 Literals
+### 9.1 Literals
 
 ```ebnf
-Literal     ::= NUMBER | STRING | BOOL
+Literal     ::= NUMBER | STRING | BOOL | IDENT
 ```
 
-### 7.2 Expressions
+### 9.2 Expressions
 
 ```ebnf
 Expr        ::= OrExpr
@@ -220,20 +295,24 @@ UnaryExpr   ::= ("not" | "-") UnaryExpr
               | Primary
 
 Primary     ::= Literal
+              | ListLiteral
               | IDENT
               | MemberExpr
               | CallExpr
               | "(" Expr ")"
 
+ListLiteral ::= "[" [ Expr { "," Expr } ] "]"
+
 MemberExpr  ::= Primary "." IDENT
 
-CallExpr    ::= IDENT "(" ArgList? ")"
-ArgList     ::= Expr { "," Expr }
+CallExpr    ::= (IDENT | MemberExpr) "(" ArgList? ")"
+ArgList     ::= CallArg { "," CallArg }
+CallArg     ::= Expr | IDENT "=" Expr
 ```
 
-The set of built-in function names is defined by the standard library (e.g. `choice`, `random`, `mean`, `clamp`, `lerp`, `neighbors.withTag`, etc.). Implementations MUST distinguish user identifiers from built-ins.
+The set of built-in function names is defined by the standard library (e.g. `choose`, `assets.pick`, `now`, `timeSeconds`, `stableHash`). Implementations MUST distinguish user identifiers from built-ins.
 
-### 7.3 Statements and blocks
+### 9.3 Statements and blocks
 
 ```ebnf
 Block       ::= "{" { Statement } "}"
@@ -257,7 +336,7 @@ ExprStmt        ::= Expr ";"
 
 Assignments to `cell`, `params`, and their fields are performed via member expressions (e.g. `cell.content = ...;`, `params.tempo = params.tempo + 1;`).
 
-## 8. Runtime configuration
+## 10. Runtime configuration
 
 ```ebnf
 RuntimeBlock  ::= "runtime" "{" { RuntimeField } "}"
@@ -276,4 +355,34 @@ AdvanceSpec         ::= "timer" "(" NUMBER "s" ")"
                       | "onRuleRequest" "(" STRING ")"
 ```
 
-This grammar defines the minimal syntax for Flux v0.1. Semantics and error handling are described in `spec/semantics.md`.
+## 11. Materials (legacy)
+
+```ebnf
+MaterialsBlock ::= "materials" "{" { MaterialDecl } "}"
+MaterialDecl   ::= "material" IDENT "{" { MaterialField } "}"
+
+MaterialField  ::= "tags" "=" "[" IdentList? "]" ";"
+                | "label" "=" STRING ";"
+                | "description" "=" STRING ";"
+                | "color" "=" STRING ";"
+                | ScoreBlock | MidiBlock | VideoBlock
+
+ScoreBlock     ::= "score" "{" { ScoreField } "}"
+ScoreField     ::= "text" "=" STRING ";"
+                | "staff" "=" STRING ";"
+                | "clef" "=" STRING ";"
+
+MidiBlock      ::= "midi" "{" { MidiField } "}"
+MidiField      ::= "channel" "=" NUMBER ";"
+                | "pitch" "=" NUMBER ";"
+                | "velocity" "=" NUMBER ";"
+                | "durationSeconds" "=" NUMBER ";"
+
+VideoBlock     ::= "video" "{" { VideoField } "}"
+VideoField     ::= "clip" "=" STRING ";"
+                | "inSeconds" "=" NUMBER ";"
+                | "outSeconds" "=" NUMBER ";"
+                | "layer" "=" STRING ";"
+```
+
+This grammar defines the minimal syntax for Flux v0.2 with v0.1 legacy constructs preserved. Semantics and error handling are described in `spec/semantics.md`.

@@ -222,6 +222,33 @@ export interface MaterialsBlock {
     materials: Material[];
 }
 
+// Assets (v0.2)
+
+export type AssetStrategy = "weighted" | "uniform";
+
+export interface AssetDefinition {
+  name: string;
+  kind: string;
+  path: string;
+  tags: string[];
+  weight?: number;
+  meta?: Record<string, FluxValueLiteral>;
+}
+
+export interface AssetBank {
+  name: string;
+  kind: string;
+  root: string;
+  include: string;
+  tags: string[];
+  strategy?: AssetStrategy;
+}
+
+export interface AssetsBlock {
+  assets: AssetDefinition[];
+  banks: AssetBank[];
+}
+
 // Rule calculus AST
 
 export type RuleMode = "docstep" | "event" | "timer";
@@ -255,6 +282,11 @@ export interface LiteralExpr {
   value: FluxLiteralValue;
 }
 
+export interface ListExpr {
+  kind: "ListExpression";
+  items: FluxExpr[];
+}
+
 export interface IdentifierExpr {
   kind: "Identifier";
   name: string;
@@ -269,7 +301,7 @@ export interface MemberExpr {
 export interface CallExpr {
   kind: "CallExpression";
   callee: FluxExpr;
-  args: FluxExpr[];
+  args: CallArg[];
 }
 
 export interface UnaryExpr {
@@ -289,17 +321,41 @@ export interface NeighborsCallExpr {
     kind: "NeighborsCallExpression";
     namespace: "neighbors";
     method: string;
-    args: FluxExpr[];
+    args: CallArg[];
 }
+
+export interface NamedArg {
+  kind: "NamedArg";
+  name: string;
+  value: FluxExpr;
+}
+
+export type CallArg = FluxExpr | NamedArg;
 
 export type FluxExpr =
     | LiteralExpr
+    | ListExpr
     | IdentifierExpr
     | MemberExpr
     | CallExpr
     | UnaryExpr
     | BinaryExpr
     | NeighborsCallExpr;
+
+// Values for document nodes
+export type FluxValueLiteral = FluxLiteralValue | FluxValueLiteral[];
+
+export interface LiteralValue {
+  kind: "LiteralValue";
+  value: FluxValueLiteral;
+}
+
+export interface DynamicValue {
+  kind: "DynamicValue";
+  expr: FluxExpr;
+}
+
+export type NodePropValue = LiteralValue | DynamicValue;
 
 // Statements
 
@@ -353,6 +409,47 @@ export interface FluxRule {
     elseBranch?: FluxStmt[];
 }
 
+// Document body (v0.2)
+
+export type RefreshPolicyKind = "onLoad" | "onDocstep" | "never" | "every";
+
+export interface RefreshPolicyBase {
+  kind: "onLoad" | "onDocstep" | "never";
+}
+
+export interface RefreshEveryPolicy {
+  kind: "every";
+  amount: number;
+  unit: TimerUnit;
+}
+
+export type RefreshPolicy = RefreshPolicyBase | RefreshEveryPolicy;
+
+export type NodeKind =
+  | "page"
+  | "section"
+  | "row"
+  | "column"
+  | "spacer"
+  | "text"
+  | "image"
+  | "figure"
+  | "table"
+  | "grid"
+  | "slot";
+
+export interface DocumentNode {
+  id: string;
+  kind: NodeKind | string;
+  props: Record<string, NodePropValue>;
+  children: DocumentNode[];
+  refresh?: RefreshPolicy;
+}
+
+export interface BodyBlock {
+  nodes: DocumentNode[];
+}
+
 // Document
 
 export interface FluxDocument {
@@ -363,4 +460,6 @@ export interface FluxDocument {
   rules: FluxRule[];
   runtime?: FluxRuntimeConfig;
   materials?: MaterialsBlock | null;
+  assets?: AssetsBlock | null;
+  body?: BodyBlock | null;
 }

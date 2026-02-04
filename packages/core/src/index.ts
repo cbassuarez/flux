@@ -7,6 +7,21 @@ export * from "./ast.js";
 // Parser
 export { parseDocument } from "./parser.js";
 
+// Render IR (v0.2)
+export type {
+  RenderDocument,
+  RenderNode,
+  RenderValue,
+  RenderAsset,
+  RenderAssetRef,
+  RenderGridData,
+  RenderGridCell,
+  RenderOptions,
+  DocumentRuntime,
+  AssetResolver,
+} from "./render.js";
+export { createDocumentRuntime, renderDocument } from "./render.js";
+
 // Runtime types (runtime's FluxEvent stays internal for now)
 export type { RuntimeState, GridRuntimeState, NeighborRef, NeighborsNamespace } from "./runtime/model.js";
 

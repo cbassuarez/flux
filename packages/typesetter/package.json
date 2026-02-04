@@ -1,0 +1,30 @@
+{
+  "name": "@flux-lang/typesetter",
+  "version": "0.1.0",
+  "description": "Typesetting backends for Flux HTML rendering.",
+  "license": "MIT",
+  "author": "Sebastian Suarez-Solis",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "playwright": "^1.50.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
