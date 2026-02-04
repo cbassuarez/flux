@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import { getViewerJs, noCacheHeaders } from "../src/index";
 
 describe("viewer client updates", () => {
-  it("wires SSE updates and applies incoming IR", () => {
+  it("wires SSE updates and applies incoming patches", () => {
     const js = getViewerJs();
     expect(js).toContain("new EventSource");
     expect(js).toContain("/api/stream");
     expect(js).toContain("sse.onmessage");
-    expect(js).toContain("applyIrPayload");
+    expect(js).toContain("applyPatchPayload");
+    expect(js).toContain("slotPatches");
   });
 
   it("falls back to polling with no-store fetch", () => {
@@ -15,6 +16,7 @@ describe("viewer client updates", () => {
     expect(js).toContain("sse.onerror");
     expect(js).toContain("startPolling");
     expect(js).toContain('cache: "no-store"');
+    expect(js).toContain("/api/patches");
   });
 });
 

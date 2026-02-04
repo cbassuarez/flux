@@ -41,6 +41,20 @@ export function scaleDownToFit(container, inner) {
     inner.style.transform = `scale(${scale})`;
     return scale;
 }
+export function applySlotPatches(root, slotPatches) {
+    const missing = [];
+    for (const [id, html] of Object.entries(slotPatches)) {
+        const selector = `[data-flux-id="${escapeSelector(id)}"]`;
+        const slot = root.querySelector(selector);
+        if (!slot) {
+            missing.push(id);
+            continue;
+        }
+        const inner = slot.querySelector("[data-flux-slot-inner]") || slot.querySelector(".flux-slot-inner") || slot;
+        inner.innerHTML = html ?? "";
+    }
+    return missing;
+}
 function collect(node, map) {
     if (node.kind === "slot" || node.kind === "inline_slot") {
         map.set(node.nodeId, JSON.stringify(node));
@@ -51,5 +65,11 @@ function collect(node, map) {
 }
 function fitsWithin(container, inner) {
     return inner.scrollWidth <= container.clientWidth && inner.scrollHeight <= container.clientHeight;
+}
+function escapeSelector(value) {
+    const css = globalThis.CSS;
+    if (css && typeof css.escape === "function")
+        return css.escape(value);
+    return value.replace(/[\"\\\\]/g, "\\\\$&");
 }
 //# sourceMappingURL=patching.js.map

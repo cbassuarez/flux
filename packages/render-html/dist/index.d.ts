@@ -32,4 +32,5 @@ export interface RenderHtmlOptions {
     rawUrl?: (raw: string) => string;
 }
 export declare function renderHtml(doc: RenderDocumentIR, options?: RenderHtmlOptions): RenderHtmlResult;
+export declare function renderSlotMap(doc: RenderDocumentIR, options?: RenderHtmlOptions): Record<string, string>;
 //# sourceMappingURL=index.d.ts.map

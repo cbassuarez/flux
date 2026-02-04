@@ -73,6 +73,20 @@ export function renderHtml(doc: RenderDocumentIR, options: RenderHtmlOptions = {
   return { html, css, assets, slots: slotMap };
 }
 
+export function renderSlotMap(doc: RenderDocumentIR, options: RenderHtmlOptions = {}): Record<string, string> {
+  const slotMap: Record<string, string> = {};
+  const renderOptions = {
+    hyphenate: options.hyphenate !== false,
+    slots: slotMap,
+    assetUrl: options.assetUrl,
+    rawUrl: options.rawUrl,
+  };
+  doc.body.forEach((node) => {
+    renderNode(node, renderOptions);
+  });
+  return slotMap;
+}
+
 function buildCss(
   page: { width: number; height: number; units: string },
   margins: { top: number; right: number; bottom: number; left: number; units: string },
@@ -321,7 +335,7 @@ function renderSlot(
   const style = styleParts.length ? ` style="${styleParts.join(";")}"` : "";
   const fitClass = fit ? ` flux-fit-${fit}` : "";
   const className = inline ? `flux-inline-slot${fitClass}` : `flux-slot${fitClass}`;
-  return `<${inline ? "span" : "div"} class="${className}" ${attrs}${style}><div class="flux-slot-inner">${childHtml}</div></${inline ? "span" : "div"}>`;
+  return `<${inline ? "span" : "div"} class="${className}" ${attrs}${style}><div class="flux-slot-inner" data-flux-slot-inner>${childHtml}</div></${inline ? "span" : "div"}>`;
 }
 
 function renderImage(

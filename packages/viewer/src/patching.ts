@@ -45,6 +45,25 @@ export function scaleDownToFit(container: HTMLElement, inner: HTMLElement): numb
   return scale;
 }
 
+export function applySlotPatches(
+  root: { querySelector: (selector: string) => Element | null },
+  slotPatches: Record<string, string>,
+): string[] {
+  const missing: string[] = [];
+  for (const [id, html] of Object.entries(slotPatches)) {
+    const selector = `[data-flux-id="${escapeSelector(id)}"]`;
+    const slot = root.querySelector(selector);
+    if (!slot) {
+      missing.push(id);
+      continue;
+    }
+    const inner =
+      slot.querySelector("[data-flux-slot-inner]") || slot.querySelector(".flux-slot-inner") || slot;
+    (inner as HTMLElement).innerHTML = html ?? "";
+  }
+  return missing;
+}
+
 function collect(node: RenderNodeIR, map: Map<string, string>): void {
   if (node.kind === "slot" || node.kind === "inline_slot") {
     map.set(node.nodeId, JSON.stringify(node));
@@ -56,4 +75,10 @@ function collect(node: RenderNodeIR, map: Map<string, string>): void {
 
 function fitsWithin(container: HTMLElement, inner: HTMLElement): boolean {
   return inner.scrollWidth <= container.clientWidth && inner.scrollHeight <= container.clientHeight;
+}
+
+function escapeSelector(value: string): string {
+  const css = (globalThis as any).CSS;
+  if (css && typeof css.escape === "function") return css.escape(value);
+  return value.replace(/[\"\\\\]/g, "\\\\$&");
 }

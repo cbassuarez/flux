@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseDocument, renderDocumentIR } from "@flux-lang/core";
-import { renderHtml } from "../src/index";
+import { renderHtml, renderSlotMap } from "../src/index";
 
 describe("render-html", () => {
   it("renders stable data-flux-id attributes", () => {
@@ -74,5 +74,40 @@ describe("render-html", () => {
     expect(html).toContain('class="flux-image"');
     expect(css).toContain(".flux-slot-inner > .flux-image");
     expect(css).toContain("object-fit: contain");
+  });
+
+  it("builds slot inner HTML for inline slots and images", () => {
+    const src = `
+      document {
+        meta { version = "0.2.0"; }
+        assets {
+          asset hero { kind = image; path = "img/hero.png"; tags = [ hero ]; }
+        }
+        body {
+          page p1 {
+            text line {
+              inline_slot word {
+                text t1 { content = "Live <tag>"; }
+              }
+            }
+            slot hero {
+              reserve = fixed(200, 80, px);
+              image heroImg { asset = @assets.pick(tags=["hero"]); }
+            }
+          }
+        }
+      }
+    `;
+    const doc = parseDocument(src);
+    const ir = renderDocumentIR(doc, { seed: 1 });
+    const assetId = ir.assets[0]?.id ?? "";
+    const slots = renderSlotMap(ir, { assetUrl: (id) => `/assets/${id}` });
+    const inlineEntry = Object.entries(slots).find(([key]) => key.includes("inline_slot"));
+    expect(inlineEntry).toBeTruthy();
+    expect(inlineEntry?.[1]).toContain("Live &lt;tag&gt;");
+    const heroEntry = Object.entries(slots).find(([key]) => key.includes("slot:hero"));
+    expect(heroEntry).toBeTruthy();
+    expect(heroEntry?.[1]).toContain("<img");
+    expect(heroEntry?.[1]).toContain(`src="/assets/${assetId}"`);
   });
 });

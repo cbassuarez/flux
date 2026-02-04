@@ -36,3 +36,5 @@ export interface RenderHtmlOptions {
 }
 
 export function renderHtml(doc: RenderDocumentIR, options?: RenderHtmlOptions): RenderHtmlResult;
+
+export function renderSlotMap(doc: RenderDocumentIR, options?: RenderHtmlOptions): Record<string, string>;
