@@ -60,6 +60,45 @@ describe("Flux render IR v0.2", () => {
     expect(v3).toBe("a");
   });
 
+  it("evaluates helper functions deterministically", () => {
+    const src = `
+      document {
+        meta { version = "0.2.0"; }
+        body {
+          page p1 {
+            section helpers {
+              dataCycle = @cycle(["a", "b", "c"]);
+              dataHash = @hashpick(["x", "y", "z"], "key-42");
+              dataPhase = @phase(2.25);
+              dataLerp = @lerp(10, 20, 0.25);
+              dataShuffle = @shuffle([1, 2, 3, 4]);
+              dataSample = @sample([1, 2, 3, 4], 2);
+            }
+          }
+        }
+      }
+    `;
+    const doc = parseDocument(src);
+    const first = renderDocument(doc, { seed: 123, docstep: 5, time: 2.25 });
+    const second = renderDocument(doc, { seed: 123, docstep: 5, time: 2.25 });
+    expect(second).toEqual(first);
+
+    const helpers = findNodeById(first.body, "helpers");
+    expect(helpers?.props?.dataCycle).toBe("c");
+    expect(helpers?.props?.dataPhase).toBeCloseTo(0.25);
+    expect(helpers?.props?.dataLerp).toBeCloseTo(12.5);
+
+    const shuffled = helpers?.props?.dataShuffle as number[];
+    expect(Array.isArray(shuffled)).toBe(true);
+    expect(shuffled).toHaveLength(4);
+    expect(shuffled.sort()).toEqual([1, 2, 3, 4]);
+
+    const sample = helpers?.props?.dataSample as number[];
+    expect(Array.isArray(sample)).toBe(true);
+    expect(sample).toHaveLength(2);
+    sample.forEach((value) => expect([1, 2, 3, 4]).toContain(value));
+  });
+
   it("chooseStep rejects empty lists", () => {
     const src = `
       document {
