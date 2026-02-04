@@ -4,7 +4,6 @@ import {
   Text,
   useInput,
   useApp,
-  useStdoutDimensions,
   measureElement,
 } from "ink";
 import path from "node:path";
@@ -81,7 +80,7 @@ export function App(props: AppProps) {
   const [fluxFiles, setFluxFiles] = useState<string[]>([]);
   const listRef = useRef<any>(null);
   const [listBounds, setListBounds] = useState<{ y: number; height: number } | null>(null);
-  const [cols] = useStdoutDimensions();
+  const [cols, setCols] = useState(() => process.stdout.columns ?? 80);
 
   useEffect(() => {
     void refreshRecents();
@@ -90,10 +89,18 @@ export function App(props: AppProps) {
   }, [props.cwd]);
 
   useEffect(() => {
+    const stdout = process.stdout;
+    if (!stdout?.on) return;
+    const handleResize = () => setCols(stdout.columns ?? 80);
+    stdout.on("resize", handleResize);
+    return () => stdout.off("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
     if (!listRef.current) return;
     try {
-      const bounds = measureElement(listRef.current);
-      setListBounds({ y: bounds.y, height: bounds.height });
+      const bounds = measureElement(listRef.current) as { y?: number; height?: number };
+      setListBounds({ y: bounds.y ?? 0, height: bounds.height ?? 0 });
     } catch {
       // ignore
     }
@@ -142,25 +149,25 @@ export function App(props: AppProps) {
   }, [viewerSession, props.detach]);
 
   useInput(async (input, key) => {
-    if (key.ctrl && key.name === "c") {
+    if (key.ctrl && input === "c") {
       exit();
       return;
     }
 
     if (prompt) {
-      if (key.name === "escape") {
+      if (key.escape) {
         setPrompt(null);
         setPromptValue("");
         return;
       }
-      if (key.name === "return") {
+      if (key.return) {
         const value = promptValue;
         setPrompt(null);
         setPromptValue("");
         await prompt.onSubmit(value);
         return;
       }
-      if (key.name === "backspace" || key.name === "delete") {
+      if (key.backspace || key.delete) {
         setPromptValue((prev) => prev.slice(0, -1));
         return;
       }
@@ -171,13 +178,13 @@ export function App(props: AppProps) {
     }
 
     if (paletteOpen) {
-      if (key.name === "escape") {
+      if (key.escape) {
         setPaletteOpen(false);
         setPaletteQuery("");
         setPaletteIndex(0);
         return;
       }
-      if (key.name === "return") {
+      if (key.return) {
         const items = filteredPalette;
         const item = items[paletteIndex];
         if (item) {
@@ -196,7 +203,7 @@ export function App(props: AppProps) {
         setPaletteIndex((prev) => Math.max(prev - 1, 0));
         return;
       }
-      if (key.name === "backspace" || key.name === "delete") {
+      if (key.backspace || key.delete) {
         setPaletteQuery((prev) => prev.slice(0, -1));
         return;
       }
@@ -206,7 +213,7 @@ export function App(props: AppProps) {
       return;
     }
 
-    if (key.ctrl && key.name === "k") {
+    if (key.ctrl && input === "k") {
       setPaletteOpen(true);
       return;
     }
@@ -216,11 +223,11 @@ export function App(props: AppProps) {
     }
 
     if (wizardOpen) {
-      if (key.name === "escape") {
+      if (key.escape) {
         setWizardOpen(false);
         return;
       }
-      if (key.name === "return") {
+      if (key.return) {
         await advanceWizard();
         return;
       }
@@ -352,7 +359,7 @@ export function App(props: AppProps) {
       setSelectedIndex((prev) => Math.max(prev - 1, 0));
       return;
     }
-    if (key.name === "return") {
+    if (key.return) {
       const item = navItems[selectedIndex];
       if (item) await activateNavItem(item);
       return;
@@ -433,7 +440,7 @@ export function App(props: AppProps) {
       lastOpened: entry.lastOpened,
     }));
     setRecents(list);
-    if (!activeDoc && list.length) {
+    if (!activeDoc && list.length && list[0].type === "doc") {
       setActiveDoc(list[0].path);
     }
   }
@@ -1023,9 +1030,14 @@ async function copyToClipboard(value: string): Promise<boolean> {
 
 async function walk(dir: string, out: string[], depth: number): Promise<void> {
   if (depth < 0) return;
-  let entries: Awaited<ReturnType<typeof fs.readdir>>;
+  type WalkEntry = {
+    name: string;
+    isDirectory: () => boolean;
+    isFile: () => boolean;
+  };
+  let entries: WalkEntry[];
   try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
+    entries = (await fs.readdir(dir, { withFileTypes: true, encoding: "utf8" })) as WalkEntry[];
   } catch {
     return;
   }
