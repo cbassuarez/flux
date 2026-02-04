@@ -41,35 +41,57 @@ describe("flux CLI", () => {
         expect(stdout).toBe(pretty);
     });
 
-it("flux check reports a missing grid reference and non-zero exit code", async () => {
-    const fixture = resolve(
-      CLI_ROOT,
-      "test",
-      "fixtures",
-      "missing-grid.flux",
-    );
+    it("flux parse/check succeed for viewer-demo", async () => {
+        const fixture = resolve(CLI_ROOT, "..", "..", "examples", "viewer-demo.flux");
 
-    const { stdout, stderr, exitCode } = await execa(
-        "node",
-        [CLI_BIN, "check", fixture],
-        {
+        const parseResult = await execa("node", [CLI_BIN, "parse", fixture], {
             reject: false,
             stripFinalNewline: false,
-        },
-    );
+        });
 
-    expect(exitCode).toBe(1);
+        expect(parseResult.exitCode).toBe(0);
+        expect(parseResult.stderr).toBe("");
+        expect(parseResult.stdout).toContain("\"title\": \"Flux Viewer Demo\"");
 
-    // Summary on stdout
-    expect(stdout).toBe("✗ 1 of 1 files failed checks\n");
+        const checkResult = await execa("node", [CLI_BIN, "check", fixture], {
+            reject: false,
+            stripFinalNewline: false,
+        });
 
-    // Diagnostic on stderr; path prefix may vary, but the tail should match.
-    expect(
-      stderr.trim().endsWith(
-        "missing-grid.flux:0:0: Check error: Rule 'growNoise' references unknown grid 'main'",
-      ),
-    ).toBe(true);
-  });
+        expect(checkResult.exitCode).toBe(0);
+        expect(checkResult.stderr).toBe("");
+        expect(checkResult.stdout).toBe("✓ 1 files OK\n");
+    });
+
+    it("flux check reports a missing grid reference and non-zero exit code", async () => {
+        const fixture = resolve(
+            CLI_ROOT,
+            "test",
+            "fixtures",
+            "missing-grid.flux",
+        );
+
+        const { stdout, stderr, exitCode } = await execa(
+            "node",
+            [CLI_BIN, "check", fixture],
+            {
+                reject: false,
+                stripFinalNewline: false,
+            },
+        );
+
+        expect(exitCode).toBe(1);
+
+        // Summary on stdout
+        expect(stdout).toBe("✗ 1 of 1 files failed checks\n");
+
+        // Diagnostic on stderr; path prefix may vary, but the tail should match.
+        expect(
+            stderr.trim().endsWith(
+                "missing-grid.flux:0:0: Check error: Rule 'growNoise' references unknown grid 'main'",
+            ),
+        ).toBe(true);
+    });
 
     it("flux render outputs Render IR with seed/time/docstep", async () => {
         const fixture = resolve(CLI_ROOT, "test", "fixtures", "doc-v0_2.flux");

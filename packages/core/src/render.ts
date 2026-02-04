@@ -548,6 +548,8 @@ function renderNode(
       assets: ctx.assets,
       refreshKey,
       nodePath,
+      nodeId: node.id,
+      nodeKind: node.kind,
     });
     cache.set(nodePath, { refreshKey, time: evalTime, docstep: evalDocstep, props });
   } else {
@@ -585,6 +587,8 @@ function resolveProps(
     assets: ResolvedAsset[];
     refreshKey: number;
     nodePath: string;
+    nodeId: string;
+    nodeKind: string;
   },
 ): Record<string, RenderValue> {
   const resolved: Record<string, RenderValue> = {};
@@ -604,8 +608,19 @@ function resolveProps(
       propSeed,
       assets: ctx.assets,
     };
-    const exprValue = evalExpr(value.expr, evalCtx);
-    resolved[key] = toRenderValue(exprValue);
+    try {
+      const exprValue = evalExpr(value.expr, evalCtx);
+      resolved[key] = toRenderValue(exprValue);
+    } catch (error) {
+      const detail = (error as Error)?.message ?? String(error);
+      const contextParts = [
+        ctx.nodeId ? `node '${ctx.nodeId}'` : "",
+        ctx.nodeKind ? `kind '${ctx.nodeKind}'` : "",
+        `prop '${key}'`,
+      ].filter(Boolean);
+      const context = contextParts.length ? ` (${contextParts.join(", ")})` : "";
+      throw new Error(`${detail}${context}`);
+    }
   }
   return resolved;
 }
@@ -835,6 +850,8 @@ function evalMember(objectExpr: any, property: string, ctx: EvalContext): unknow
 }
 
 function evalCall(expr: any, ctx: EvalContext): unknown {
+  // Supported document-expression builtins:
+  // choose, chooseStep, now/timeSeconds, stableHash, assets.pick
   if (expr.callee.kind === "Identifier") {
     const name = expr.callee.name;
     if (name === "choose") {
@@ -861,7 +878,11 @@ function evalCall(expr: any, ctx: EvalContext): unknown {
     return evalAssetsPick(expr.args, ctx);
   }
 
-  throw new Error("Unsupported function call in document expressions");
+  const calleeName = describeCallee(expr.callee) ?? "unknown";
+  const location = formatExprLocation(expr);
+  throw new Error(
+    `Unsupported function call '${calleeName}' in document expressions${location}`,
+  );
 }
 
 function evalCallArgs(args: any[], ctx: EvalContext): {
@@ -899,11 +920,43 @@ function evalChooseStep(args: any[], ctx: EvalContext): unknown {
   if (!Array.isArray(list)) {
     throw new Error("chooseStep(list) expects a list");
   }
-  if (list.length === 0) return null;
+  if (list.length === 0) {
+    throw new Error("chooseStep(list) expects a non-empty list");
+  }
   const offsetRaw = named.offset ?? 0;
   const offset = typeof offsetRaw === "number" && Number.isFinite(offsetRaw) ? offsetRaw : 0;
   const idx = Math.abs(Math.floor(ctx.docstep + offset)) % list.length;
   return list[idx];
+}
+
+function describeCallee(callee: any): string | null {
+  if (!callee) return null;
+  if (callee.kind === "Identifier") return String(callee.name);
+  if (callee.kind === "MemberExpression") {
+    const object = callee.object;
+    const objectName = object?.kind === "Identifier" ? object.name : null;
+    const property = typeof callee.property === "string" ? callee.property : null;
+    if (objectName && property) {
+      return `${objectName}.${property}`;
+    }
+  }
+  return null;
+}
+
+function formatExprLocation(expr: any): string {
+  const loc = expr?.location ?? expr?.loc ?? null;
+  const line =
+    typeof loc?.line === "number" ? loc.line : typeof expr?.line === "number" ? expr.line : null;
+  const column =
+    typeof loc?.column === "number"
+      ? loc.column
+      : typeof expr?.column === "number"
+        ? expr.column
+        : null;
+  if (line != null && column != null) {
+    return ` at ${line}:${column}`;
+  }
+  return "";
 }
 
 function evalAssetsPick(args: any[], ctx: EvalContext): ResolvedAsset | null {
