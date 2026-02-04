@@ -7,6 +7,9 @@ import { parseDocument, createDocumentRuntimeIR } from "@flux-lang/core";
 import { advanceViewerRuntime, startViewerServer } from "../src/index";
 
 describe("viewer server", () => {
+  const networkDisabled = process.env.CODEX_SANDBOX_NETWORK_DISABLED === "1";
+  const itNetwork = networkDisabled ? it.skip : it;
+
   it("advances time and docstep on the wallclock tick", () => {
     const source = `
       document {
@@ -32,7 +35,7 @@ describe("viewer server", () => {
     expect(tick2.ir.time).toBeCloseTo(1, 4);
   });
 
-  it("streams slot patches over SSE", async () => {
+  itNetwork("streams slot patches over SSE", async () => {
     const source = `
       document {
         meta { version = "0.2.0"; }

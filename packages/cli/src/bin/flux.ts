@@ -25,6 +25,18 @@ type ExitCode = 0 | 1 | 2;
 
 const VERSION = "0.2.0";
 
+function parseFlux(source: string, filePath: string | null): FluxDocument {
+    if (!filePath || filePath === "-") {
+        return parseDocument(source);
+    }
+    const resolved = path.resolve(filePath);
+    return parseDocument(source, {
+        sourcePath: resolved,
+        docRoot: path.dirname(resolved),
+        resolveIncludes: true,
+    });
+}
+
 interface ParseOptions {
     ndjson: boolean;
     pretty: boolean;
@@ -354,7 +366,7 @@ async function runParse(args: string[]): Promise<ExitCode> {
         }
 
         try {
-            const doc = parseDocument(source);
+            const doc = parseFlux(source, file);
             docs.push({ file: file === "-" ? "<stdin>" : file, doc });
         } catch (error) {
             const msg = formatParseOrLexerError(file, error);
@@ -423,7 +435,7 @@ async function runCheck(args: string[]): Promise<ExitCode> {
 
         let doc: FluxDocument;
         try {
-            doc = parseDocument(source);
+            doc = parseFlux(source, file);
         } catch (error) {
             const diagnostic = formatParseOrLexerError(file, error);
             results.push({
@@ -559,10 +571,14 @@ async function runRender(args: string[]): Promise<ExitCode> {
 
     let doc: FluxDocument;
     try {
-        doc = parseDocument(source);
+        doc = parseFlux(source, file);
     } catch (error) {
         console.error(formatParseOrLexerError(file, error));
         return 1;
+    }
+
+    if (!doc.meta?.target) {
+        doc = { ...doc, meta: { ...doc.meta, target: "print" } };
     }
 
     const dir = file === "-" ? process.cwd() : path.dirname(path.resolve(file));
@@ -630,7 +646,7 @@ async function runTick(args: string[]): Promise<ExitCode> {
 
     let doc: FluxDocument;
     try {
-        doc = parseDocument(source);
+        doc = parseFlux(source, file);
     } catch (error) {
         console.error(formatParseOrLexerError(file, error));
         return 1;
@@ -692,7 +708,7 @@ async function runStep(args: string[]): Promise<ExitCode> {
 
     let doc: FluxDocument;
     try {
-        doc = parseDocument(source);
+        doc = parseFlux(source, file);
     } catch (error) {
         console.error(formatParseOrLexerError(file, error));
         return 1;
@@ -771,7 +787,7 @@ async function runView(args: string[]): Promise<ExitCode> {
     if (useTty) {
         try {
             const source = await fs.readFile(docPath, "utf8");
-            const doc = parseDocument(source);
+            const doc = parseFlux(source, docPath);
             const runtime = createRuntime(doc, { clock: "manual" });
 
             const labels = new Map<string, string>();
@@ -874,7 +890,7 @@ async function runPdf(args: string[]): Promise<ExitCode> {
 
     let doc: FluxDocument;
     try {
-        doc = parseDocument(source);
+        doc = parseFlux(source, file);
     } catch (error) {
         console.error(formatParseOrLexerError(file, error));
         return 1;

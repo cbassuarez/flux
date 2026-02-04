@@ -45,6 +45,7 @@ export interface RenderNode {
     props: Record<string, RenderValue>;
     children: RenderNode[];
     grid?: RenderGridData;
+    style?: RenderNodeStyle;
 }
 export interface RenderDocument {
     meta: FluxMeta;
@@ -78,6 +79,27 @@ export interface RenderNodeIR {
         fit?: SlotFitPolicy;
     };
     grid?: RenderGridData;
+    style?: RenderNodeStyle;
+    counters?: RenderNodeCounters;
+}
+export interface RenderNodeCounters {
+    section?: string;
+    figure?: number;
+    table?: number;
+    footnote?: number;
+    label?: string;
+    ref?: string;
+}
+export interface RenderStyleDefinition {
+    name: string;
+    className: string;
+    props: Record<string, RenderValue>;
+}
+export interface RenderNodeStyle {
+    name?: string;
+    role?: string;
+    className?: string;
+    inline?: Record<string, RenderValue>;
 }
 export interface RenderDocumentIR {
     meta: FluxMeta;
@@ -87,6 +109,8 @@ export interface RenderDocumentIR {
     pageConfig?: FluxDocument["pageConfig"];
     assets: RenderAsset[];
     body: RenderNodeIR[];
+    theme?: string;
+    styles?: RenderStyleDefinition[];
 }
 export interface RenderOptions {
     seed?: number;

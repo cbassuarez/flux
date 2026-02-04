@@ -26,7 +26,68 @@ export function checkDocument(file, doc) {
             }
         }
     }
+    if (doc.body?.nodes?.length) {
+        const labelMap = new Map();
+        const refCalls = [];
+        const diagnostics = [];
+        const visit = (node) => {
+            const labelProp = node.props?.label;
+            if (labelProp) {
+                if (labelProp.kind !== "LiteralValue" || typeof labelProp.value !== "string") {
+                    diagnostics.push(`${formatNodeLocation(file, node)}: Check error: label must be a literal string`);
+                }
+                else {
+                    const label = labelProp.value;
+                    if (labelMap.has(label)) {
+                        diagnostics.push(`${formatNodeLocation(file, node)}: Check error: duplicate label '${label}'`);
+                    }
+                    else {
+                        labelMap.set(label, node);
+                    }
+                }
+            }
+            const visibleProp = node.props?.visibleIf;
+            if (visibleProp) {
+                if (visibleProp.kind === "LiteralValue") {
+                    if (typeof visibleProp.value !== "boolean") {
+                        diagnostics.push(`${formatNodeLocation(file, node)}: Check error: visibleIf expects a boolean`);
+                    }
+                }
+                else {
+                    const expr = visibleProp.expr;
+                    if (!isBooleanishExpr(expr)) {
+                        diagnostics.push(`${formatNodeLocation(file, node)}: Check error: visibleIf expects a boolean-ish expression`);
+                    }
+                    if (usesDynamicTime(expr)) {
+                        diagnostics.push(`${formatNodeLocation(file, node)}: Check error: visibleIf cannot depend on time/docstep or random helpers`);
+                    }
+                }
+            }
+            for (const prop of Object.values(node.props ?? {})) {
+                collectRefCalls(prop, node, refCalls, diagnostics, file);
+            }
+            for (const child of node.children ?? []) {
+                visit(child);
+            }
+        };
+        for (const node of doc.body.nodes) {
+            visit(node);
+        }
+        for (const ref of refCalls) {
+            if (!labelMap.has(ref.label)) {
+                diagnostics.push(`${formatNodeLocation(file, ref.node)}: Check error: ref('${ref.label}') target not found`);
+            }
+        }
+        errors.push(...diagnostics);
+    }
     return errors;
+}
+function formatNodeLocation(file, node) {
+    const loc = node.loc;
+    if (loc?.line != null && loc?.column != null) {
+        return `${file}:${loc.line}:${loc.column}`;
+    }
+    return `${file}:0:0`;
 }
 function checkRuleExpressions(file, rule, errors) {
     if (rule.condition) {
@@ -107,6 +168,106 @@ function checkStmt(stmt, file, errors) {
             break;
         default:
             // AdvanceDocstepStatement, ExpressionStatement, etc. — nothing to check yet.
+            break;
+    }
+}
+function collectRefCalls(prop, node, refs, diagnostics, file) {
+    if (prop.kind !== "DynamicValue")
+        return;
+    visitExpr(prop.expr, (expr) => {
+        if (expr.kind === "CallExpression" && expr.callee.kind === "Identifier" && expr.callee.name === "ref") {
+            const first = expr.args?.[0];
+            if (first && first.kind === "Literal" && typeof first.value === "string") {
+                refs.push({ label: first.value, node });
+            }
+            else {
+                diagnostics.push(`${formatNodeLocation(file, node)}: Check error: ref() expects a literal string label`);
+            }
+        }
+    });
+}
+function isBooleanishExpr(expr) {
+    switch (expr.kind) {
+        case "Literal":
+            return typeof expr.value === "boolean";
+        case "UnaryExpression":
+            return expr.op === "not" ? isBooleanishExpr(expr.argument) : false;
+        case "BinaryExpression":
+            if (expr.op === "and" || expr.op === "or")
+                return true;
+            if (["==", "!=", "===", "!==", "<", "<=", ">", ">="].includes(expr.op))
+                return true;
+            return false;
+        case "Identifier":
+        case "MemberExpression":
+        case "CallExpression":
+            return true;
+        case "ListExpression":
+            return false;
+        default:
+            return false;
+    }
+}
+function usesDynamicTime(expr) {
+    let found = false;
+    visitExpr(expr, (node) => {
+        if (node.kind === "Identifier") {
+            if (node.name === "time" || node.name === "timeSeconds" || node.name === "docstep") {
+                found = true;
+            }
+        }
+        if (node.kind === "CallExpression") {
+            if (node.callee.kind === "Identifier") {
+                const name = node.callee.name;
+                if (name === "choose" ||
+                    name === "chooseStep" ||
+                    name === "cycle" ||
+                    name === "shuffle" ||
+                    name === "sample" ||
+                    name === "phase" ||
+                    name === "hashpick") {
+                    found = true;
+                }
+            }
+            if (node.callee.kind === "MemberExpression" &&
+                node.callee.object.kind === "Identifier" &&
+                node.callee.object.name === "assets") {
+                found = true;
+            }
+        }
+    });
+    return found;
+}
+function visitExpr(expr, fn) {
+    fn(expr);
+    switch (expr.kind) {
+        case "BinaryExpression":
+            visitExpr(expr.left, fn);
+            visitExpr(expr.right, fn);
+            break;
+        case "UnaryExpression":
+            visitExpr(expr.argument, fn);
+            break;
+        case "MemberExpression":
+            visitExpr(expr.object, fn);
+            break;
+        case "CallExpression":
+            visitExpr(expr.callee, fn);
+            for (const arg of expr.args ?? []) {
+                if (arg.kind === "NamedArg") {
+                    visitExpr(arg.value, fn);
+                }
+                else {
+                    visitExpr(arg, fn);
+                }
+            }
+            break;
+        case "ListExpression":
+            for (const item of expr.items) {
+                visitExpr(item, fn);
+            }
+            break;
+        default:
             break;
     }
 }

@@ -6,6 +6,8 @@ A Flux document describes a document as a **stateful system** rather than a fixe
 
 Flux v0.2.0 keeps the v0.1 kernel for backward compatibility while adding a **document body tree**, an **assets system**, and **refresh policies** for controlled re-evaluation. It is designed to be embedded in tools and viewers, exported to other notations (e.g. LaTeX/PDF), and analyzed as a language in its own right.
 
+v0.3 (preview) extends the document renderer with **rich text nodes**, **named styles + tokens**, **print/screen themes**, **cross-refs**, and **sandboxed includes**. The viewer demo (`examples/viewer-demo.flux`) showcases these additions in a 6-page LaTeX-like layout.
+
 ## Core concepts
 
 ### Document
@@ -48,7 +50,7 @@ The legacy `materials` block remains supported and is mapped into the assets cat
 The `body` block defines the document structure:
 
 - **page** is the top-level node type inside `body`.
-- Supported node kinds: `page`, `section`, `row`, `column`, `spacer`, `text`, `image`, `figure`, `table`, `grid`, `slot`, `inline_slot`.
+- Supported node kinds (v0.3 preview): `page`, `section`, `row`, `column`, `spacer`, `text`, `image`, `figure`, `table`, `grid`, `slot`, `inline_slot`, `blockquote`, `codeblock`, `callout`, `ul`, `ol`, `li`, `hr`, `footnote`, and inline rich-text nodes (`em`, `strong`, `code`, `smallcaps`, `sub`, `sup`, `mark`, `link`, `quote`).
 
 - Live-refresh nodes must be layout-locked inside slots/inline slots with declared `reserve` and `fit` policies to prevent reflow.
 - Each node has an `id`, `props`, optional `refresh`, and child nodes.

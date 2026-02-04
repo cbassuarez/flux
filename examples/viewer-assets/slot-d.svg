@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+  <rect width="320" height="200" fill="#f6f1e8"/>
+  <circle cx="160" cy="100" r="70" fill="#c9d7c8" stroke="#6a7a69" stroke-width="3"/>
+  <text x="160" y="110" text-anchor="middle" font-family="serif" font-size="24" fill="#2f3a30">Slot D</text>
+</svg>

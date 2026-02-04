@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import {
     FluxDocument,
     FluxMeta,
@@ -16,6 +18,10 @@ import {
     AssetsBlock,
     AssetDefinition,
     AssetBank,
+    TokensBlock,
+    StylesBlock,
+    StyleDef,
+    ThemeBlock,
     BodyBlock,
     DocumentNode,
     NodePropValue,
@@ -589,9 +595,11 @@ class Lexer {
 class Parser {
   private tokens: Token[];
   private current = 0;
+  private allowBodyFragments = false;
 
-  constructor(tokens: Token[]) {
+  constructor(tokens: Token[], options: { allowBodyFragments?: boolean } = {}) {
     this.tokens = tokens;
+    this.allowBodyFragments = options.allowBodyFragments ?? false;
   }
 
   parseDocument(): FluxDocument {
@@ -607,6 +615,9 @@ class Parser {
       let runtime: FluxRuntimeConfig | undefined;
       let materials: MaterialsBlock | undefined;
       let assets: AssetsBlock | undefined;
+      let tokens: TokensBlock | undefined;
+      let styles: StylesBlock | undefined;
+      const themes: ThemeBlock[] = [];
       let body: BodyBlock | undefined;
 
       while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
@@ -628,6 +639,12 @@ class Parser {
           assets = this.parseAssetsBlock();
       } else if (this.checkIdentifier("materials")) {
           materials = this.parseMaterialsBlock();
+      } else if (this.checkIdentifier("tokens")) {
+          tokens = this.parseTokensBlock();
+      } else if (this.checkIdentifier("styles")) {
+          styles = this.parseStylesBlock();
+      } else if (this.checkIdentifier("theme")) {
+          themes.push(this.parseThemeBlock());
       } else if (this.checkIdentifier("body")) {
           body = this.parseBodyBlock();
       } else {
@@ -647,6 +664,9 @@ class Parser {
           runtime,
           materials,
           assets,
+          tokens,
+          styles,
+          themes,
           body,
       };
 
@@ -662,8 +682,7 @@ class Parser {
     const meta: FluxMeta = { version: "0.1.0" };
 
     while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
-      const keyTok = this.consume(TokenType.Identifier, "Expected meta field name");
-      const key = String(keyTok.value);
+      const key = this.parseKeyPath("Expected meta field name");
       this.consume(TokenType.Equals, "Expected '=' after meta field name");
       const valueTok = this.consume(TokenType.String, "Expected string value for meta field");
       meta[key] = String(valueTok.value);
@@ -1269,8 +1288,7 @@ class Parser {
 
     const meta: Record<string, any> = {};
     while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
-      const keyTok = this.consume(TokenType.Identifier, "Expected meta field name");
-      const key = String(keyTok.value);
+      const key = this.parseKeyPath("Expected meta field name");
       this.consume(TokenType.Equals, "Expected '=' after meta field name");
       const value = this.parseValueLiteral();
       meta[key] = value;
@@ -1291,7 +1309,7 @@ class Parser {
 
     while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
       const node = this.parseDocumentNode();
-      if (node.kind !== "page") {
+      if (!this.allowBodyFragments && node.kind !== "page") {
         throw this.errorAtToken(this.peek(), "Body block must contain page nodes at the top level");
       }
       nodes.push(node);
@@ -1325,8 +1343,7 @@ class Parser {
       }
 
       if (this.check(TokenType.Identifier)) {
-        const keyTok = this.advance();
-        const key = String(keyTok.value);
+        const key = this.parseKeyPath("Expected property name");
         this.consume(TokenType.Equals, "Expected '=' after property name");
 
         if (this.match(TokenType.At)) {
@@ -1344,8 +1361,81 @@ class Parser {
       this.skipStatement();
     }
 
-    this.consume(TokenType.RBrace, "Expected '}' after node block");
-    return { id, kind, props, children, refresh };
+    const endTok = this.consume(TokenType.RBrace, "Expected '}' after node block");
+    return {
+      id,
+      kind,
+      props,
+      children,
+      refresh,
+      loc: { line: kindTok.line, column: kindTok.column, endLine: endTok.line, endColumn: endTok.column },
+    };
+  }
+
+  private parseTokensBlock(): TokensBlock {
+    this.expectIdentifier("tokens", "Expected 'tokens'");
+    this.consume(TokenType.LBrace, "Expected '{' after 'tokens'");
+    const tokens: Record<string, any> = {};
+    while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+      const key = this.parseKeyPath("Expected token name");
+      this.consume(TokenType.Equals, "Expected '=' after token name");
+      const value = this.parseValueLiteral();
+      tokens[key] = value;
+      this.consumeOptional(TokenType.Semicolon);
+    }
+    this.consume(TokenType.RBrace, "Expected '}' after tokens block");
+    return { tokens };
+  }
+
+  private parseStylesBlock(): StylesBlock {
+    this.expectIdentifier("styles", "Expected 'styles'");
+    this.consume(TokenType.LBrace, "Expected '{' after 'styles'");
+    const styles: StyleDef[] = [];
+
+    while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+      const nameTok = this.consume(TokenType.Identifier, "Expected style name");
+      const name = String(nameTok.value);
+      let extendsName: string | undefined;
+      if (this.match(TokenType.Colon)) {
+        const baseTok = this.consume(TokenType.Identifier, "Expected base style name");
+        extendsName = String(baseTok.value);
+      }
+      this.consume(TokenType.LBrace, "Expected '{' after style name");
+      const props = this.parsePropertyMap();
+      this.consume(TokenType.RBrace, "Expected '}' after style block");
+      styles.push({ name, extends: extendsName, props });
+    }
+
+    this.consume(TokenType.RBrace, "Expected '}' after styles block");
+    return { styles };
+  }
+
+  private parseThemeBlock(): ThemeBlock {
+    this.expectIdentifier("theme", "Expected 'theme'");
+    let name: string;
+    if (this.check(TokenType.String)) {
+      name = String(this.advance().value);
+    } else if (this.check(TokenType.Identifier)) {
+      name = String(this.advance().value);
+    } else {
+      throw this.errorAtToken(this.peek(), "Expected theme name");
+    }
+
+    this.consume(TokenType.LBrace, "Expected '{' after theme name");
+    let tokens: TokensBlock | undefined;
+    let styles: StylesBlock | undefined;
+    while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+      if (this.checkIdentifier("tokens")) {
+        tokens = this.parseTokensBlock();
+      } else if (this.checkIdentifier("styles")) {
+        styles = this.parseStylesBlock();
+      } else {
+        const tok = this.peek();
+        throw this.errorAtToken(tok, `Unexpected theme field '${tok.lexeme}'`);
+      }
+    }
+    this.consume(TokenType.RBrace, "Expected '}' after theme block");
+    return { name, tokens, styles };
   }
 
   private parseRefreshPolicy(): RefreshPolicy {
@@ -1405,6 +1495,35 @@ class Parser {
     this.consume(TokenType.RBracket, "Expected ']' after identifier list");
     this.consumeOptional(TokenType.Semicolon);
     return values;
+  }
+
+  private parseKeyPath(message: string): string {
+    const first = this.consume(TokenType.Identifier, message);
+    const parts = [String(first.value)];
+    while (this.match(TokenType.Dot)) {
+      const next = this.consume(TokenType.Identifier, "Expected identifier after '.'");
+      parts.push(String(next.value));
+    }
+    return parts.join(".");
+  }
+
+  private parsePropertyMap(): Record<string, NodePropValue> {
+    const props: Record<string, NodePropValue> = {};
+    while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
+      const key = this.parseKeyPath("Expected property name");
+      this.consume(TokenType.Equals, "Expected '=' after property name");
+
+      if (this.match(TokenType.At)) {
+        const expr = this.parseExpr();
+        props[key] = { kind: "DynamicValue", expr };
+      } else {
+        const value = this.parseValueLiteral();
+        props[key] = { kind: "LiteralValue", value };
+      }
+
+      this.consumeOptional(TokenType.Semicolon);
+    }
+    return props;
   }
 
     // --- Expressions ---
@@ -1523,6 +1642,7 @@ class Parser {
                 kind: "UnaryExpression",
                 op,
                 argument,
+                loc: argument?.loc,
             };
         }
         if (this.match(TokenType.Minus)) {
@@ -1532,6 +1652,7 @@ class Parser {
                 kind: "UnaryExpression",
                 op,
                 argument,
+                loc: argument?.loc,
             };
         }
         return this.parsePostfix();
@@ -1548,10 +1669,13 @@ class Parser {
                     kind: "MemberExpression",
                     object: expr,
                     property,
+                    loc: expr?.loc,
                 };
             } else if (this.match(TokenType.LParen)) {
                 const args = this.parseArgumentList();
-                expr = this.maybeNeighborsCall(expr, args);
+                const callExpr = this.maybeNeighborsCall(expr, args) as FluxExpr;
+                (callExpr as any).loc = expr?.loc;
+                expr = callExpr;
             } else {
                 break;
             }
@@ -1570,6 +1694,7 @@ class Parser {
                 return {
                     kind: "Literal",
                     value: tok.value as number,
+                    loc: { line: tok.line, column: tok.column },
                 };
             }
             case TokenType.String: {
@@ -1577,6 +1702,7 @@ class Parser {
                 return {
                     kind: "Literal",
                     value: tok.value as string,
+                    loc: { line: tok.line, column: tok.column },
                 };
             }
             case TokenType.Bool: {
@@ -1584,6 +1710,7 @@ class Parser {
                 return {
                     kind: "Literal",
                     value: tok.value as boolean,
+                    loc: { line: tok.line, column: tok.column },
                 };
             }
             case TokenType.LBracket: {
@@ -1599,6 +1726,7 @@ class Parser {
                 return {
                     kind: "ListExpression",
                     items,
+                    loc: { line: tok.line, column: tok.column },
                 };
             }
             case TokenType.Identifier: {
@@ -1606,6 +1734,7 @@ class Parser {
                 return {
                     kind: "Identifier",
                     name: tok.lexeme,
+                    loc: { line: tok.line, column: tok.column },
                 };
             }
             case TokenType.LBrace: {
@@ -1682,6 +1811,7 @@ class Parser {
             op,
             left,
             right,
+            loc: left?.loc,
         };
     }
 
@@ -2194,9 +2324,168 @@ class Parser {
 }
 
 // Public API
-export function parseDocument(source: string): FluxDocument {
+export interface ParseOptions {
+  sourcePath?: string;
+  docRoot?: string;
+  resolveIncludes?: boolean;
+  maxIncludeBytes?: number;
+  includeDepthLimit?: number;
+  allowBodyFragments?: boolean;
+}
+
+const DEFAULT_INCLUDE_BYTES = 1024 * 1024;
+const DEFAULT_INCLUDE_DEPTH = 8;
+
+export function parseDocument(source: string, options: ParseOptions = {}): FluxDocument {
   const lexer = new Lexer(source);
   const tokens = lexer.tokenize();
-  const parser = new Parser(tokens);
-  return parser.parseDocument();
+  const parser = new Parser(tokens, { allowBodyFragments: options.allowBodyFragments });
+  const doc = parser.parseDocument();
+
+  const shouldResolve = options.resolveIncludes || options.sourcePath || options.docRoot;
+  if (!shouldResolve) return doc;
+
+  const root = options.docRoot ?? (options.sourcePath ? path.dirname(options.sourcePath) : null);
+  if (!root) return doc;
+
+  return resolveIncludes(doc, {
+    docRoot: root,
+    sourcePath: options.sourcePath ?? "<buffer>",
+    maxIncludeBytes: options.maxIncludeBytes ?? DEFAULT_INCLUDE_BYTES,
+    includeDepthLimit: options.includeDepthLimit ?? DEFAULT_INCLUDE_DEPTH,
+  });
+}
+
+interface IncludeContext {
+  docRoot: string;
+  sourcePath: string;
+  maxIncludeBytes: number;
+  includeDepthLimit: number;
+  seen: Set<string>;
+}
+
+function resolveIncludes(doc: FluxDocument, options: Omit<IncludeContext, "seen">): FluxDocument {
+  const context: IncludeContext = { ...options, seen: new Set<string>() };
+  const body = doc.body;
+  if (!body?.nodes?.length) return doc;
+  const nodes = resolveIncludeNodes(body.nodes, context, "root", 0);
+  return { ...doc, body: { nodes } };
+}
+
+function resolveIncludeNodes(
+  nodes: DocumentNode[],
+  ctx: IncludeContext,
+  parentPath: string,
+  depth: number,
+): DocumentNode[] {
+  if (depth > ctx.includeDepthLimit) {
+    throw new Error(`Include depth exceeds limit (${ctx.includeDepthLimit}) at ${parentPath}`);
+  }
+  const result: DocumentNode[] = [];
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index];
+    const nodePath = `${parentPath}/${node.kind}:${node.id}:${index}`;
+    if (node.kind === "include") {
+      const includePath = resolveIncludePath(node, ctx, nodePath);
+      const included = loadIncludedDocument(includePath, ctx, depth + 1);
+      const includeNodes = included.body?.nodes ?? [];
+      const rewritten = rewriteNodeIds(includeNodes, includePath, nodePath);
+      result.push(...rewritten);
+      continue;
+    }
+    const children = node.children?.length
+      ? resolveIncludeNodes(node.children, ctx, nodePath, depth)
+      : [];
+    result.push({ ...node, children });
+  }
+  return result;
+}
+
+function resolveIncludePath(node: DocumentNode, ctx: IncludeContext, nodePath: string): string {
+  const raw =
+    node.props?.path?.kind === "LiteralValue"
+      ? String(node.props.path.value)
+      : node.props?.src?.kind === "LiteralValue"
+        ? String(node.props.src.value)
+        : null;
+  if (!raw) {
+    throw new Error(
+      `Include at ${nodePath} requires a literal 'path' (or 'src') string`,
+    );
+  }
+  if (path.isAbsolute(raw)) {
+    throw new Error(`Include path must be relative: '${raw}'`);
+  }
+  if (raw.split(/[\\/]+/).some((part) => part === "..")) {
+    throw new Error(`Include path cannot contain '..': '${raw}'`);
+  }
+  const resolved = path.resolve(ctx.docRoot, raw);
+  if (!resolved.startsWith(ctx.docRoot)) {
+    throw new Error(`Include path escapes doc root: '${raw}'`);
+  }
+  if (path.extname(resolved) !== ".flux") {
+    throw new Error(`Include path must target a .flux file: '${raw}'`);
+  }
+  return resolved;
+}
+
+function loadIncludedDocument(filePath: string, ctx: IncludeContext, depth: number): FluxDocument {
+  if (ctx.seen.has(filePath)) {
+    throw new Error(`Include cycle detected at '${filePath}'`);
+  }
+  ctx.seen.add(filePath);
+  const stat = fs.statSync(filePath);
+  if (stat.size > ctx.maxIncludeBytes) {
+    throw new Error(`Include file too large (${stat.size} bytes): '${filePath}'`);
+  }
+  const source = fs.readFileSync(filePath, "utf8");
+  const doc = parseDocument(source, {
+    sourcePath: filePath,
+    docRoot: ctx.docRoot,
+    resolveIncludes: true,
+    maxIncludeBytes: ctx.maxIncludeBytes,
+    includeDepthLimit: ctx.includeDepthLimit - depth,
+    allowBodyFragments: true,
+  });
+  ctx.seen.delete(filePath);
+  return doc;
+}
+
+function rewriteNodeIds(nodes: DocumentNode[], includePath: string, parentPath: string): DocumentNode[] {
+  return nodes.map((node, index) => {
+    const nodePath = `${parentPath}/${node.kind}:${node.id}:${index}`;
+    const hash = stableHash(includePath, nodePath).toString(16).padStart(6, "0");
+    const nextId = `${node.id}_${hash}`;
+    const children = rewriteNodeIds(node.children ?? [], includePath, nodePath);
+    return { ...node, id: nextId, children };
+  });
+}
+
+function stableHash(...values: unknown[]): number {
+  const serialized = values.map((value) => stableSerialize(value)).join("|");
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < serialized.length; i += 1) {
+    hash ^= serialized.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function stableSerialize(value: unknown): string {
+  if (value == null) return "null";
+  if (typeof value === "number") return `n:${String(value)}`;
+  if (typeof value === "string") return `s:${value}`;
+  if (typeof value === "boolean") return `b:${value}`;
+  if (Array.isArray(value)) {
+    return `a:[${value.map((item) => stableSerialize(item)).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a.localeCompare(b),
+    );
+    return `o:{${entries
+      .map(([key, val]) => `${key}:${stableSerialize(val)}`)
+      .join(",")}}`;
+  }
+  return `u:${String(value)}`;
 }

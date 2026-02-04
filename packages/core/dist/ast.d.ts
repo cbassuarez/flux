@@ -166,40 +166,43 @@ export interface RuleScope {
 export type BinaryOp = "==" | "!=" | "===" | "!==" | "<" | "<=" | ">" | ">=" | "+" | "-" | "*" | "/" | "and" | "or";
 export type UnaryOp = "-" | "not";
 export type FluxLiteralValue = number | string | boolean;
-export interface LiteralExpr {
+export interface ExprBase {
+    loc?: SourceSpan;
+}
+export interface LiteralExpr extends ExprBase {
     kind: "Literal";
     value: FluxLiteralValue;
 }
-export interface ListExpr {
+export interface ListExpr extends ExprBase {
     kind: "ListExpression";
     items: FluxExpr[];
 }
-export interface IdentifierExpr {
+export interface IdentifierExpr extends ExprBase {
     kind: "Identifier";
     name: string;
 }
-export interface MemberExpr {
+export interface MemberExpr extends ExprBase {
     kind: "MemberExpression";
     object: FluxExpr;
     property: string;
 }
-export interface CallExpr {
+export interface CallExpr extends ExprBase {
     kind: "CallExpression";
     callee: FluxExpr;
     args: CallArg[];
 }
-export interface UnaryExpr {
+export interface UnaryExpr extends ExprBase {
     kind: "UnaryExpression";
     op: UnaryOp;
     argument: FluxExpr;
 }
-export interface BinaryExpr {
+export interface BinaryExpr extends ExprBase {
     kind: "BinaryExpression";
     op: BinaryOp;
     left: FluxExpr;
     right: FluxExpr;
 }
-export interface NeighborsCallExpr {
+export interface NeighborsCallExpr extends ExprBase {
     kind: "NeighborsCallExpression";
     namespace: "neighbors";
     method: string;
@@ -264,16 +267,39 @@ export interface RefreshEveryPolicy {
     unit: TimerUnit;
 }
 export type RefreshPolicy = RefreshPolicyBase | RefreshEveryPolicy;
-export type NodeKind = "page" | "section" | "row" | "column" | "spacer" | "text" | "image" | "figure" | "table" | "grid" | "slot";
+export type NodeKind = "page" | "section" | "row" | "column" | "spacer" | "text" | "em" | "strong" | "code" | "smallcaps" | "sub" | "sup" | "mark" | "link" | "quote" | "blockquote" | "codeblock" | "callout" | "image" | "figure" | "table" | "ul" | "ol" | "li" | "hr" | "footnote" | "grid" | "slot" | "inline_slot" | "include";
 export interface DocumentNode {
     id: string;
     kind: NodeKind | string;
     props: Record<string, NodePropValue>;
     children: DocumentNode[];
     refresh?: RefreshPolicy;
+    loc?: SourceSpan;
 }
 export interface BodyBlock {
     nodes: DocumentNode[];
+}
+export interface SourceSpan {
+    line: number;
+    column: number;
+    endLine?: number;
+    endColumn?: number;
+}
+export interface TokensBlock {
+    tokens: Record<string, FluxValueLiteral>;
+}
+export interface StyleDef {
+    name: string;
+    extends?: string;
+    props: Record<string, NodePropValue>;
+}
+export interface StylesBlock {
+    styles: StyleDef[];
+}
+export interface ThemeBlock {
+    name: string;
+    tokens?: TokensBlock | null;
+    styles?: StylesBlock | null;
 }
 export interface FluxDocument {
     meta: FluxMeta;
@@ -284,6 +310,9 @@ export interface FluxDocument {
     runtime?: FluxRuntimeConfig;
     materials?: MaterialsBlock | null;
     assets?: AssetsBlock | null;
+    tokens?: TokensBlock | null;
+    styles?: StylesBlock | null;
+    themes?: ThemeBlock[] | null;
     body?: BodyBlock | null;
 }
 //# sourceMappingURL=ast.d.ts.map

@@ -80,7 +80,11 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
   let doc: ReturnType<typeof parseDocument> | null = null;
   let errors: string[] = [];
   try {
-    doc = parseDocument(source);
+    doc = parseDocument(source, {
+      sourcePath: docPath,
+      docRoot,
+      resolveIncludes: true,
+    });
     errors = checkDocument(docPath, doc);
   } catch (err) {
     errors = [String((err as Error)?.message ?? err)];
@@ -388,7 +392,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
   });
 
   const port = options.port ?? 0;
-  const host = options.host ?? "0.0.0.0";
+  const host = options.host ?? "127.0.0.1";
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   const address = server.address();
   if (!address || typeof address === "string") {

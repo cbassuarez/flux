@@ -5,7 +5,7 @@
 export * from "./ast.js";
 
 // Parser
-export { parseDocument } from "./parser.js";
+export { parseDocument, type ParseOptions } from "./parser.js";
 
 // Render IR (v0.2)
 export type {
@@ -20,6 +20,9 @@ export type {
   RenderGridCell,
   SlotReserve,
   SlotFitPolicy,
+  RenderStyleDefinition,
+  RenderNodeStyle,
+  RenderNodeCounters,
   RenderOptions,
   DocumentRuntime,
   DocumentRuntimeIR,

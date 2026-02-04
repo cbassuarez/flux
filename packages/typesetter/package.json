@@ -20,7 +20,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "echo \"No tests yet\""
   },
   "dependencies": {
     "playwright": "^1.50.1"

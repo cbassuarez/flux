@@ -59,7 +59,12 @@ export async function runParseCommand(argv: string[]): Promise<void> {
       }
 
       try {
-        const doc = parseDocument(src);
+        const resolved = path.resolve(file);
+        const doc = parseDocument(src, {
+          sourcePath: resolved,
+          docRoot: path.dirname(resolved),
+          resolveIncludes: true,
+        });
         outputs.push({ file: path.resolve(file), doc });
       } catch (err) {
         hadError = true;
@@ -129,4 +134,3 @@ function summarizeDoc(file: string, doc: any): string {
     `  rules   : ${rules}`,
   ].join("\n");
 }
-
