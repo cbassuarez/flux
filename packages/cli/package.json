@@ -26,10 +26,11 @@
   },
   "dependencies": {
     "@flux-lang/core": "^0.1.6",
-    "@flux-lang/cli-core": "workspace:*",
-    "@flux-lang/cli-ui": "workspace:*"
+    "@flux-lang/cli-core": "^0.1.0",
+    "@flux-lang/cli-ui": "^0.1.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "execa": "^8.0.0",
     "vitest": "^2.1.0",
     "typescript": "^5.6.0"
