@@ -12,11 +12,10 @@ import {
     renderDocument,
     renderDocumentIR,
     type Runtime,
+    type RenderDocumentIR,
+    type RenderAsset,
 } from "@flux-lang/core";
 import type { FluxDocument } from "@flux-lang/core";
-import { renderHtml } from "@flux-lang/render-html";
-import { createTypesetterBackend } from "@flux-lang/typesetter";
-import { startViewerServer } from "@flux-lang/viewer";
 import { runViewer } from "../view/runViewer.js";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -785,6 +784,7 @@ async function runView(args: string[]): Promise<ExitCode> {
     }
 
     try {
+        const { startViewerServer } = await import("@flux-lang/viewer");
         const server = await startViewerServer({
             docPath,
             port,
@@ -876,13 +876,13 @@ async function runPdf(args: string[]): Promise<ExitCode> {
     }
 
     const dir = file === "-" ? process.cwd() : path.dirname(path.resolve(file));
-    const ir = renderDocumentIR(doc, { seed, docstep, assetCwd: dir });
+    const ir: RenderDocumentIR = renderDocumentIR(doc, { seed, docstep, assetCwd: dir });
 
     const placeholder =
         "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
 
     const assetUrl = (assetId: string): string => {
-        const asset = ir.assets.find((entry) => entry.id === assetId);
+        const asset = ir.assets.find((entry: RenderAsset) => entry.id === assetId);
         if (!asset?.path) return placeholder;
         const resolved = path.isAbsolute(asset.path) ? asset.path : path.resolve(dir, asset.path);
         return pathToFileURL(resolved).toString();
@@ -896,6 +896,8 @@ async function runPdf(args: string[]): Promise<ExitCode> {
         return pathToFileURL(resolved).toString();
     };
 
+    const { renderHtml } = await import("@flux-lang/render-html");
+    const { createTypesetterBackend } = await import("@flux-lang/typesetter");
     const { html, css } = renderHtml(ir, { assetUrl, rawUrl });
     const typesetter = createTypesetterBackend();
     const pdf = await typesetter.pdf(html, css, { allowFile: true });
