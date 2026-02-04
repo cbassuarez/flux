@@ -2,7 +2,7 @@ import path from "node:path";
 import { errorResult, okResult, type CommandResult } from "../types.js";
 import { ensureDir, pathExists, writeFileText } from "../fs.js";
 import { getTemplate, type TemplateName, type TemplateOptions } from "../new/templates.js";
-import type { FontsPreset, PageSizeOption, ThemeOption } from "../config.js";
+import type { FontFallbackOption, FontsPreset, PageSizeOption, ThemeOption } from "../config.js";
 
 export interface NewOptions {
   cwd: string;
@@ -11,6 +11,7 @@ export interface NewOptions {
   page?: PageSizeOption;
   theme?: ThemeOption;
   fonts?: FontsPreset;
+  fontFallback?: FontFallbackOption;
   assets?: boolean;
   chapters?: number;
   live?: boolean;
@@ -43,6 +44,7 @@ export async function newCommand(options: NewOptions): Promise<CommandResult<New
     page: normalized.page,
     theme: normalized.theme,
     fonts: normalized.fonts,
+    fontFallback: normalized.fontFallback,
     assets: normalized.assets,
     chapters: normalized.chapters,
     live: normalized.live,
@@ -81,6 +83,7 @@ function normalizeNewOptions(options: NewOptions) {
     page: options.page ?? "Letter",
     theme: options.theme ?? "screen",
     fonts: options.fonts ?? "tech",
+    fontFallback: options.fontFallback ?? "system",
     assets: options.assets ?? true,
     chapters: options.chapters ?? 0,
     live: options.live ?? (options.template === "demo"),

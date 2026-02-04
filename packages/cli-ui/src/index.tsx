@@ -7,6 +7,8 @@ export interface CliUiOptions {
   mode?: "new";
   initialArgs?: string[];
   detach?: boolean;
+  helpCommand?: string;
+  version?: string;
 }
 
 export async function runCliUi(options: CliUiOptions): Promise<void> {

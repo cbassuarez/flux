@@ -4,6 +4,7 @@ import { findGitRoot, pathExists, readJsonFile, writeJsonFile } from "./fs.js";
 export type PageSizeOption = "Letter" | "A4";
 export type ThemeOption = "print" | "screen" | "both";
 export type FontsPreset = "tech" | "bookish";
+export type FontFallbackOption = "system" | "none";
 
 export interface FluxConfig {
   docstepMs: number;

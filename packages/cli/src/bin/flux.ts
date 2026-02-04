@@ -21,6 +21,7 @@ import {
 import type { FluxConfig } from "@flux-lang/cli-core";
 import { runViewer } from "../view/runViewer.js";
 import { createRuntime, parseDocument, type FluxDocument } from "@flux-lang/core";
+import { shouldLaunchUi } from "../ui-routing.js";
 
 const VERSION = "0.3.0";
 
@@ -41,29 +42,44 @@ async function main(argv: string[]): Promise<ExitCode> {
   const parsed = parseGlobalArgs(argv);
   const args = parsed.args;
 
+  const uiEnabled = shouldLaunchUi({
+    stdoutIsTTY: Boolean(process.stdout.isTTY),
+    stdinIsTTY: process.stdin.isTTY,
+    json: parsed.json,
+    noUi: parsed.noUi,
+    env: process.env,
+  });
+
+  if (uiEnabled) {
+    return launchUi({
+      cwd: process.cwd(),
+      initialArgs: args,
+      detach: parsed.detach,
+      helpCommand: parsed.help ? args[0] : undefined,
+      version: parsed.version ? `flux v${VERSION}` : undefined,
+    });
+  }
+
   if (parsed.version) {
     console.log(`flux v${VERSION}`);
     return 0;
   }
 
-  if (args.length === 0) {
-    if (parsed.help || parsed.noUi || process.env.FLUX_NO_UI === "1" || !isInteractive()) {
+  if (parsed.help) {
+    if (args.length === 0) {
       printGlobalHelp();
       return 0;
     }
-    return launchUi({ cwd: process.cwd(), detach: parsed.detach });
-  }
-
-  const [cmd, ...rest] = args;
-
-  if (parsed.help) {
-    printCommandHelp(cmd);
+    printCommandHelp(args[0]);
     return 0;
   }
 
-  if (parsed.ui && isInteractive()) {
-    return launchUi({ cwd: process.cwd(), initialArgs: args, detach: parsed.detach });
+  if (args.length === 0) {
+    printGlobalHelp();
+    return 0;
   }
+
+  const [cmd, ...rest] = args;
 
   switch (cmd) {
     case "parse":
@@ -208,7 +224,7 @@ function printGlobalHelp(): void {
       "  -h, --help      Show this help message.",
       "  -v, --version   Show CLI version.",
       "  --no-ui         Disable Ink UI launch.",
-      "  --ui            Force Ink UI launch.",
+      "  --ui            Force Ink UI launch (TTY only).",
       "  --detach        Keep viewer running on UI exit.",
       "  --json          Emit machine-readable JSON where applicable.",
       "  -q, --quiet     Reduce non-essential output.",
@@ -388,8 +404,8 @@ function printNewHelp(): void {
     [
       "Usage:",
       "  flux new           (launch wizard)",
-      "  flux new <template> --out <dir> --page Letter|A4 --theme print|screen|both --fonts tech|bookish ",
-      "    --assets yes|no --chapters N --live yes|no",
+      "  flux new <template> --out <dir> --page Letter|A4 --theme print|screen|both --fonts tech|bookish",
+      "    --fallback system|none --assets yes|no --chapters N --live yes|no",
       "",
       "Templates:",
       "  demo, article, spec, zine, paper",
@@ -873,11 +889,8 @@ async function runConfig(args: string[], globals: ReturnType<typeof parseGlobalA
 async function runNew(args: string[], globals: ReturnType<typeof parseGlobalArgs>): Promise<ExitCode> {
   const [template, ...rest] = args;
   if (!template) {
-    if (!isInteractive() || globals.noUi || process.env.FLUX_NO_UI === "1") {
-      printNewHelp();
-      return 1;
-    }
-    return launchUi({ cwd: process.cwd(), mode: "new", detach: globals.detach });
+    printNewHelp();
+    return 1;
   }
 
   const opts = parseNewArgs(rest);
@@ -894,6 +907,7 @@ async function runNew(args: string[], globals: ReturnType<typeof parseGlobalArgs
     page: opts.page,
     theme: opts.theme,
     fonts: opts.fonts,
+    fontFallback: opts.fontFallback,
     assets: opts.assets,
     chapters: opts.chapters,
     live: opts.live,
@@ -910,6 +924,7 @@ async function runNew(args: string[], globals: ReturnType<typeof parseGlobalArgs
     process.stdout.write(JSON.stringify(result.data) + "\n");
   } else if (!globals.quiet) {
     console.log(`Created ${result.data.docPath}`);
+    printNewNextSteps(result.data.docPath);
   }
 
   return 0;
@@ -960,6 +975,7 @@ function parseNewArgs(args: string[]) {
     page?: "Letter" | "A4";
     theme?: "print" | "screen" | "both";
     fonts?: "tech" | "bookish";
+    fontFallback?: "system" | "none";
     assets?: boolean;
     chapters?: number;
     live?: boolean;
@@ -987,6 +1003,13 @@ function parseNewArgs(args: string[]) {
       i += 1;
     } else if (arg.startsWith("--fonts=")) {
       opts.fonts = arg.slice("--fonts=".length) as any;
+    } else if (arg === "--fallback" || arg === "--font-fallback") {
+      opts.fontFallback = parseFontFallback(args[i + 1]);
+      i += 1;
+    } else if (arg.startsWith("--fallback=")) {
+      opts.fontFallback = parseFontFallback(arg.slice("--fallback=".length));
+    } else if (arg.startsWith("--font-fallback=")) {
+      opts.fontFallback = parseFontFallback(arg.slice("--font-fallback=".length));
     } else if (arg === "--assets") {
       opts.assets = parseYesNo(args[i + 1]);
       i += 1;
@@ -1042,6 +1065,12 @@ function parseYesNo(raw?: string): boolean {
   return !(raw === "no" || raw === "false" || raw === "0");
 }
 
+function parseFontFallback(raw?: string): "system" | "none" {
+  if (!raw) return "system";
+  if (raw === "none" || raw === "off" || raw === "false" || raw === "0") return "none";
+  return "system";
+}
+
 function parseConfigValue(key: string, raw: string): { key: keyof FluxConfig; value: FluxConfig[keyof FluxConfig] } {
   switch (key) {
     case "docstepMs":
@@ -1078,6 +1107,20 @@ async function printConfig(config: FluxConfig, globals: ReturnType<typeof parseG
   return 0;
 }
 
+function printNewNextSteps(docPath: string): void {
+  const pdfPath = docPath.replace(/\.flux$/i, ".pdf");
+  console.log(
+    [
+      "",
+      "Next steps:",
+      `  flux view ${docPath}`,
+      `  flux check ${docPath}`,
+      `  flux pdf ${docPath} --out ${pdfPath}`,
+      "",
+    ].join("\n"),
+  );
+}
+
 function parseNumberFlag(flag: string, raw: string | undefined): number {
   const value = Number(raw);
   if (!Number.isFinite(value)) {
@@ -1100,9 +1143,23 @@ function openBrowser(url: string): void {
   spawn(command, args, { stdio: "ignore", detached: true });
 }
 
-async function launchUi(options: { cwd: string; mode?: "new"; initialArgs?: string[]; detach?: boolean }): Promise<ExitCode> {
+async function launchUi(options: {
+  cwd: string;
+  mode?: "new";
+  initialArgs?: string[];
+  detach?: boolean;
+  helpCommand?: string;
+  version?: string;
+}): Promise<ExitCode> {
   const { runCliUi } = await import("@flux-lang/cli-ui");
-  await runCliUi({ cwd: options.cwd, mode: options.mode, initialArgs: options.initialArgs, detach: options.detach });
+  await runCliUi({
+    cwd: options.cwd,
+    mode: options.mode,
+    initialArgs: options.initialArgs,
+    detach: options.detach,
+    helpCommand: options.helpCommand,
+    version: options.version,
+  });
   return 0;
 }
 
