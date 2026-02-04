@@ -273,6 +273,7 @@ function printViewHelp(): void {
             "  --docstep-ms <n>    Docstep interval in milliseconds.",
             "  --seed <n>          Seed for deterministic rendering.",
             "  --allow-net <orig>  Allow remote assets for origin (repeatable or comma-separated).",
+            "  --no-time           Disable automatic time advancement.",
             "  --tty              Use the legacy TTY grid viewer.",
             "  -h, --help          Show this message.",
             "",
@@ -715,12 +716,15 @@ async function runView(args: string[]): Promise<ExitCode> {
     let useTty = false;
     const allowNet: string[] = [];
     let file: string | undefined;
+    let advanceTime = true;
 
     try {
         for (let i = 0; i < args.length; i += 1) {
             const arg = args[i];
             if (arg === "--tty") {
                 useTty = true;
+            } else if (arg === "--no-time") {
+                advanceTime = false;
             } else if (arg === "--port") {
                 port = parseNumberFlag("--port", args[i + 1]);
                 i += 1;
@@ -791,6 +795,7 @@ async function runView(args: string[]): Promise<ExitCode> {
             docstepMs,
             seed,
             allowNet,
+            advanceTime,
         });
         console.log(`Flux viewer running at ${server.url}`);
         console.log("Press Ctrl+C to stop.");

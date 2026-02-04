@@ -13,10 +13,12 @@ import { createTypesetterBackend } from "@flux-lang/typesetter";
 export interface ViewerServerOptions {
   docPath: string;
   port?: number;
+  host?: string;
   docstepMs?: number;
   seed?: number;
   allowNet?: string[];
   docstepStart?: number;
+  advanceTime?: boolean;
 }
 
 export interface ViewerServer {
@@ -34,6 +36,25 @@ interface ViewerState {
 }
 
 const DEFAULT_DOCSTEP_MS = 1000;
+const MAX_TICK_SECONDS = 1;
+
+type ViewerRenderOptions = Parameters<typeof renderHtml>[1];
+
+export function advanceViewerRuntime(
+  runtime: ReturnType<typeof createDocumentRuntimeIR>,
+  renderOptions: ViewerRenderOptions,
+  advanceTime: boolean,
+  dtSeconds: number,
+): { ir: RenderDocumentIR; render: RenderHtmlResult } {
+  if (advanceTime && dtSeconds > 0) {
+    runtime.tick(dtSeconds);
+  }
+  const nextIr = runtime.step(1);
+  return {
+    ir: nextIr,
+    render: renderHtml(nextIr, renderOptions),
+  };
+}
 const MAX_REMOTE_BYTES = 8 * 1024 * 1024;
 const REMOTE_TIMEOUT_MS = 5000;
 
@@ -76,15 +97,21 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
   let intervalMs = options.docstepMs ?? DEFAULT_DOCSTEP_MS;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let nextTickAt = Date.now() + intervalMs;
+  let lastTickAt = Date.now();
+  const advanceTime = options.advanceTime !== false;
 
   const tick = (): void => {
     if (!running) return;
     if (!runtime) return;
-    const nextIr = runtime.step(1);
+    const now = Date.now();
+    const elapsedMs = Math.max(0, now - lastTickAt);
+    lastTickAt = now;
+    const dtSeconds = Math.min(elapsedMs / 1000, MAX_TICK_SECONDS);
+    const next = advanceViewerRuntime(runtime, renderOptions, advanceTime, dtSeconds);
     current = {
       ...current,
-      ir: nextIr,
-      render: renderHtml(nextIr, renderOptions),
+      ir: next.ir,
+      render: next.render,
     };
     nextTickAt += intervalMs;
     scheduleTick();
@@ -107,6 +134,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
     if (!runtime || current.errors.length) return;
     if (running) return;
     running = true;
+    lastTickAt = Date.now();
     nextTickAt = Date.now() + intervalMs;
     scheduleTick();
   };
@@ -186,6 +214,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
         if (typeof payload?.docstepMs === "number" && Number.isFinite(payload.docstepMs)) {
           intervalMs = Math.max(50, payload.docstepMs);
           if (running) {
+            lastTickAt = Date.now();
             nextTickAt = Date.now() + intervalMs;
             scheduleTick();
           }
@@ -265,15 +294,17 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
   });
 
   const port = options.port ?? 0;
-  await new Promise<void>((resolve) => server.listen(port, resolve));
+  const host = options.host ?? "0.0.0.0";
+  await new Promise<void>((resolve) => server.listen(port, host, resolve));
   const address = server.address();
   if (!address || typeof address === "string") {
     throw new Error("Failed to start viewer server");
   }
+  const displayHost = host === "0.0.0.0" ? "localhost" : host;
 
   return {
     port: address.port,
-    url: `http://localhost:${address.port}`,
+    url: `http://${displayHost}:${address.port}`,
     close: async () => {
       stopTicking();
       await new Promise<void>((resolve) => server.close(() => resolve()));
