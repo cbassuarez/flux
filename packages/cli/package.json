@@ -20,7 +20,8 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "lint": "eslint src --ext .ts",
-    "test": "vitest",
+    "pretest": "npm run build --workspace @flux-lang/core",
+    "test": "npm run build && vitest",
     "prepublishOnly": "npm run build && chmod +x dist/bin/flux.js"
   },
   "dependencies": {
