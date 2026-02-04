@@ -85,6 +85,36 @@ export interface RenderDocument {
   body: RenderNode[];
 }
 
+export type SlotFitPolicy = "clip" | "ellipsis" | "shrink" | "scaleDown";
+
+export type SlotReserve =
+  | { kind: "fixed"; width: number; height: number; units: string }
+  | { kind: "fixedWidth"; width: number; units: string };
+
+export interface RenderNodeIR {
+  nodeId: string;
+  id: string;
+  kind: string;
+  props: Record<string, RenderValue>;
+  children: RenderNodeIR[];
+  refresh: RefreshPolicy;
+  slot?: {
+    reserve?: SlotReserve;
+    fit?: SlotFitPolicy;
+  };
+  grid?: RenderGridData;
+}
+
+export interface RenderDocumentIR {
+  meta: FluxMeta;
+  seed: number;
+  time: number;
+  docstep: number;
+  pageConfig?: FluxDocument["pageConfig"];
+  assets: RenderAsset[];
+  body: RenderNodeIR[];
+}
+
 export interface RenderOptions {
   seed?: number;
   time?: number;
@@ -101,6 +131,16 @@ export interface DocumentRuntime {
   render(): RenderDocument;
   tick(seconds: number): RenderDocument;
   step(n?: number): RenderDocument;
+}
+
+export interface DocumentRuntimeIR {
+  readonly doc: FluxDocument;
+  readonly seed: number;
+  readonly time: number;
+  readonly docstep: number;
+  render(): RenderDocumentIR;
+  tick(seconds: number): RenderDocumentIR;
+  step(n?: number): RenderDocumentIR;
 }
 
 export type AssetResolver = (bank: AssetBank, options: { cwd?: string }) => string[];
@@ -247,6 +287,36 @@ export function renderDocument(doc: FluxDocument, options: RenderOptions = {}): 
   return runtime.render();
 }
 
+export function createDocumentRuntimeIR(doc: FluxDocument, options: RenderOptions = {}): DocumentRuntimeIR {
+  const runtime = createDocumentRuntime(doc, options);
+  const body = ensureBody(doc);
+
+  const toIr = (rendered: RenderDocument): RenderDocumentIR => buildRenderDocumentIR(rendered, body);
+
+  return {
+    get doc() {
+      return runtime.doc;
+    },
+    get seed() {
+      return runtime.seed;
+    },
+    get time() {
+      return runtime.time;
+    },
+    get docstep() {
+      return runtime.docstep;
+    },
+    render: () => toIr(runtime.render()),
+    tick: (seconds: number) => toIr(runtime.tick(seconds)),
+    step: (n?: number) => toIr(runtime.step(n)),
+  };
+}
+
+export function renderDocumentIR(doc: FluxDocument, options: RenderOptions = {}): RenderDocumentIR {
+  const runtime = createDocumentRuntimeIR(doc, options);
+  return runtime.render();
+}
+
 function ensureBody(doc: FluxDocument): BodyBlock {
   if (doc.body?.nodes?.length) {
     return doc.body;
@@ -285,6 +355,160 @@ function ensureBody(doc: FluxDocument): BodyBlock {
   }
 
   return { nodes };
+}
+
+function buildRenderDocumentIR(rendered: RenderDocument, body: BodyBlock): RenderDocumentIR {
+  return {
+    ...rendered,
+    body: buildRenderNodesIR(body.nodes, rendered.body, "root", undefined),
+  };
+}
+
+function buildRenderNodesIR(
+  astNodes: DocumentNode[],
+  renderedNodes: RenderNode[],
+  parentPath: string,
+  parentPolicy: RefreshPolicy | undefined,
+): RenderNodeIR[] {
+  const count = Math.max(astNodes.length, renderedNodes.length);
+  const result: RenderNodeIR[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const rendered = renderedNodes[index];
+    const fallbackAst: DocumentNode = rendered
+      ? { id: rendered.id, kind: rendered.kind, props: {}, children: [] }
+      : { id: `node${index}`, kind: "node", props: {}, children: [] };
+    const astNode = astNodes[index] ?? fallbackAst;
+    const renderedNode: RenderNode = rendered ?? {
+      id: astNode.id,
+      kind: astNode.kind,
+      props: {},
+      children: [],
+    };
+
+    const nodePath = `${parentPath}/${astNode.kind}:${astNode.id}:${index}`;
+    const effectivePolicy = astNode.refresh ?? parentPolicy ?? { kind: "onLoad" };
+    const children = buildRenderNodesIR(
+      astNode.children ?? [],
+      renderedNode.children ?? [],
+      nodePath,
+      effectivePolicy,
+    );
+
+    const slot = buildSlotInfo(astNode.kind, renderedNode.props);
+
+    result.push({
+      ...renderedNode,
+      nodeId: nodePath,
+      refresh: effectivePolicy,
+      slot,
+      children,
+    });
+  }
+
+  return result;
+}
+
+function buildSlotInfo(
+  kind: string,
+  props: Record<string, RenderValue>,
+): { reserve?: SlotReserve; fit?: SlotFitPolicy } | undefined {
+  if (kind !== "slot" && kind !== "inline_slot") return undefined;
+  const reserve = parseSlotReserve(props.reserve);
+  const fit = parseSlotFit(props.fit);
+  if (!reserve && !fit) return undefined;
+  return { reserve, fit };
+}
+
+function parseSlotFit(value: RenderValue | undefined): SlotFitPolicy | undefined {
+  if (typeof value !== "string") return undefined;
+  switch (value) {
+    case "clip":
+    case "ellipsis":
+    case "shrink":
+    case "scaleDown":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function parseSlotReserve(value: RenderValue | undefined): SlotReserve | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "object") {
+    if (Array.isArray(value)) return parseSlotReserveArray(value);
+    const maybeAsset = value as RenderAssetRef;
+    if (maybeAsset.kind === "asset") return undefined;
+    return parseSlotReserveObject(value as Record<string, RenderValue>);
+  }
+  if (typeof value === "string") {
+    const fixedMatch = value.match(/^fixed\(\s*([0-9.+-]+)\s*,\s*([0-9.+-]+)\s*,\s*([^)]+)\s*\)$/i);
+    if (fixedMatch) {
+      const width = Number(fixedMatch[1]);
+      const height = Number(fixedMatch[2]);
+      const units = fixedMatch[3].trim();
+      if (Number.isFinite(width) && Number.isFinite(height) && units) {
+        return { kind: "fixed", width, height, units };
+      }
+    }
+    const fixedWidthMatch = value.match(/^fixedWidth\(\s*([0-9.+-]+)\s*,\s*([^)]+)\s*\)$/i);
+    if (fixedWidthMatch) {
+      const width = Number(fixedWidthMatch[1]);
+      const units = fixedWidthMatch[2].trim();
+      if (Number.isFinite(width) && units) {
+        return { kind: "fixedWidth", width, units };
+      }
+    }
+  }
+  return undefined;
+}
+
+function parseSlotReserveObject(value: Record<string, RenderValue>): SlotReserve | undefined {
+  const kind = typeof value.kind === "string" ? value.kind : null;
+  if (kind === "fixed") {
+    const width = toFiniteNumber(value.width);
+    const height = toFiniteNumber(value.height);
+    const units = typeof value.units === "string" ? value.units : null;
+    if (width !== null && height !== null && units) {
+      return { kind: "fixed", width, height, units };
+    }
+  }
+  if (kind === "fixedWidth") {
+    const width = toFiniteNumber(value.width);
+    const units = typeof value.units === "string" ? value.units : null;
+    if (width !== null && units) {
+      return { kind: "fixedWidth", width, units };
+    }
+  }
+  return undefined;
+}
+
+function parseSlotReserveArray(value: RenderValue[]): SlotReserve | undefined {
+  if (value.length >= 3) {
+    const width = toFiniteNumber(value[0]);
+    const height = toFiniteNumber(value[1]);
+    const units = typeof value[2] === "string" ? value[2] : null;
+    if (width !== null && height !== null && units) {
+      return { kind: "fixed", width, height, units };
+    }
+  }
+  if (value.length >= 2) {
+    const width = toFiniteNumber(value[0]);
+    const units = typeof value[1] === "string" ? value[1] : null;
+    if (width !== null && units) {
+      return { kind: "fixedWidth", width, units };
+    }
+  }
+  return undefined;
+}
+
+function toFiniteNumber(value: RenderValue | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }
 
 function buildParams(params: FluxParam[]): Record<string, number | string | boolean> {

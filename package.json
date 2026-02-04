@@ -10,7 +10,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "npm run build --workspace @flux-lang/core && npm run build --workspace @flux-lang/render-html && npm run build --workspace @flux-lang/typesetter && npm run build --workspace @flux-lang/viewer && npm run build --workspace @flux-lang/cli && npm run build --workspace @flux-lang/vscode-flux",
     "test": "npm run test --workspaces"
   },
   "version": "0.1.1"
