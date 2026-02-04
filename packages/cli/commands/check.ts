@@ -1,4 +1,5 @@
 // packages/cli/src/commands/check.ts
+import path from "node:path";
 import { parseArgs } from "packages/cli/src/args.js";
 import { collectFluxFiles, readFileText } from "packages/cli/src/fs-utils.js";
 import { parseDocument } from "@flux-lang/core"; // adjust path if needed
@@ -91,7 +92,14 @@ function collectDiagnostics(
   opts: CheckOptions,
 ): void {
   try {
-    const doc = parseDocument(src);
+    const resolved = file === "<stdin>" ? null : file;
+    const doc = resolved
+      ? parseDocument(src, {
+          sourcePath: resolved,
+          docRoot: path.dirname(resolved),
+          resolveIncludes: true,
+        })
+      : parseDocument(src);
 
     // Minimal static checks, "as robust as possible for this spec" without overreaching.
 
@@ -153,4 +161,3 @@ function extractLocationFromMessage(message: string): { line?: number; column?: 
     column: Number(match[2]),
   };
 }
-

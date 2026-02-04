@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+  <rect width="320" height="200" fill="#f2ece7"/>
+  <polygon points="160,24 296,176 24,176" fill="#d9c9d9" stroke="#7b5f7b" stroke-width="3"/>
+  <text x="160" y="120" text-anchor="middle" font-family="serif" font-size="24" fill="#3d2b3d">Slot E</text>
+</svg>

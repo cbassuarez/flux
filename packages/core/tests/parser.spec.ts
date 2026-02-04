@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import { parseDocument } from "../src/parser";
 import type { FluxDocument } from "../src/ast";
 
+const stripLoc = <T>(value: T): T =>
+    JSON.parse(JSON.stringify(value, (key, val) => (key === "loc" ? undefined : val)));
+
 describe("Flux parser v0.1", () => {
     it("parses a minimal document", () => {
         const src = `
@@ -473,12 +476,10 @@ describe("Flux parser v0.1", () => {
       `;
 
             const doc = parseDocument(src);
-            const ir = JSON.parse(
-                JSON.stringify({
-                    rules: doc.rules,
-                    runtime: doc.runtime,
-                }),
-            );
+            const ir = stripLoc({
+                rules: doc.rules,
+                runtime: doc.runtime,
+            });
 
             expect(ir).toEqual({
                 rules: [
@@ -708,7 +709,7 @@ describe("Flux parser v0.1", () => {
       `;
 
             const doc = parseDocument(src);
-            const ir = JSON.parse(JSON.stringify(doc.rules[0]));
+            const ir = stripLoc(doc.rules[0]);
 
             expect(ir).toEqual({
                 name: "handleClick",
@@ -896,6 +897,42 @@ describe("Flux parser v0.1", () => {
     });
 });
 
+describe("Flux parser v0.3 blocks", () => {
+  it("parses tokens, styles, and themes", () => {
+    const src = `
+      document {
+        meta { version = "0.3.0"; }
+        tokens {
+          font.serif = "Iowan Old Style";
+          color.muted = "#666666";
+        }
+        styles {
+          Body {
+            font.family = @tokens.font.serif;
+            font.size = 10.5;
+          }
+          H1 : Body {
+            font.size = 24;
+          }
+        }
+        theme "print" {
+          tokens { color.muted = "#222222"; }
+          styles {
+            Body { color = "#111111"; }
+          }
+        }
+        body { page p1 { text t1 { content = "ok"; } } }
+      }
+    `;
+
+    const doc = parseDocument(src);
+    expect(doc.tokens?.tokens["font.serif"]).toBe("Iowan Old Style");
+    expect(doc.styles?.styles?.length).toBe(2);
+    expect(doc.themes?.length).toBe(1);
+    expect(doc.themes?.[0]?.name).toBe("print");
+  });
+});
+
 // ──────────────────────────────────────────────────────────────
 // NEW: v0.2 assets + body + dynamic props
 // ──────────────────────────────────────────────────────────────
@@ -937,7 +974,7 @@ describe("Flux parser v0.2", () => {
             }
 
             image heroImg {
-              src = @assets.pick(tags=[hero], strategy=weighted, seed=7).path;
+              src = @assets.pick(tags=["hero"], strategy=weighted, seed=7).path;
             }
 
             section s1 {

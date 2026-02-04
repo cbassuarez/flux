@@ -153,4 +153,43 @@ describe("render-html", () => {
     expect(css).toContain(".flux-page-number");
     expect(css).toContain("counter(flux-page)");
   });
+
+  it("renders rich text and block nodes", () => {
+    const src = `
+      document {
+        meta { version = "0.3.0"; }
+        body {
+          page p1 {
+            text p1 {
+              content = "Intro ";
+              em e1 { content = "em"; }
+              strong s1 { content = "strong"; }
+              code c1 { content = "code"; }
+              link l1 { href = "https://example.com"; content = "link"; }
+              mark m1 { content = "mark"; }
+              smallcaps sc1 { content = "caps"; }
+              sub sub1 { content = "2"; }
+              sup sup1 { content = "3"; }
+              quote q1 { content = "quote"; }
+            }
+            blockquote b1 { text t1 { content = "Quoted block."; } }
+            codeblock cb1 { content = "const x = 1;"; }
+            callout c1 { tone = "note"; text t2 { content = "Callout text."; } }
+            table tb1 { rows = [ ["A", "B"], ["C", "D"] ]; }
+            ul list1 { li i1 { text t3 { content = "Item"; } } }
+            footnote fn1 { content = "Footnote text."; }
+          }
+        }
+      }
+    `;
+    const doc = parseDocument(src);
+    const ir = renderDocumentIR(doc);
+    const { html } = renderHtml(ir);
+    expect(html).toContain("<em");
+    expect(html).toContain("<strong");
+    expect(html).toContain("flux-callout");
+    expect(html).toContain("<blockquote");
+    expect(html).toContain("<table");
+    expect(html).toContain("flux-footnotes");
+  });
 });
