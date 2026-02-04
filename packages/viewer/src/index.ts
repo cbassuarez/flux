@@ -90,8 +90,9 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
     errors = [String((err as Error)?.message ?? err)];
   }
 
-  const runtime = doc
-    ? createDocumentRuntimeIR(doc, {
+  const baseDoc = doc;
+  let runtime = baseDoc
+    ? createDocumentRuntimeIR(baseDoc, {
         seed: options.seed ?? 0,
         docstep: options.docstepStart ?? 0,
         assetCwd: docRoot,
@@ -146,6 +147,35 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
 
   let lastSlotMap: Record<string, string> = current.render.slots;
   let lastPatchPayload: SlotPatchPayload = buildPatchPayload(current.render.slots);
+
+  const rebuildCurrent = (nextRuntime: ReturnType<typeof createDocumentRuntimeIR>): void => {
+    const nextIr = nextRuntime.render();
+    const nextRender = renderHtml(nextIr, renderOptions);
+    current = {
+      ...current,
+      ir: nextIr,
+      render: nextRender,
+      errors: [],
+    };
+    lastSlotMap = nextRender.slots;
+    lastPatchPayload = buildPatchPayload(nextRender.slots);
+  };
+
+  const resetRuntime = (payload: { seed?: number; docstep?: number; time?: number }): boolean => {
+    if (!baseDoc) return false;
+    const next = createDocumentRuntimeIR(baseDoc, {
+      seed: payload.seed ?? runtime?.seed ?? 0,
+      docstep: payload.docstep ?? runtime?.docstep ?? 0,
+      time: payload.time ?? runtime?.time ?? 0,
+      assetCwd: docRoot,
+    });
+    runtime = next;
+    rebuildCurrent(next);
+    lastTickAt = Date.now();
+    nextTickAt = Date.now() + intervalMs;
+    broadcastPatchUpdate(lastPatchPayload);
+    return true;
+  };
 
   const broadcastPatchUpdate = (payload: SlotPatchPayload = lastPatchPayload): void => {
     if (sseClients.size === 0) return;
@@ -252,6 +282,9 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           docPath,
           docstepMs: intervalMs,
           running,
+          seed: runtime?.seed ?? 0,
+          docstep: runtime?.docstep ?? 0,
+          time: runtime?.time ?? 0,
         });
         return;
       }
@@ -322,6 +355,27 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           else stopTicking();
         }
         sendJson(res, { ok: true, running, docstepMs: intervalMs });
+        return;
+      }
+
+      if (url.pathname === "/api/runtime" && req.method === "POST") {
+        const payload = await readJson(req);
+        const updated = resetRuntime({
+          seed: typeof payload?.seed === "number" ? payload.seed : undefined,
+          docstep: typeof payload?.docstep === "number" ? payload.docstep : undefined,
+          time: typeof payload?.time === "number" ? payload.time : undefined,
+        });
+        if (!updated) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Document not loaded" }));
+          return;
+        }
+        sendJson(res, {
+          ok: true,
+          seed: runtime?.seed ?? 0,
+          docstep: runtime?.docstep ?? 0,
+          time: runtime?.time ?? 0,
+        });
         return;
       }
 
@@ -580,7 +634,7 @@ export function getViewerJs(): string {
 
   const applyFit = (slot, win = window) => {
     const fit = slot.getAttribute("data-flux-fit");
-    const inner = slot.querySelector("[data-flux-slot-inner]") || slot.querySelector(".flux-slot-inner");
+    const inner = slot.querySelector("[data-flux-slot-inner]");
     if (!inner) return;
     const isInline = slot.getAttribute("data-flux-inline") === "true";
     inner.style.transform = "";
@@ -665,8 +719,11 @@ export function getViewerJs(): string {
         warnMissingSlot(id);
         return;
       }
-      const inner =
-        slot.querySelector("[data-flux-slot-inner]") || slot.querySelector(".flux-slot-inner") || slot;
+      const inner = slot.querySelector("[data-flux-slot-inner]");
+      if (!inner) {
+        warnMissingSlot(id);
+        return;
+      }
       inner.innerHTML = html || "";
       applyAssets(inner);
       requestAnimationFrame(() => applyFit(slot, win));

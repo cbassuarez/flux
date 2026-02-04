@@ -1,0 +1,444 @@
+import type { FontsPreset, PageSizeOption, ThemeOption } from "../config.js";
+
+export type TemplateName = "demo" | "article" | "spec" | "zine" | "paper";
+
+export interface TemplateOptions {
+  title: string;
+  page: PageSizeOption;
+  theme: ThemeOption;
+  fonts: FontsPreset;
+  assets: boolean;
+  chapters: number;
+  live: boolean;
+}
+
+export interface TemplateOutput {
+  mainFlux: string;
+  readme: string;
+  chapters: { path: string; content: string }[];
+  assetsDir?: string;
+}
+
+export interface TemplateDefinition {
+  name: TemplateName;
+  description: string;
+  build(options: TemplateOptions): TemplateOutput;
+}
+
+const FONT_PRESETS: Record<FontsPreset, { body: string; heading: string; mono: string }> = {
+  tech: {
+    body: "Inter, Helvetica Neue, Arial, sans-serif",
+    heading: "IBM Plex Sans, Inter, Helvetica Neue, Arial, sans-serif",
+    mono: "JetBrains Mono, Source Code Pro, Menlo, monospace",
+  },
+  bookish: {
+    body: "Iowan Old Style, Palatino Linotype, Palatino, Times New Roman, serif",
+    heading: "Iowan Old Style, Palatino Linotype, Palatino, Times New Roman, serif",
+    mono: "Source Code Pro, Courier New, monospace",
+  },
+};
+
+const PAGE_SIZES: Record<PageSizeOption, { width: number; height: number; units: string }> = {
+  Letter: { width: 8.5, height: 11, units: "in" },
+  A4: { width: 210, height: 297, units: "mm" },
+};
+
+export function getTemplate(name: string): TemplateDefinition | null {
+  const templates: TemplateDefinition[] = [
+    {
+      name: "demo",
+      description: "Live slots + assets + annotations",
+      build: buildDemoTemplate,
+    },
+    {
+      name: "article",
+      description: "Narrative article starter",
+      build: buildArticleTemplate,
+    },
+    {
+      name: "spec",
+      description: "Technical spec layout",
+      build: buildSpecTemplate,
+    },
+    {
+      name: "zine",
+      description: "Visual zine layout",
+      build: buildZineTemplate,
+    },
+    {
+      name: "paper",
+      description: "Academic paper with abstract",
+      build: buildPaperTemplate,
+    },
+  ];
+  return templates.find((t) => t.name === name) ?? null;
+}
+
+function buildBaseDoc(options: TemplateOptions, bodyContent: string, extraBlocks: string[] = []): string {
+  const size = PAGE_SIZES[options.page];
+  const fonts = FONT_PRESETS[options.fonts];
+  const target = options.theme === "both" ? "screen" : options.theme;
+  const themeBlock = options.theme !== "screen"
+    ? [
+        "  theme \"print\" {",
+        "    tokens {",
+        "      color.text = \"#1b1a17\";",
+        "      color.muted = \"#6a6258\";",
+        "      color.accent = \"#0c7f7a\";",
+        "    }",
+        "  }",
+      ].join("\n")
+    : "";
+
+  const assetsBlock = options.assets
+    ? [
+        "  assets {",
+        "    // Asset bank for local images. Drop files into ./assets.",
+        "    bank media {",
+        "      kind = image;",
+        "      root = \"assets\";",
+        "      include = \"*.{png,jpg,jpeg,svg}\";",
+        "      strategy = uniform;",
+        "    }",
+        "  }",
+      ].join("\n")
+    : "";
+
+  return [
+    "/// Flux document starter. Edit the text nodes and styles below.",
+    "document {",
+    "  meta {",
+    `    title = \"${escapeString(options.title)}\";`,
+    "    version = \"0.3.0\";",
+    `    target = \"${target}\";`,
+    "  }",
+    "",
+    "  pageConfig {",
+    "    size {",
+    `      width = ${size.width};`,
+    `      height = ${size.height};`,
+    `      units = \"${size.units}\";`,
+    "    }",
+    "  }",
+    "",
+    "  tokens {",
+    `    font.body = \"${fonts.body}\";`,
+    `    font.heading = \"${fonts.heading}\";`,
+    `    font.mono = \"${fonts.mono}\";`,
+    "    color.text = \"#1d1b17\";",
+    "    color.muted = \"#6b645a\";",
+    "    color.accent = \"#0ea5a4\";",
+    "    space.xs = 2;",
+    "    space.s = 4;",
+    "    space.m = 8;",
+    "    space.l = 12;",
+    "    space.xl = 18;",
+    "  }",
+    "",
+    "  styles {",
+    "    Body {",
+    "      font.family = @tokens.font.body;",
+    "      font.size = 11;",
+    "      line.height = 1.45;",
+    "      color = @tokens.color.text;",
+    "      space.after = @tokens.space.m;",
+    "    }",
+    "    H1 : Body {",
+    "      font.family = @tokens.font.heading;",
+    "      font.size = 18;",
+    "      font.weight = 600;",
+    "      space.before = @tokens.space.m;",
+    "      space.after = @tokens.space.s;",
+    "    }",
+    "    H2 : Body {",
+    "      font.family = @tokens.font.heading;",
+    "      font.size = 14;",
+    "      font.weight = 600;",
+    "      space.before = @tokens.space.s;",
+    "      space.after = @tokens.space.xs;",
+    "    }",
+    "    Title : H1 {",
+    "      font.size = 26;",
+    "      letter.spacing = \"0.02em\";",
+    "      space.after = @tokens.space.s;",
+    "    }",
+    "    Subtitle : Body {",
+    "      color = @tokens.color.muted;",
+    "      font.size = 12;",
+    "      space.after = @tokens.space.m;",
+    "    }",
+    "    Caption : Body {",
+    "      font.size = 9.5;",
+    "      color = @tokens.color.muted;",
+    "    }",
+    "    Code : Body {",
+    "      font.family = @tokens.font.mono;",
+    "      font.size = 9.5;",
+    "      background = \"#f4f0e9\";",
+    "      padding = @tokens.space.s;",
+    "      border.radius = 6;",
+    "    }",
+    "  }",
+    themeBlock,
+    assetsBlock,
+    extraBlocks.join("\n"),
+    "",
+    "  body {",
+    indent(bodyContent, 2),
+    "  }",
+    "}",
+    "",
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
+}
+
+function buildDemoTemplate(options: TemplateOptions): TemplateOutput {
+  const liveLine = options.live
+    ? [
+        "text liveLabel { style = \"H2\"; content = \"Live slots\"; }",
+        "text liveBody {",
+        "  content = \"Docstep: \";",
+        "  inline_slot liveStep {",
+        "    reserve = fixedWidth(6, ch);",
+        "    fit = ellipsis;",
+        "    refresh = onDocstep;",
+        "    text liveValue { content = @docstep; }",
+        "  }",
+        "  text liveTail { content = \" - time \"; }",
+        "  inline_slot liveTime {",
+        "    reserve = fixedWidth(6, ch);",
+        "    fit = ellipsis;",
+        "    refresh = onDocstep;",
+        "    text liveTimeValue { content = @time; }",
+        "  }",
+        "  text liveTail2 { content = \"s\"; }",
+        "}",
+      ].join("\n")
+    : [
+        "text liveLabel { style = \"H2\"; content = \"Static snapshot\"; }",
+        "text liveBody { content = \"Live slots disabled. Flip the setting to enable.\"; }",
+      ].join("\n");
+
+  const body = [
+    "page cover {",
+    "  /// Update the title + subtitle below.",
+    "  section hero {",
+    `    text title { role = \"title\"; style = \"Title\"; content = \"${escapeString(options.title)}\"; }`,
+    "    text subtitle { role = \"subtitle\"; style = \"Subtitle\"; content = \"A 2026 demo for Flux\"; }",
+    "    text byline { content = \"Prepared with flux new\"; }",
+    "  }",
+    "  section summary {",
+    "    text summaryHeading { style = \"H1\"; content = \"What to edit next\"; }",
+    "    text summaryBody { content = \"Replace these paragraphs, tweak styles, and wire assets.\"; }",
+    "  }",
+    indent(liveLine, 2),
+    "  section demoActions {",
+    "    text demoHeading { style = \"H1\"; content = \"Assets + slots\"; }",
+    "    slot demoSlot {",
+    "      reserve = fixed(260, 120, px);",
+    "      fit = scaleDown;",
+    "      refresh = onDocstep;",
+    "      text demoSlotText { content = \"Drop a figure or image here.\"; }",
+    "    }",
+    "  }",
+    "}",
+    ...buildChapterIncludes(options.chapters),
+  ].join("\n");
+
+  return {
+    mainFlux: buildBaseDoc(options, body),
+    readme: buildReadme(options),
+    chapters: buildChapters(options.chapters),
+    assetsDir: options.assets ? "assets" : undefined,
+  };
+}
+
+function buildArticleTemplate(options: TemplateOptions): TemplateOutput {
+  const body = [
+    "page article {",
+    "  section lead {",
+    `    text title { role = \"title\"; style = \"Title\"; content = \"${escapeString(options.title)}\"; }`,
+    "    text subtitle { role = \"subtitle\"; style = \"Subtitle\"; content = \"Short deck for the story.\"; }",
+    "  }",
+    "  section intro {",
+    "    text introHeading { style = \"H1\"; content = \"Introduction\"; }",
+    "    text introBody { content = \"Open with a strong paragraph that sets context.\"; }",
+    "  }",
+    "  section body {",
+    "    text bodyHeading { style = \"H1\"; content = \"Main section\"; }",
+    "    text bodyText { content = \"Add narrative content, quotes, and figures.\"; }",
+    "  }",
+    "}",
+    ...buildChapterIncludes(options.chapters),
+  ].join("\n");
+
+  return {
+    mainFlux: buildBaseDoc(options, body),
+    readme: buildReadme(options),
+    chapters: buildChapters(options.chapters),
+    assetsDir: options.assets ? "assets" : undefined,
+  };
+}
+
+function buildSpecTemplate(options: TemplateOptions): TemplateOutput {
+  const body = [
+    "page spec {",
+    "  section overview {",
+    `    text title { role = \"title\"; style = \"Title\"; content = \"${escapeString(options.title)}\"; }`,
+    "    text subtitle { role = \"subtitle\"; style = \"Subtitle\"; content = \"Specification draft\"; }",
+    "  }",
+    "  section requirements {",
+    "    text reqHeading { style = \"H1\"; content = \"Requirements\"; }",
+    "    text reqBody { content = \"List functional and non-functional requirements.\"; }",
+    "    table reqTable {",
+    "      rows = [",
+    "        [\"ID\", \"Requirement\"],",
+    "        [\"REQ-1\", \"Describe the core behavior\"],",
+    "      ];",
+    "      header = true;",
+    "    }",
+    "  }",
+    "  section api {",
+    "    text apiHeading { style = \"H1\"; content = \"API sketch\"; }",
+    "    codeblock apiBlock { content = \"GET /api/status\\nPOST /api/update\"; }",
+    "  }",
+    "}",
+    ...buildChapterIncludes(options.chapters),
+  ].join("\n");
+
+  return {
+    mainFlux: buildBaseDoc(options, body),
+    readme: buildReadme(options),
+    chapters: buildChapters(options.chapters),
+    assetsDir: options.assets ? "assets" : undefined,
+  };
+}
+
+function buildZineTemplate(options: TemplateOptions): TemplateOutput {
+  const body = [
+    "page zine {",
+    "  section splash {",
+    `    text title { role = \"title\"; style = \"Title\"; content = \"${escapeString(options.title)}\"; }`,
+    "    text subtitle { role = \"subtitle\"; style = \"Subtitle\"; content = \"Visual zine layout\"; }",
+    "  }",
+    "  row highlights {",
+    "    column left {",
+    "      text leftHeading { style = \"H2\"; content = \"Left column\"; }",
+    "      text leftBody { content = \"Short bites and captions.\"; }",
+    "    }",
+    "    column right {",
+    "      text rightHeading { style = \"H2\"; content = \"Right column\"; }",
+    "      text rightBody { content = \"Add illustration or collage.\"; }",
+    "    }",
+    "  }",
+    "  callout zineCallout {",
+    "    tone = \"note\";",
+    "    text calloutText { content = \"Use callouts for side notes.\"; }",
+    "  }",
+    "}",
+    ...buildChapterIncludes(options.chapters),
+  ].join("\n");
+
+  return {
+    mainFlux: buildBaseDoc(options, body),
+    readme: buildReadme(options),
+    chapters: buildChapters(options.chapters),
+    assetsDir: options.assets ? "assets" : undefined,
+  };
+}
+
+function buildPaperTemplate(options: TemplateOptions): TemplateOutput {
+  const body = [
+    "page paper {",
+    "  section titleBlock {",
+    `    text title { role = \"title\"; style = \"Title\"; content = \"${escapeString(options.title)}\"; }`,
+    "    text subtitle { role = \"subtitle\"; style = \"Subtitle\"; content = \"Abstract + references\"; }",
+    "  }",
+    "  section abstract {",
+    "    text abstractHeading { style = \"H2\"; content = \"Abstract\"; }",
+    "    text abstractBody { content = \"Summarize the contribution.\"; }",
+    "  }",
+    "  section main {",
+    "    text mainHeading { style = \"H1\"; content = \"Main section\"; }",
+    "    text mainBody { content = \"Describe methods and results.\"; }",
+    "  }",
+    "  section references {",
+    "    text refHeading { style = \"H2\"; content = \"References\"; }",
+    "    text refBody { content = \"Add citations or a bibliography list.\"; }",
+    "  }",
+    "}",
+    ...buildChapterIncludes(options.chapters),
+  ].join("\n");
+
+  return {
+    mainFlux: buildBaseDoc(options, body),
+    readme: buildReadme(options),
+    chapters: buildChapters(options.chapters),
+    assetsDir: options.assets ? "assets" : undefined,
+  };
+}
+
+function buildReadme(options: TemplateOptions): string {
+  return [
+    "# Flux Document",
+    "",
+    "This folder was generated by `flux new`.",
+    "",
+    "## Next steps",
+    "- Run `flux view <doc>.flux` to preview the document.",
+    "- Edit text nodes inside the `.flux` file.",
+    "- Slots reserve space for live content: use `reserve` + `fit` policies.",
+    "- Asset banks live under the `assets` block (if enabled).",
+    "- Export a snapshot with `flux pdf <doc>.flux --out output.pdf`.",
+    "",
+    `Default page size: ${options.page}`,
+    `Theme: ${options.theme}`,
+    `Fonts: ${options.fonts}`,
+    "",
+  ].join("\n");
+}
+
+function buildChapters(count: number): { path: string; content: string }[] {
+  const chapters: { path: string; content: string }[] = [];
+  for (let i = 1; i <= count; i += 1) {
+    const name = `chapter-${i}.flux`;
+    const content = [
+      "document {",
+      "  meta {",
+      "    version = \"0.3.0\";",
+      "  }",
+      "  body {",
+      `    section chapter${i} {`,
+      `      text heading { style = \"H2\"; content = \"Chapter ${i}\"; }`,
+      "      text body { content = \"Edit this chapter file.\"; }",
+      "    }",
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+    chapters.push({ path: name, content });
+  }
+  return chapters;
+}
+
+function buildChapterIncludes(count: number): string[] {
+  if (count <= 0) return [];
+  const lines = ["", "/// Chapter includes"];
+  for (let i = 1; i <= count; i += 1) {
+    lines.push(`include chapter${i} { path = \"chapters/chapter-${i}.flux\"; }`);
+  }
+  return lines;
+}
+
+function indent(text: string, level: number): string {
+  const prefix = "  ".repeat(level);
+  return text
+    .split("\n")
+    .map((line) => (line.length ? prefix + line : ""))
+    .join("\n");
+}
+
+function escapeString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
+}
