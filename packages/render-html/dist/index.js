@@ -396,3 +396,4 @@ function escapeAttr(value) {
 function transparentPixel() {
     return "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
 }
+//# sourceMappingURL=index.js.map
