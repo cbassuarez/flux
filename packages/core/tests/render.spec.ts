@@ -34,6 +34,49 @@ describe("Flux render IR v0.2", () => {
     expect(second).toEqual(first);
   });
 
+  it("chooseStep selects by docstep deterministically", () => {
+    const src = `
+      document {
+        meta { version = "0.2.0"; }
+        body {
+          page p1 {
+            text t1 { refresh = onDocstep; content = @chooseStep(["a", "b", "c"]); }
+          }
+        }
+      }
+    `;
+    const doc = parseDocument(src);
+
+    const step0 = renderDocument(doc, { docstep: 0 });
+    const step1 = renderDocument(doc, { docstep: 1 });
+    const step3 = renderDocument(doc, { docstep: 3 });
+
+    const v0 = step0.body[0].children[0].props.content;
+    const v1 = step1.body[0].children[0].props.content;
+    const v3 = step3.body[0].children[0].props.content;
+
+    expect(v0).toBe("a");
+    expect(v1).toBe("b");
+    expect(v3).toBe("a");
+  });
+
+  it("chooseStep rejects empty lists", () => {
+    const src = `
+      document {
+        meta { version = "0.2.0"; }
+        body {
+          page p1 {
+            text t1 { content = @chooseStep([]); }
+          }
+        }
+      }
+    `;
+    const doc = parseDocument(src);
+    expect(() => renderDocument(doc, { docstep: 0 })).toThrow(
+      "chooseStep(list) expects a non-empty list",
+    );
+  });
+
   it("scopes refresh to onLoad vs onDocstep", () => {
     const src = `
       document {
