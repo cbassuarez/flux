@@ -1,5 +1,5 @@
 import path from "node:path";
-import { renderDocument, type RenderDocumentIR } from "@flux-lang/core";
+import { renderDocumentIR, type RenderDocumentIR } from "@flux-lang/core";
 import type { FluxDocument } from "@flux-lang/core";
 import { errorResult, okResult, type CommandResult } from "../types.js";
 import { formatIoError, formatParseOrLexerError, parseFlux, readSource } from "./common.js";
@@ -45,7 +45,7 @@ export async function renderCommand(options: RenderOptions): Promise<CommandResu
   }
 
   const dir = file === "-" ? process.cwd() : path.dirname(path.resolve(file));
-  const rendered = renderDocument(doc, {
+  const rendered = renderDocumentIR(doc, {
     seed: options.seed,
     time: options.time,
     docstep: options.docstep,

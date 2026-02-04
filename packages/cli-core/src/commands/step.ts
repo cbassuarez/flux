@@ -1,5 +1,5 @@
 import path from "node:path";
-import { createDocumentRuntime } from "@flux-lang/core";
+import { createDocumentRuntimeIR } from "@flux-lang/core";
 import type { FluxDocument, RenderDocumentIR } from "@flux-lang/core";
 import { errorResult, okResult, type CommandResult } from "../types.js";
 import { formatIoError, formatParseOrLexerError, parseFlux, readSource } from "./common.js";
@@ -35,7 +35,7 @@ export async function stepCommand(options: StepOptions): Promise<CommandResult<S
   }
 
   const dir = options.file === "-" ? process.cwd() : path.dirname(path.resolve(options.file));
-  const runtime = createDocumentRuntime(doc, { seed: options.seed, assetCwd: dir });
+  const runtime = createDocumentRuntimeIR(doc, { seed: options.seed, assetCwd: dir });
   const rendered = runtime.step(count);
   return okResult({ rendered });
 }
