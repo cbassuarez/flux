@@ -33,7 +33,7 @@ Keywords (reserved):
 
 ```text
 document, meta, state, pageConfig, assets, asset, bank, body,
-page, section, row, column, spacer, text, image, figure, table, grid, slot,
+page, section, row, column, spacer, text, image, figure, table, grid, slot, inline_slot,
 refresh, onLoad, onDocstep, every, never,
 size, cell, tags, content, mediaId, payload, dynamic, density, salience, numericFields,
 param, int, float, bool, string, enum, rule, when, then, else,
@@ -137,7 +137,7 @@ NodeItem    ::= NodeDecl | RefreshField | PropField
 
 NodeDecl    ::= NodeKind IDENT NodeBlock
 NodeKind    ::= "page" | "section" | "row" | "column" | "spacer"
-             | "text" | "image" | "figure" | "table" | "grid" | "slot"
+             | "text" | "image" | "figure" | "table" | "grid" | "slot" | "inline_slot"
 
 RefreshField ::= "refresh" "=" RefreshPolicy ";"
 RefreshPolicy ::= "onLoad" | "onDocstep" | "never" | "every" "(" Duration ")"
@@ -148,6 +148,30 @@ Value       ::= Literal | ListLiteral | "@" Expr
 
 If a node omits `refresh`, it inherits the nearest ancestor refresh policy.
 If no ancestor defines a refresh policy, the default is `onLoad`.
+
+### Slot constraints (layout-locked)
+
+Slots and inline slots reserve geometry and must declare a fit policy:
+
+```ebnf
+SlotReserve ::= "fixed" "(" NUMBER "," NUMBER "," IDENT ")"
+InlineSlotReserve ::= "fixedWidth" "(" NUMBER "," IDENT ")"
+SlotFit ::= "clip" | "ellipsis" | "shrink" | "scaleDown"
+```
+
+Slots are expected to provide:
+
+```
+slot mySlot {
+  reserve = fixed(200, 80, px);
+  fit = clip;
+}
+
+inline_slot word {
+  reserve = fixedWidth(120, px);
+  fit = ellipsis;
+}
+```
 
 ## 7. Grids and cells (v0.1 legacy)
 

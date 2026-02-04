@@ -48,7 +48,9 @@ The legacy `materials` block remains supported and is mapped into the assets cat
 The `body` block defines the document structure:
 
 - **page** is the top-level node type inside `body`.
-- Supported node kinds: `page`, `section`, `row`, `column`, `spacer`, `text`, `image`, `figure`, `table`, `grid`, `slot`.
+- Supported node kinds: `page`, `section`, `row`, `column`, `spacer`, `text`, `image`, `figure`, `table`, `grid`, `slot`, `inline_slot`.
+
+- Live-refresh nodes must be layout-locked inside slots/inline slots with declared `reserve` and `fit` policies to prevent reflow.
 - Each node has an `id`, `props`, optional `refresh`, and child nodes.
 
 ### Dynamic properties and refresh

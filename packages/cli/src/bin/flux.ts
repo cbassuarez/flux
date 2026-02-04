@@ -10,10 +10,16 @@ import {
     createRuntime,
     createDocumentRuntime,
     renderDocument,
+    renderDocumentIR,
     type Runtime,
 } from "@flux-lang/core";
 import type { FluxDocument } from "@flux-lang/core";
+import { renderHtml } from "@flux-lang/render-html";
+import { createTypesetterBackend } from "@flux-lang/typesetter";
+import { startViewerServer } from "@flux-lang/viewer";
 import { runViewer } from "../view/runViewer.js";
+import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 
 type ExitCode = 0 | 1 | 2;
@@ -75,6 +81,10 @@ async function main(argv: string[]): Promise<ExitCode> {
             printTickHelp();
         } else if (cmd === "step") {
             printStepHelp();
+        } else if (cmd === "view") {
+            printViewHelp();
+        } else if (cmd === "pdf") {
+            printPdfHelp();
         } else {
             printGlobalHelp();
         }
@@ -113,6 +123,10 @@ async function main(argv: string[]): Promise<ExitCode> {
         return runView(rest);
     }
 
+    if (cmd === "pdf") {
+        return runPdf(rest);
+    }
+
     console.error(`Unknown command '${cmd}'.`);
     printGlobalHelp();
     return 1;
@@ -134,6 +148,7 @@ function printGlobalHelp(): void {
             "  flux tick [options] <file>",
             "  flux step [options] <file>",
             "  flux view <file>",
+            "  flux pdf <file> --out <file.pdf>",
             "",
             "Commands:",
             "  parse   Parse Flux source files and print their IR as JSON.",
@@ -141,7 +156,8 @@ function printGlobalHelp(): void {
             "  render  Render a Flux document to canonical Render IR JSON.",
             "  tick    Advance time and render the updated document.",
             "  step    Advance docsteps and render the updated document.",
-            "  view    View a Flux document in a simple docstep viewer.",
+            "  view    View a Flux document in a local web preview.",
+            "  pdf     Export a Flux document snapshot to PDF.",
             "",
             "Global options:",
             "  -h, --help      Show this help message.",
@@ -239,6 +255,46 @@ function printStepHelp(): void {
             "  --n N       Docsteps to advance by (default: 1).",
             "  --seed N    Deterministic RNG seed (default: 0).",
             "  -h, --help  Show this message.",
+            "",
+        ].join("\n"),
+    );
+}
+
+function printViewHelp(): void {
+    console.log(
+        [
+            "Usage:",
+            "  flux view [options] <file>",
+            "",
+            "Description:",
+            "  Open a local web viewer for a Flux document.",
+            "",
+            "Options:",
+            "  --port <n>          Port for the local server (default: auto).",
+            "  --docstep-ms <n>    Docstep interval in milliseconds.",
+            "  --seed <n>          Seed for deterministic rendering.",
+            "  --allow-net <orig>  Allow remote assets for origin (repeatable or comma-separated).",
+            "  --tty              Use the legacy TTY grid viewer.",
+            "  -h, --help          Show this message.",
+            "",
+        ].join("\n"),
+    );
+}
+
+function printPdfHelp(): void {
+    console.log(
+        [
+            "Usage:",
+            "  flux pdf [options] <file> --out <file.pdf>",
+            "",
+            "Description:",
+            "  Render a Flux document snapshot to PDF.",
+            "",
+            "Options:",
+            "  --out <file>      Output PDF path. (required)",
+            "  --seed <n>        Seed for deterministic rendering.",
+            "  --docstep <n>     Docstep to render.",
+            "  -h, --help        Show this message.",
             "",
         ].join("\n"),
     );
@@ -654,29 +710,198 @@ async function runStep(args: string[]): Promise<ExitCode> {
 /* -------------------------------------------------------------------------- */
 
 async function runView(args: string[]): Promise<ExitCode> {
-    if (args.length === 0) {
-        console.error("flux view: No input file specified.");
+    let port: number | undefined;
+    let docstepMs: number | undefined;
+    let seed: number | undefined;
+    let useTty = false;
+    const allowNet: string[] = [];
+    let file: string | undefined;
+
+    try {
+        for (let i = 0; i < args.length; i += 1) {
+            const arg = args[i];
+            if (arg === "--tty") {
+                useTty = true;
+            } else if (arg === "--port") {
+                port = parseNumberFlag("--port", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--port=")) {
+                port = parseNumberFlag("--port", arg.slice("--port=".length));
+            } else if (arg === "--docstep-ms") {
+                docstepMs = parseNumberFlag("--docstep-ms", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--docstep-ms=")) {
+                docstepMs = parseNumberFlag("--docstep-ms", arg.slice("--docstep-ms=".length));
+            } else if (arg === "--seed") {
+                seed = parseNumberFlag("--seed", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--seed=")) {
+                seed = parseNumberFlag("--seed", arg.slice("--seed=".length));
+            } else if (arg === "--allow-net") {
+                const raw = args[i + 1] ?? "";
+                allowNet.push(...raw.split(",").map((item) => item.trim()).filter(Boolean));
+                i += 1;
+            } else if (arg.startsWith("--allow-net=")) {
+                const raw = arg.slice("--allow-net=".length);
+                allowNet.push(...raw.split(",").map((item) => item.trim()).filter(Boolean));
+            } else if (!arg.startsWith("-")) {
+                file = arg;
+            }
+        }
+    } catch (error) {
+        console.error(`flux view: ${(error as Error)?.message ?? error}`);
         return 1;
     }
 
-    const docPath = path.resolve(args[0]);
+    if (!file) {
+        console.error("flux view: No input file specified.");
+        printViewHelp();
+        return 1;
+    }
+    if (file === "-") {
+        console.error("flux view: stdin input is not supported for the web viewer.");
+        return 1;
+    }
+
+    const docPath = path.resolve(file);
+
+    if (useTty) {
+        try {
+            const source = await fs.readFile(docPath, "utf8");
+            const doc = parseDocument(source);
+            const runtime = createRuntime(doc, { clock: "manual" });
+
+            const labels = new Map<string, string>();
+            for (const mat of doc.materials?.materials ?? []) {
+                labels.set(mat.name, mat.label ?? mat.name);
+            }
+
+            await runViewer(runtime, { docPath, title: doc.meta.title, materialLabels: labels });
+            return 0;
+        } catch (error) {
+            console.error(`flux view: ${String((error as Error)?.message ?? error)}`);
+            return 1;
+        }
+    }
 
     try {
-        const source = await fs.readFile(docPath, "utf8");
-        const doc = parseDocument(source);
-        const runtime = createRuntime(doc, { clock: "manual" });
+        const server = await startViewerServer({
+            docPath,
+            port,
+            docstepMs,
+            seed,
+            allowNet,
+        });
+        console.log(`Flux viewer running at ${server.url}`);
+        console.log("Press Ctrl+C to stop.");
+        openBrowser(server.url);
 
-        const labels = new Map<string, string>();
-        for (const mat of doc.materials?.materials ?? []) {
-            labels.set(mat.name, mat.label ?? mat.name);
-        }
-
-        await runViewer(runtime, { docPath, title: doc.meta.title, materialLabels: labels });
+        await new Promise<void>((resolve) => {
+            const shutdown = async () => {
+                await server.close();
+                resolve();
+            };
+            process.on("SIGINT", shutdown);
+            process.on("SIGTERM", shutdown);
+        });
         return 0;
     } catch (error) {
         console.error(`flux view: ${String((error as Error)?.message ?? error)}`);
         return 1;
     }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  flux pdf                                  */
+/* -------------------------------------------------------------------------- */
+
+async function runPdf(args: string[]): Promise<ExitCode> {
+    let seed: number | undefined;
+    let docstep: number | undefined;
+    let outPath: string | undefined;
+    let file: string | undefined;
+
+    try {
+        for (let i = 0; i < args.length; i += 1) {
+            const arg = args[i];
+            if (arg === "--out") {
+                outPath = args[i + 1];
+                i += 1;
+            } else if (arg.startsWith("--out=")) {
+                outPath = arg.slice("--out=".length);
+            } else if (arg === "--seed") {
+                seed = parseNumberFlag("--seed", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--seed=")) {
+                seed = parseNumberFlag("--seed", arg.slice("--seed=".length));
+            } else if (arg === "--docstep") {
+                docstep = parseNumberFlag("--docstep", args[i + 1]);
+                i += 1;
+            } else if (arg.startsWith("--docstep=")) {
+                docstep = parseNumberFlag("--docstep", arg.slice("--docstep=".length));
+            } else if (!arg.startsWith("-")) {
+                file = arg;
+            }
+        }
+    } catch (error) {
+        console.error(`flux pdf: ${(error as Error)?.message ?? error}`);
+        return 1;
+    }
+
+    if (!file) {
+        console.error("flux pdf: No input file specified.");
+        printPdfHelp();
+        return 1;
+    }
+    if (!outPath) {
+        console.error("flux pdf: --out <file.pdf> is required.");
+        printPdfHelp();
+        return 1;
+    }
+
+    let source: string;
+    try {
+        source = await readSource(file);
+    } catch (error) {
+        console.error(formatIoError(file, error));
+        return 1;
+    }
+
+    let doc: FluxDocument;
+    try {
+        doc = parseDocument(source);
+    } catch (error) {
+        console.error(formatParseOrLexerError(file, error));
+        return 1;
+    }
+
+    const dir = file === "-" ? process.cwd() : path.dirname(path.resolve(file));
+    const ir = renderDocumentIR(doc, { seed, docstep, assetCwd: dir });
+
+    const placeholder =
+        "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+
+    const assetUrl = (assetId: string): string => {
+        const asset = ir.assets.find((entry) => entry.id === assetId);
+        if (!asset?.path) return placeholder;
+        const resolved = path.isAbsolute(asset.path) ? asset.path : path.resolve(dir, asset.path);
+        return pathToFileURL(resolved).toString();
+    };
+
+    const rawUrl = (raw: string): string => {
+        if (raw.startsWith("http://") || raw.startsWith("https://")) {
+            return placeholder;
+        }
+        const resolved = path.isAbsolute(raw) ? raw : path.resolve(dir, raw);
+        return pathToFileURL(resolved).toString();
+    };
+
+    const { html, css } = renderHtml(ir, { assetUrl, rawUrl });
+    const typesetter = createTypesetterBackend();
+    const pdf = await typesetter.pdf(html, css, { allowFile: true });
+    await fs.writeFile(outPath, pdf);
+    console.log(`Wrote PDF to ${outPath}`);
+    return 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -738,4 +963,20 @@ function parseNumberFlag(flag: string, raw: string | undefined): number {
         throw new Error(`Invalid number for ${flag}: '${raw}'`);
     }
     return value;
+}
+
+function openBrowser(url: string): void {
+    try {
+        if (process.platform === "darwin") {
+            spawn("open", [url], { stdio: "ignore", detached: true });
+            return;
+        }
+        if (process.platform === "win32") {
+            spawn("cmd", ["/c", "start", "", url], { stdio: "ignore", detached: true });
+            return;
+        }
+        spawn("xdg-open", [url], { stdio: "ignore", detached: true });
+    } catch {
+        // best-effort
+    }
 }

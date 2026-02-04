@@ -1,0 +1,34 @@
+{
+  "name": "@flux-lang/render-html",
+  "version": "0.1.0",
+  "description": "HTML/CSS renderer for Flux RenderDocumentIR.",
+  "license": "MIT",
+  "author": "Sebastian Suarez-Solis",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@flux-lang/core": "^0.1.6",
+    "hyphenation.en-us": "^0.2.1",
+    "hypher": "^0.2.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

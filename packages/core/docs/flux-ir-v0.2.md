@@ -6,6 +6,7 @@ There are two related JSON shapes:
 
 1. **AST IR** (`FluxDocument`) produced by `parseDocument(source)`.
 2. **Render IR** (`RenderDocument`) produced by `renderDocument(doc, options)`.
+3. **Render Document IR** (`RenderDocumentIR`) produced by `renderDocumentIR(doc, options)` with stable node IDs and refresh/slot constraints.
 
 The Render IR is the canonical, fully-resolved output used by viewers and exporters.
 
@@ -24,6 +25,37 @@ interface RenderDocument {
   body: RenderNode[];
 }
 ```
+
+## Render Document IR (with stable node IDs)
+
+```ts
+interface RenderDocumentIR {
+  meta: FluxMeta;
+  seed: number;
+  time: number;
+  docstep: number;
+  pageConfig?: PageConfig;
+  assets: RenderAsset[];
+  body: RenderNodeIR[];
+}
+
+interface RenderNodeIR {
+  nodeId: string;       // stable, path-based identifier
+  id: string;
+  kind: string;
+  props: Record<string, RenderValue>;
+  children: RenderNodeIR[];
+  refresh: RefreshPolicy;
+  slot?: {
+    reserve: SlotReserve;
+    fit: SlotFitPolicy;
+  };
+  grid?: RenderGridData;
+}
+```
+
+Slot nodes carry their `reserve` geometry and `fit` policy so renderers can lock layout and apply
+patching without reflow.
 
 ### Assets
 
