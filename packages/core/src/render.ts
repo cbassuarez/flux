@@ -860,6 +860,24 @@ function evalCall(expr: any, ctx: EvalContext): unknown {
     if (name === "chooseStep") {
       return evalChooseStep(expr.args, ctx);
     }
+    if (name === "cycle") {
+      return evalCycle(expr.args, ctx);
+    }
+    if (name === "hashpick") {
+      return evalHashpick(expr.args, ctx);
+    }
+    if (name === "phase") {
+      return evalPhase(expr.args, ctx);
+    }
+    if (name === "lerp") {
+      return evalLerp(expr.args, ctx);
+    }
+    if (name === "shuffle") {
+      return evalShuffle(expr.args, ctx);
+    }
+    if (name === "sample") {
+      return evalSample(expr.args, ctx);
+    }
     if (name === "now" || name === "timeSeconds") {
       return ctx.time;
     }
@@ -927,6 +945,85 @@ function evalChooseStep(args: any[], ctx: EvalContext): unknown {
   const offset = typeof offsetRaw === "number" && Number.isFinite(offsetRaw) ? offsetRaw : 0;
   const idx = Math.abs(Math.floor(ctx.docstep + offset)) % list.length;
   return list[idx];
+}
+
+function evalCycle(args: any[], ctx: EvalContext): unknown {
+  const { positional, named } = evalCallArgs(args, ctx);
+  const list = (named.list ?? positional[0]) as unknown;
+  if (!Array.isArray(list)) {
+    throw new Error("cycle(list, index) expects a list");
+  }
+  if (list.length === 0) return null;
+  const rawIndex = named.index ?? positional[1] ?? ctx.docstep;
+  const indexValue = typeof rawIndex === "number" && Number.isFinite(rawIndex) ? rawIndex : 0;
+  const idx = ((Math.floor(indexValue) % list.length) + list.length) % list.length;
+  return list[idx];
+}
+
+function evalHashpick(args: any[], ctx: EvalContext): unknown {
+  const { positional, named } = evalCallArgs(args, ctx);
+  const list = (named.list ?? positional[0]) as unknown;
+  if (!Array.isArray(list)) {
+    throw new Error("hashpick(list, key) expects a list");
+  }
+  if (list.length === 0) return null;
+  const keyRaw = named.key ?? positional[1];
+  if (keyRaw == null) {
+    throw new Error("hashpick(list, key) expects a key");
+  }
+  const hash = stableHash(String(keyRaw));
+  const idx = hash % list.length;
+  return list[idx];
+}
+
+function evalPhase(args: any[], ctx: EvalContext): number {
+  const { positional, named } = evalCallArgs(args, ctx);
+  const raw = named.value ?? positional[0] ?? ctx.docstep;
+  const value = typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+  const floor = Math.floor(value);
+  return value - floor;
+}
+
+function evalLerp(args: any[], ctx: EvalContext): number {
+  const { positional, named } = evalCallArgs(args, ctx);
+  const a = named.a ?? positional[0];
+  const b = named.b ?? positional[1];
+  const t = named.t ?? positional[2];
+  if (![a, b, t].every((v) => typeof v === "number" && Number.isFinite(v))) {
+    throw new Error("lerp(a, b, t) expects numeric arguments");
+  }
+  return (a as number) + ((b as number) - (a as number)) * (t as number);
+}
+
+function evalShuffle(args: any[], ctx: EvalContext): unknown[] {
+  const { positional, named } = evalCallArgs(args, ctx);
+  const list = (named.list ?? positional[0]) as unknown;
+  if (!Array.isArray(list)) {
+    throw new Error("shuffle(list) expects a list");
+  }
+  return shuffleList(list, ctx.rng);
+}
+
+function evalSample(args: any[], ctx: EvalContext): unknown[] {
+  const { positional, named } = evalCallArgs(args, ctx);
+  const list = (named.list ?? positional[0]) as unknown;
+  if (!Array.isArray(list)) {
+    throw new Error("sample(list, n) expects a list");
+  }
+  const nRaw = named.n ?? positional[1] ?? 1;
+  const n = typeof nRaw === "number" && Number.isFinite(nRaw) ? Math.floor(nRaw) : 1;
+  if (n <= 0) return [];
+  const shuffled = shuffleList(list, ctx.rng);
+  return shuffled.slice(0, Math.min(n, shuffled.length));
+}
+
+function shuffleList(list: unknown[], rng: () => number): unknown[] {
+  const items = [...list];
+  for (let i = items.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items;
 }
 
 function describeCallee(callee: any): string | null {
