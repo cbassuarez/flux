@@ -29,6 +29,19 @@ export function renderHtml(doc, options = {}) {
     ].join("");
     return { html, css, assets, slots: slotMap };
 }
+export function renderSlotMap(doc, options = {}) {
+    const slotMap = {};
+    const renderOptions = {
+        hyphenate: options.hyphenate !== false,
+        slots: slotMap,
+        assetUrl: options.assetUrl,
+        rawUrl: options.rawUrl,
+    };
+    doc.body.forEach((node) => {
+        renderNode(node, renderOptions);
+    });
+    return slotMap;
+}
 function buildCss(page, margins, fonts) {
     const pageWidth = `${page.width}${page.units}`;
     const pageHeight = `${page.height}${page.units}`;
@@ -254,7 +267,7 @@ function renderSlot(node, attrs, inline, childHtml, slots) {
     const style = styleParts.length ? ` style="${styleParts.join(";")}"` : "";
     const fitClass = fit ? ` flux-fit-${fit}` : "";
     const className = inline ? `flux-inline-slot${fitClass}` : `flux-slot${fitClass}`;
-    return `<${inline ? "span" : "div"} class="${className}" ${attrs}${style}><div class="flux-slot-inner">${childHtml}</div></${inline ? "span" : "div"}>`;
+    return `<${inline ? "span" : "div"} class="${className}" ${attrs}${style}><div class="flux-slot-inner" data-flux-slot-inner>${childHtml}</div></${inline ? "span" : "div"}>`;
 }
 function renderImage(node, attrs, options) {
     const { src, assetId, raw } = resolveImageSource(node.props, options);

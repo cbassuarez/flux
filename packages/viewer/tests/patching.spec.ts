@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RenderDocumentIR, RenderNodeIR } from "@flux-lang/core";
-import { collectSlotHashes, diffSlotIds, shrinkToFit, scaleDownToFit } from "../src/patching";
+import { applySlotPatches, collectSlotHashes, diffSlotIds, shrinkToFit, scaleDownToFit } from "../src/patching";
 
 function makeSlot(content: string): RenderNodeIR {
   return {
@@ -96,5 +96,19 @@ describe("viewer patching", () => {
     const scale = scaleDownToFit(container, inner);
     expect(scale).toBeCloseTo(0.5, 2);
     expect(inner.style.transform).toContain("scale(0.5");
+  });
+
+  it("applies slot patches inside the preview document", () => {
+    const inner = { innerHTML: "" } as HTMLElement;
+    const slot = {
+      querySelector: (selector: string) => (selector.includes("data-flux-slot-inner") ? inner : null),
+    } as unknown as Element;
+    const root = {
+      querySelector: (selector: string) => (selector.includes('data-flux-id="slot-1"') ? slot : null),
+    };
+
+    const missing = applySlotPatches(root, { "slot-1": "<span>Updated</span>" });
+    expect(inner.innerHTML).toBe("<span>Updated</span>");
+    expect(missing).toEqual([]);
   });
 });
