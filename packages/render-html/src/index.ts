@@ -38,17 +38,17 @@ export interface RenderHtmlOptions {
 }
 
 const DEFAULT_PAGE = { width: 8.5, height: 11, units: "in" };
-const DEFAULT_MARGINS = { top: 1, right: 1, bottom: 1, left: 1, units: "in" };
+const DEFAULT_MARGINS = { top: 1, right: 1, bottom: 1.1, left: 1, units: "in" };
 const DEFAULT_FONTS = {
-  body: '"Source Serif 4", "Times New Roman", serif',
-  heading: '"Source Serif 4", "Times New Roman", serif',
+  body: '"Iowan Old Style", "Palatino Linotype", Palatino, "Times New Roman", serif',
+  heading: '"Iowan Old Style", "Palatino Linotype", Palatino, "Times New Roman", serif',
   mono: '"Source Code Pro", "Courier New", monospace',
 };
 
 const hyphenator = new Hypher(enUsPatterns as any);
 
 export function renderHtml(doc: RenderDocumentIR, options: RenderHtmlOptions = {}): RenderHtmlResult {
-  const page = doc.pageConfig?.size ?? DEFAULT_PAGE;
+  const page = options.page ?? doc.pageConfig?.size ?? DEFAULT_PAGE;
   const margins = options.margins ?? DEFAULT_MARGINS;
   const fonts = options.fonts ?? DEFAULT_FONTS;
   const css = buildCss(page, margins, fonts);
@@ -118,6 +118,7 @@ function buildCss(
 
 body {
   margin: 0;
+  background: #ebe6df;
 }
 
 .flux-doc {
@@ -129,8 +130,8 @@ body {
   align-items: center;
   color: #141414;
   font-family: ${fonts.body};
-  font-size: 11pt;
-  line-height: 1.45;
+  font-size: 10.8pt;
+  line-height: 1.4;
   font-kerning: normal;
   font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
   text-rendering: optimizeLegibility;
@@ -139,13 +140,15 @@ body {
 .flux-page {
   width: var(--page-width);
   height: var(--page-height);
-  background: #fffdf8;
+  background: #fffdf9;
   color: inherit;
-  box-shadow: 0 16px 30px rgba(20, 12, 8, 0.2);
+  box-shadow: 0 16px 30px rgba(20, 12, 8, 0.18);
+  border: 1px solid #d8d0c4;
   position: relative;
   counter-increment: flux-page;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .flux-page-inner {
@@ -175,6 +178,7 @@ body {
 .flux-text {
   margin: 0 0 12px 0;
   text-align: justify;
+  text-justify: inter-word;
   hyphens: manual;
   widows: 2;
   orphans: 2;
@@ -182,6 +186,76 @@ body {
 
 .flux-text.inline {
   margin: 0;
+  text-align: inherit;
+}
+
+.flux-text-title {
+  font-size: 26pt;
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+}
+
+.flux-text-subtitle {
+  font-size: 12.5pt;
+  color: #4f4a42;
+  margin-bottom: 14px;
+}
+
+.flux-text-heading {
+  font-size: 13pt;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.flux-text-edition {
+  font-size: 9.5pt;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5f5a52;
+  margin-bottom: 8px;
+}
+
+.flux-text-label {
+  font-size: 8.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #6a655c;
+  margin-bottom: 4px;
+}
+
+.flux-text-caption {
+  font-size: 9.5pt;
+  color: #4f4a42;
+  margin-top: 8px;
+  margin-bottom: 2px;
+}
+
+.flux-text-credit {
+  font-size: 8pt;
+  color: #7b756c;
+  margin-bottom: 12px;
+}
+
+.flux-text-note {
+  font-size: 8.5pt;
+  color: #6a655c;
+}
+
+.flux-text-sample {
+  font-size: 10pt;
+  letter-spacing: 0.08em;
+  font-kerning: normal;
+}
+
+.flux-text-list {
+  padding-left: 1.4em;
+  text-indent: -1.4em;
+}
+
+.flux-text-end {
+  font-size: 10pt;
+  text-align: right;
+  margin-top: 16px;
 }
 
 .flux-row {
@@ -230,21 +304,39 @@ body {
 .flux-inline-slot {
   position: relative;
   overflow: hidden;
-  border: 1px dashed rgba(120, 110, 98, 0.4);
 }
 
 .flux-slot {
   display: block;
+  border: 1px solid #d2cbc0;
+  background: #ffffff;
+  border-radius: 3px;
 }
 
 .flux-inline-slot {
   display: inline-block;
   vertical-align: baseline;
+  padding: 0 0.15em;
+  border-radius: 0.2em;
+  background: rgba(234, 228, 216, 0.7);
+  border: none;
 }
 
 .flux-slot-inner {
   width: 100%;
   height: 100%;
+}
+
+.flux-inline-slot .flux-slot-inner {
+  display: inline-block;
+  min-width: 100%;
+  line-height: inherit;
+}
+
+body[data-debug-slots="1"] .flux-slot,
+body[data-debug-slots="1"] .flux-inline-slot {
+  outline: 1px dashed rgba(120, 110, 98, 0.55);
+  outline-offset: 1px;
 }
 
 .flux-slot-inner > .flux-image {
@@ -296,8 +388,13 @@ function renderNode(
     case "text": {
       const content = renderTextContent(node.props.content, options.hyphenate);
       const tag = inlineContext ? "span" : "p";
-      const className = inlineContext ? "flux-text inline" : "flux-text";
-      return `<${tag} class="${className}" ${attrs}>${content}${childHtml}</${tag}>`;
+      const variantRaw = resolveString(node.props.variant);
+      const variant = variantRaw ? sanitizeClass(variantRaw) : "";
+      const variantClass = variant ? ` flux-text-${variant}` : "";
+      const className = inlineContext ? `flux-text inline${variantClass}` : `flux-text${variantClass}`;
+      const align = resolveString(node.props.align);
+      const style = align ? ` style="text-align:${escapeAttr(align)}"` : "";
+      return `<${tag} class="${className}" ${attrs}${style}>${content}${childHtml}</${tag}>`;
     }
     case "image":
       return renderImage(node, attrs, options);
@@ -335,7 +432,8 @@ function renderSlot(
   const style = styleParts.length ? ` style="${styleParts.join(";")}"` : "";
   const fitClass = fit ? ` flux-fit-${fit}` : "";
   const className = inline ? `flux-inline-slot${fitClass}` : `flux-slot${fitClass}`;
-  return `<${inline ? "span" : "div"} class="${className}" ${attrs}${style}><div class="flux-slot-inner" data-flux-slot-inner>${childHtml}</div></${inline ? "span" : "div"}>`;
+  const innerTag = inline ? "span" : "div";
+  return `<${inline ? "span" : "div"} class="${className}" ${attrs}${style}><${innerTag} class="flux-slot-inner" data-flux-slot-inner>${childHtml}</${innerTag}></${inline ? "span" : "div"}>`;
 }
 
 function renderImage(
@@ -460,6 +558,7 @@ function resolveImageUrl(
 
 function buildAttrs(node: RenderNodeIR, inline: boolean): string {
   const refresh = node.refresh?.kind ?? "onLoad";
+  const isInline = inline || node.kind === "inline_slot";
   const attrs = [
     `data-flux-id="${escapeAttr(node.nodeId)}"`,
     `data-flux-node="${escapeAttr(node.id)}"`,
@@ -472,7 +571,7 @@ function buildAttrs(node: RenderNodeIR, inline: boolean): string {
   if (node.slot?.reserve) {
     attrs.push(`data-flux-reserve="${escapeAttr(node.slot.reserve.kind)}"`);
   }
-  if (inline) {
+  if (isInline) {
     attrs.push(`data-flux-inline="true"`);
   }
   return attrs.join(" ");
@@ -497,6 +596,10 @@ function escapeHtml(text: string): string {
 
 function escapeAttr(value: string): string {
   return escapeHtml(value);
+}
+
+function sanitizeClass(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
 }
 
 function transparentPixel(): string {

@@ -578,8 +578,14 @@ export function getViewerJs(): string {
     const fit = slot.getAttribute("data-flux-fit");
     const inner = slot.querySelector("[data-flux-slot-inner]") || slot.querySelector(".flux-slot-inner");
     if (!inner) return;
+    const isInline = slot.getAttribute("data-flux-inline") === "true";
     inner.style.transform = "";
     inner.style.fontSize = "";
+    inner.style.whiteSpace = "";
+    inner.style.textOverflow = "";
+    inner.style.webkitLineClamp = "";
+    inner.style.webkitBoxOrient = "";
+    inner.style.display = "";
     if (fit === "shrink") {
       const style = win.getComputedStyle(inner);
       const base = parseFloat(style.fontSize) || 14;
@@ -604,12 +610,19 @@ export function getViewerJs(): string {
       const scale = Math.min(1, scaleX, scaleY);
       inner.style.transform = "scale(" + scale + ")";
     } else if (fit === "ellipsis") {
-      const lineHeight = parseFloat(win.getComputedStyle(inner).lineHeight) || 16;
-      const maxLines = Math.max(1, Math.floor(slot.clientHeight / lineHeight));
-      inner.style.display = "-webkit-box";
-      inner.style.webkitBoxOrient = "vertical";
-      inner.style.webkitLineClamp = String(maxLines);
-      inner.style.overflow = "hidden";
+      if (isInline) {
+        inner.style.display = "inline-block";
+        inner.style.whiteSpace = "nowrap";
+        inner.style.textOverflow = "ellipsis";
+        inner.style.overflow = "hidden";
+      } else {
+        const lineHeight = parseFloat(win.getComputedStyle(inner).lineHeight) || 16;
+        const maxLines = Math.max(1, Math.floor(slot.clientHeight / lineHeight));
+        inner.style.display = "-webkit-box";
+        inner.style.webkitBoxOrient = "vertical";
+        inner.style.webkitLineClamp = String(maxLines);
+        inner.style.overflow = "hidden";
+      }
     }
   };
 
