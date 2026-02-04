@@ -6,6 +6,13 @@ import { renderHtml } from "@flux-lang/render-html";
 import { createTypesetterBackend } from "@flux-lang/typesetter";
 const DEFAULT_DOCSTEP_MS = 1000;
 const MAX_TICK_SECONDS = 1;
+const NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+    Pragma: "no-cache",
+};
+export function noCacheHeaders(extra = {}) {
+    return { ...NO_CACHE_HEADERS, ...extra };
+}
 export function advanceViewerRuntime(runtime, renderOptions, advanceTime, dtSeconds) {
     if (advanceTime && dtSeconds > 0) {
         runtime.tick(dtSeconds);
@@ -56,6 +63,38 @@ export async function startViewerServer(options) {
     let nextTickAt = Date.now() + intervalMs;
     let lastTickAt = Date.now();
     const advanceTime = options.advanceTime !== false;
+    const sseClients = new Set();
+    let keepAliveTimer = null;
+    const buildIrPayload = () => {
+        if (current.errors.length) {
+            return { errors: current.errors };
+        }
+        return { ir: current.ir, slots: current.render.slots };
+    };
+    const broadcastIrUpdate = () => {
+        if (sseClients.size === 0)
+            return;
+        const payload = buildIrPayload();
+        const message = `data: ${JSON.stringify(payload)}\n\n`;
+        for (const client of sseClients) {
+            client.write(message);
+        }
+    };
+    const startKeepAlive = () => {
+        if (keepAliveTimer)
+            return;
+        keepAliveTimer = setInterval(() => {
+            for (const client of sseClients) {
+                client.write(": ping\n\n");
+            }
+        }, 15000);
+    };
+    const stopKeepAlive = () => {
+        if (!keepAliveTimer)
+            return;
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
+    };
     const tick = () => {
         if (!running)
             return;
@@ -71,6 +110,7 @@ export async function startViewerServer(options) {
             ir: next.ir,
             render: next.render,
         };
+        broadcastIrUpdate();
         nextTickAt += intervalMs;
         scheduleTick();
     };
@@ -99,6 +139,7 @@ export async function startViewerServer(options) {
         scheduleTick();
     };
     scheduleTick();
+    startKeepAlive();
     const allowNet = new Set((options.allowNet ?? []).map((origin) => origin.trim()).filter(Boolean));
     const server = http.createServer(async (req, res) => {
         try {
@@ -158,6 +199,21 @@ export async function startViewerServer(options) {
                         slots: current.render.slots,
                     });
                 }
+                return;
+            }
+            if (url.pathname === "/api/stream") {
+                res.writeHead(200, {
+                    "Content-Type": "text/event-stream; charset=utf-8",
+                    Connection: "keep-alive",
+                    ...noCacheHeaders(),
+                });
+                res.write(": connected\n\n");
+                sseClients.add(res);
+                res.write(`data: ${JSON.stringify(buildIrPayload())}\n\n`);
+                req.on("close", () => {
+                    sseClients.delete(res);
+                    res.end();
+                });
                 return;
             }
             if (url.pathname === "/api/ticker" && req.method === "POST") {
@@ -255,6 +311,7 @@ export async function startViewerServer(options) {
         url: `http://${displayHost}:${address.port}`,
         close: async () => {
             stopTicking();
+            stopKeepAlive();
             await new Promise((resolve) => server.close(() => resolve()));
         },
     };
@@ -273,7 +330,10 @@ function buildIndexHtml(title) {
         "<body>",
         "<div id=\"app\">",
         "  <header class=\"viewer-toolbar\">",
-        "    <div class=\"viewer-title\">Flux Viewer</div>",
+        "    <div class=\"viewer-title-group\">",
+        "      <div class=\"viewer-title\">Flux Viewer</div>",
+        "      <div class=\"viewer-status\" id=\"viewer-status\">docstep 0 · t=0.00</div>",
+        "    </div>",
         "    <div class=\"viewer-controls\">",
         "      <button id=\"viewer-toggle\">Pause</button>",
         "      <label>Interval <input id=\"viewer-interval\" type=\"number\" min=\"50\" step=\"50\"></label>",
@@ -311,11 +371,23 @@ body {
   border-bottom: 1px solid #2b2925;
 }
 
+.viewer-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
 .viewer-title {
   font-size: 14px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: #cdbf9f;
+}
+
+.viewer-status {
+  font-size: 12px;
+  color: #9f9788;
+  letter-spacing: 0.08em;
 }
 
 .viewer-controls {
@@ -359,18 +431,20 @@ body {
 }
 `.trim();
 }
-function getViewerJs() {
+export function getViewerJs() {
     return `
 (() => {
   const docRoot = document.getElementById("viewer-doc");
   const toggleBtn = document.getElementById("viewer-toggle");
   const intervalInput = document.getElementById("viewer-interval");
   const exportBtn = document.getElementById("viewer-export");
+  const statusEl = document.getElementById("viewer-status");
 
   let currentIr = null;
   let currentSlots = {};
   let running = true;
   let pollTimer = null;
+  let sse = null;
 
   const fetchJson = async (url, options) => {
     const res = await fetch(url, options);
@@ -378,7 +452,18 @@ function getViewerJs() {
     return res.json();
   };
 
-  const applyAssets = (root = document) => {
+  const getPreviewContext = () => {
+    const frame = docRoot ? docRoot.querySelector("iframe") : null;
+    if (frame && frame.contentDocument) {
+      return {
+        root: frame.contentDocument,
+        win: frame.contentWindow || window,
+      };
+    }
+    return { root: docRoot || document, win: window };
+  };
+
+  const applyAssets = (root) => {
     root.querySelectorAll("img[data-flux-asset-id]").forEach((img) => {
       const id = img.getAttribute("data-flux-asset-id");
       if (id) img.src = "/assets/" + id;
@@ -410,14 +495,14 @@ function getViewerJs() {
     return inner.scrollWidth <= container.clientWidth && inner.scrollHeight <= container.clientHeight;
   };
 
-  const applyFit = (slot) => {
+  const applyFit = (slot, win = window) => {
     const fit = slot.getAttribute("data-flux-fit");
     const inner = slot.querySelector(".flux-slot-inner");
     if (!inner) return;
     inner.style.transform = "";
     inner.style.fontSize = "";
     if (fit === "shrink") {
-      const style = window.getComputedStyle(inner);
+      const style = win.getComputedStyle(inner);
       const base = parseFloat(style.fontSize) || 14;
       let lo = 6;
       let hi = base;
@@ -440,7 +525,7 @@ function getViewerJs() {
       const scale = Math.min(1, scaleX, scaleY);
       inner.style.transform = "scale(" + scale + ")";
     } else if (fit === "ellipsis") {
-      const lineHeight = parseFloat(window.getComputedStyle(inner).lineHeight) || 16;
+      const lineHeight = parseFloat(win.getComputedStyle(inner).lineHeight) || 16;
       const maxLines = Math.max(1, Math.floor(slot.clientHeight / lineHeight));
       inner.style.display = "-webkit-box";
       inner.style.webkitBoxOrient = "vertical";
@@ -449,19 +534,20 @@ function getViewerJs() {
     }
   };
 
-  const applyFits = (root = document) => {
-    root.querySelectorAll("[data-flux-fit]").forEach((slot) => applyFit(slot));
+  const applyFits = (root, win) => {
+    root.querySelectorAll("[data-flux-fit]").forEach((slot) => applyFit(slot, win));
   };
 
   const patchSlots = (slots, changedIds) => {
+    const { root, win } = getPreviewContext();
     changedIds.forEach((id) => {
-      const slot = document.querySelector('[data-flux-id="' + id + '"]');
+      const slot = root.querySelector('[data-flux-id="' + id + '"]');
       if (!slot) return;
       const inner = slot.querySelector(".flux-slot-inner");
       if (!inner) return;
       inner.innerHTML = slots[id] || "";
       applyAssets(inner);
-      requestAnimationFrame(() => applyFit(slot));
+      requestAnimationFrame(() => applyFit(slot, win));
     });
   };
 
@@ -480,6 +566,36 @@ function getViewerJs() {
       "</ul></div>";
   };
 
+  const updateStatus = (ir) => {
+    if (!statusEl || !ir) return;
+    const time = typeof ir.time === "number" ? ir.time : 0;
+    statusEl.textContent = "docstep " + ir.docstep + " · t=" + time.toFixed(2);
+  };
+
+  const applyIrPayload = (payload) => {
+    if (!payload) return;
+    if (payload.errors) {
+      showError(payload.errors);
+      return;
+    }
+    if (!payload.ir) return;
+    if (!currentIr) {
+      currentIr = payload.ir;
+      currentSlots = payload.slots || {};
+      updateStatus(payload.ir);
+      return;
+    }
+    const prevMap = collectSlots(currentIr);
+    const nextMap = collectSlots(payload.ir);
+    const changed = diffSlots(prevMap, nextMap);
+    if (changed.length) {
+      patchSlots(payload.slots || {}, changed);
+    }
+    currentIr = payload.ir;
+    currentSlots = payload.slots || {};
+    updateStatus(payload.ir);
+  };
+
   const loadInitial = async () => {
     const config = await fetchJson("/api/config");
     running = config.running;
@@ -488,46 +604,52 @@ function getViewerJs() {
 
     const render = await fetchJson("/api/render");
     docRoot.innerHTML = render.html;
-    applyAssets(docRoot);
-    requestAnimationFrame(() => applyFits(docRoot));
+    const { root, win } = getPreviewContext();
+    applyAssets(root);
+    requestAnimationFrame(() => applyFits(root, win));
 
-    const irPayload = await fetchJson("/api/ir");
-    if (irPayload.errors) {
-      showError(irPayload.errors);
-      return;
-    }
-    currentIr = irPayload.ir;
-    currentSlots = irPayload.slots || {};
+    const irPayload = await fetchJson("/api/ir", { cache: "no-store" });
+    applyIrPayload(irPayload);
   };
 
   const poll = async () => {
     try {
-      const payload = await fetchJson("/api/ir");
-      if (payload.errors) {
-        showError(payload.errors);
-        return;
-      }
-      if (!currentIr) {
-        currentIr = payload.ir;
-        currentSlots = payload.slots || {};
-        return;
-      }
-      const prevMap = collectSlots(currentIr);
-      const nextMap = collectSlots(payload.ir);
-      const changed = diffSlots(prevMap, nextMap);
-      if (changed.length) {
-        patchSlots(payload.slots || {}, changed);
-      }
-      currentIr = payload.ir;
-      currentSlots = payload.slots || {};
+      const payload = await fetchJson("/api/ir", { cache: "no-store" });
+      applyIrPayload(payload);
     } catch (err) {
       console.warn("poll failed", err);
     }
   };
 
-  const startPolling = () => {
+  const startPolling = (interval = 250) => {
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(poll, 500);
+    pollTimer = setInterval(poll, interval);
+  };
+
+  const startSse = () => {
+    if (typeof EventSource === "undefined") {
+      startPolling();
+      return;
+    }
+    if (sse) sse.close();
+    sse = new EventSource("/api/stream");
+    sse.onopen = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+    sse.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        applyIrPayload(payload);
+      } catch (err) {
+        console.warn("stream parse failed", err);
+      }
+    };
+    sse.onerror = () => {
+      if (!pollTimer) startPolling();
+    };
   };
 
   toggleBtn.addEventListener("click", async () => {
@@ -554,7 +676,7 @@ function getViewerJs() {
     window.open("/api/pdf", "_blank");
   });
 
-  loadInitial().then(startPolling);
+  loadInitial().then(startSse);
 })();
 `.trim();
 }
@@ -572,7 +694,7 @@ function applyCsp(res) {
     ].join("; "));
 }
 function sendJson(res, payload) {
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", ...noCacheHeaders() });
     res.end(JSON.stringify(payload));
 }
 async function readJson(req) {
