@@ -840,6 +840,9 @@ function evalCall(expr: any, ctx: EvalContext): unknown {
     if (name === "choose") {
       return evalChoose(expr.args, ctx);
     }
+    if (name === "chooseStep") {
+      return evalChooseStep(expr.args, ctx);
+    }
     if (name === "now" || name === "timeSeconds") {
       return ctx.time;
     }
@@ -887,6 +890,19 @@ function evalChoose(args: any[], ctx: EvalContext): unknown {
   }
   if (list.length === 0) return null;
   const idx = Math.floor(ctx.rng() * list.length);
+  return list[idx];
+}
+
+function evalChooseStep(args: any[], ctx: EvalContext): unknown {
+  const { positional, named } = evalCallArgs(args, ctx);
+  const list = (named.list ?? positional[0]) as unknown;
+  if (!Array.isArray(list)) {
+    throw new Error("chooseStep(list) expects a list");
+  }
+  if (list.length === 0) return null;
+  const offsetRaw = named.offset ?? 0;
+  const offset = typeof offsetRaw === "number" && Number.isFinite(offsetRaw) ? offsetRaw : 0;
+  const idx = Math.abs(Math.floor(ctx.docstep + offset)) % list.length;
   return list[idx];
 }
 

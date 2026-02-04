@@ -123,17 +123,25 @@ describe("Flux render IR v0.2", () => {
     const doc = parseDocument(demoSource);
     const assetCwd = path.dirname(demoPath);
 
-    const step0 = renderDocument(doc, { seed: 1, docstep: 0, assetCwd });
-    const step1 = renderDocument(doc, { seed: 1, docstep: 1, assetCwd });
+    const step0 = renderDocument(doc, { seed: 1, docstep: 0, time: 0, assetCwd });
+    const step1 = renderDocument(doc, { seed: 1, docstep: 1, time: 1, assetCwd });
 
     const hero0 = findNodeById(step0.body, "heroImg");
     const hero1 = findNodeById(step1.body, "heroImg");
     expect(hero0?.props?.asset).not.toBeNull();
     expect(hero1?.props?.asset).not.toBeNull();
 
-    const slot0 = findNodeById(step0.body, "t1");
-    const slot1 = findNodeById(step1.body, "t1");
-    expect(slot0?.props?.content).not.toBe(slot1?.props?.content);
+    const word0 = findNodeById(step0.body, "wordValue");
+    const word1 = findNodeById(step1.body, "wordValue");
+    expect(word0?.props?.content).not.toBe(word1?.props?.content);
+
+    const editionStep0 = findNodeById(step0.body, "editionStepValue");
+    const editionStep1 = findNodeById(step1.body, "editionStepValue");
+    expect(editionStep0?.props?.content).not.toBe(editionStep1?.props?.content);
+
+    const editionTime0 = findNodeById(step0.body, "editionTimeValue");
+    const editionTime1 = findNodeById(step1.body, "editionTimeValue");
+    expect(editionTime0?.props?.content).not.toBe(editionTime1?.props?.content);
 
     const assetIds = Array.from({ length: 6 }, (_, index) => {
       const rendered = renderDocument(doc, { seed: 1, docstep: index, assetCwd });

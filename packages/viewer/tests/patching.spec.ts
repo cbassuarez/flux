@@ -99,7 +99,7 @@ describe("viewer patching", () => {
   });
 
   it("applies slot patches inside the preview document", () => {
-    const inner = { innerHTML: "" } as HTMLElement;
+    const inner = { innerHTML: "<span>Old</span>" } as HTMLElement;
     const slot = {
       querySelector: (selector: string) => (selector.includes("data-flux-slot-inner") ? inner : null),
     } as unknown as Element;
@@ -110,5 +110,9 @@ describe("viewer patching", () => {
     const missing = applySlotPatches(root, { "slot-1": "<span>Updated</span>" });
     expect(inner.innerHTML).toBe("<span>Updated</span>");
     expect(missing).toEqual([]);
+
+    const missingAgain = applySlotPatches(root, { "slot-1": "<span>Next</span>" });
+    expect(inner.innerHTML).toBe("<span>Next</span>");
+    expect(missingAgain).toEqual([]);
   });
 });

@@ -49,6 +49,31 @@ describe("render-html", () => {
     expect(html).toContain('class="flux-inline-slot');
   });
 
+  it("renders inline slots as spans with inner span wrappers", () => {
+    const src = `
+      document {
+        meta { version = "0.2.0"; }
+        body {
+          page p1 {
+            text line {
+              inline_slot word {
+                reserve = fixedWidth(120, px);
+                fit = ellipsis;
+                text t1 { content = "Inline"; }
+              }
+            }
+          }
+        }
+      }
+    `;
+    const doc = parseDocument(src);
+    const ir = renderDocumentIR(doc);
+    const { html } = renderHtml(ir);
+    expect(html).toContain('<span class="flux-inline-slot');
+    expect(html).toContain('data-flux-id="root/page:p1:0/text:line:0/inline_slot:word:0"');
+    expect(html).toContain('<span class="flux-slot-inner" data-flux-slot-inner>');
+  });
+
   it("sizes slot-contained images to fill reserved geometry", () => {
     const src = `
       document {
@@ -109,5 +134,23 @@ describe("render-html", () => {
     expect(heroEntry).toBeTruthy();
     expect(heroEntry?.[1]).toContain("<img");
     expect(heroEntry?.[1]).toContain(`src="/assets/${assetId}"`);
+  });
+
+  it("includes CSS for page numbering", () => {
+    const src = `
+      document {
+        meta { version = "0.2.0"; }
+        body {
+          page p1 {
+            text t1 { content = "Hello"; }
+          }
+        }
+      }
+    `;
+    const doc = parseDocument(src);
+    const ir = renderDocumentIR(doc);
+    const { css } = renderHtml(ir);
+    expect(css).toContain(".flux-page-number");
+    expect(css).toContain("counter(flux-page)");
   });
 });
