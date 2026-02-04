@@ -90,10 +90,12 @@ export function App(props: AppProps) {
 
   useEffect(() => {
     const stdout = process.stdout;
-    if (!stdout?.on) return;
+    if (!stdout?.on || !stdout?.off) return;
     const handleResize = () => setCols(stdout.columns ?? 80);
     stdout.on("resize", handleResize);
-    return () => stdout.off("resize", handleResize);
+    return () => {
+      stdout.off("resize", handleResize);
+    };
   }, []);
 
   useEffect(() => {
