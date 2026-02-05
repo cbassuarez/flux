@@ -32,6 +32,9 @@ export async function startViewerServer(options) {
     let currentSource = await fs.readFile(docPath, "utf8");
     let baseDoc = null;
     let errors = [];
+    let diagnostics = buildDiagnosticsBundle([]);
+    let revision = 0;
+    let lastValidRevision = 0;
     const parseSource = (source) => {
         try {
             const parsed = parseDocument(source, {
@@ -39,14 +42,20 @@ export async function startViewerServer(options) {
                 docRoot,
                 resolveIncludes: true,
             });
-            const diagnostics = checkDocument(docPath, parsed);
-            return { doc: parsed, errors: diagnostics };
+            const checkErrors = checkDocument(docPath, parsed);
+            const parsedDiagnostics = buildDiagnosticsBundle(checkErrors.map((message) => buildDiagnosticFromMessage(message, source, docPath)));
+            return { doc: parsed, errors: checkErrors, diagnostics: parsedDiagnostics };
         }
         catch (err) {
-            return { doc: null, errors: [String(err?.message ?? err)] };
+            const message = String(err?.message ?? err);
+            const parsedDiagnostics = buildDiagnosticsBundle([buildDiagnosticFromMessage(message, source, docPath, "fail")]);
+            return { doc: null, errors: [message], diagnostics: parsedDiagnostics };
         }
     };
-    ({ doc: baseDoc, errors } = parseSource(currentSource));
+    ({ doc: baseDoc, errors, diagnostics } = parseSource(currentSource));
+    if (!errors.length && baseDoc) {
+        lastValidRevision = revision;
+    }
     const buildRuntime = (doc, overrides = {}) => createDocumentRuntimeIR(doc, {
         seed: overrides.seed ?? options.seed ?? 0,
         docstep: overrides.docstep ?? options.docstepStart ?? 0,
@@ -66,6 +75,7 @@ export async function startViewerServer(options) {
         ir: initialIr,
         render: renderHtml(initialIr, renderOptions),
         errors,
+        diagnostics,
     };
     let running = runtime !== null && errors.length === 0;
     let intervalMs = options.docstepMs ?? DEFAULT_DOCSTEP_MS;
@@ -97,7 +107,7 @@ export async function startViewerServer(options) {
     };
     let lastSlotMap = current.render.slots;
     let lastPatchPayload = buildPatchPayload(current.render.slots);
-    const rebuildCurrent = (nextRuntime, nextErrors) => {
+    const rebuildCurrent = (nextRuntime, nextErrors, nextDiagnostics) => {
         const nextIr = nextRuntime ? nextRuntime.render() : buildEmptyIR();
         const nextRender = renderHtml(nextIr, renderOptions);
         current = {
@@ -105,6 +115,7 @@ export async function startViewerServer(options) {
             ir: nextIr,
             render: nextRender,
             errors: nextErrors,
+            diagnostics: nextDiagnostics,
         };
         lastSlotMap = nextRender.slots;
         lastPatchPayload = buildPatchPayload(nextRender.slots);
@@ -113,6 +124,10 @@ export async function startViewerServer(options) {
         const parsed = parseSource(nextSource);
         baseDoc = parsed.doc;
         errors = parsed.errors;
+        diagnostics = parsed.diagnostics;
+        if (!errors.length && baseDoc) {
+            lastValidRevision = revision;
+        }
         const wasRunning = running;
         runtime = baseDoc
             ? buildRuntime(baseDoc, {
@@ -121,7 +136,7 @@ export async function startViewerServer(options) {
                 time: runtime?.time ?? 0,
             })
             : null;
-        rebuildCurrent(runtime, errors);
+        rebuildCurrent(runtime, errors, diagnostics);
         const canRun = runtime !== null && errors.length === 0;
         running = wasRunning && canRun;
         if (running) {
@@ -142,7 +157,7 @@ export async function startViewerServer(options) {
             time: payload.time ?? runtime?.time ?? 0,
         });
         runtime = next;
-        rebuildCurrent(next, errors);
+        rebuildCurrent(next, errors, diagnostics);
         lastTickAt = Date.now();
         nextTickAt = Date.now() + intervalMs;
         broadcastPatchUpdate(lastPatchPayload);
@@ -229,6 +244,7 @@ export async function startViewerServer(options) {
     const buildEditState = async () => {
         const stats = await fs.stat(docPath).catch(() => null);
         const title = baseDoc?.meta?.title ?? path.basename(docPath);
+        const version = baseDoc?.meta?.version ?? null;
         const banks = baseDoc?.assets?.banks?.map((bank) => ({
             name: bank.name,
             kind: bank.kind,
@@ -239,40 +255,79 @@ export async function startViewerServer(options) {
             bankTag: `bank:${bank.name}`,
         }));
         return {
-            docPath,
             title,
-            lastModified: stats ? new Date(stats.mtimeMs).toISOString() : null,
-            diagnosticsSummary: {
-                ok: current.errors.length === 0,
-                errorCount: current.errors.length,
-                errors: current.errors,
+            path: docPath,
+            docPath,
+            meta: { title, version },
+            file: {
+                path: docPath,
+                mtime: stats ? new Date(stats.mtimeMs).toISOString() : null,
             },
+            lastModified: stats ? new Date(stats.mtimeMs).toISOString() : null,
+            revision,
+            lastValidRevision,
+            diagnostics: current.diagnostics,
+            previewPath: "/preview",
+            outline: buildOutline(),
             assetsBanks: banks ?? [],
             capabilities: {
+                setText: true,
                 addSection: true,
+                addParagraph: true,
                 addFigure: true,
+                addCallout: true,
+                addTable: true,
+                transforms: {
+                    setText: true,
+                    addSection: true,
+                    addParagraph: true,
+                    addFigure: true,
+                    addCallout: true,
+                    addTable: true,
+                },
             },
         };
     };
     const buildOutline = () => {
         if (!baseDoc?.body?.nodes)
             return [];
+        const inlineKinds = new Set([
+            "em",
+            "strong",
+            "code",
+            "smallcaps",
+            "sub",
+            "sup",
+            "mark",
+            "link",
+            "inline_slot",
+        ]);
+        const flattenKinds = new Set(["row", "column"]);
         const outlineFromNodes = (nodes) => {
             const result = [];
             for (const node of nodes ?? []) {
-                const childNodes = outlineFromNodes(node.children ?? []);
-                if (node.kind === "page" || node.kind === "section" || node.kind === "figure") {
-                    const label = deriveOutlineLabel(node);
+                if (node.kind === "page" || node.kind === "section") {
+                    const childNodes = outlineFromNodes(node.children ?? []);
                     result.push({
                         id: node.id,
                         kind: node.kind,
-                        label,
+                        label: deriveOutlineLabel(node),
                         children: childNodes.length ? childNodes : undefined,
                     });
+                    continue;
                 }
-                else if (childNodes.length) {
-                    result.push(...childNodes);
+                if (inlineKinds.has(node.kind)) {
+                    continue;
                 }
+                if (flattenKinds.has(node.kind)) {
+                    result.push(...outlineFromNodes(node.children ?? []));
+                    continue;
+                }
+                result.push({
+                    id: node.id,
+                    kind: node.kind,
+                    label: deriveOutlineLabel(node),
+                });
             }
             return result;
         };
@@ -285,6 +340,14 @@ export async function startViewerServer(options) {
         try {
             const url = new URL(req.url ?? "/", "http://localhost");
             applyCsp(res);
+            if (url.pathname.startsWith("/api/edit/")) {
+                const requestedFile = url.searchParams.get("file");
+                if (requestedFile && path.resolve(requestedFile) !== docPath) {
+                    res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+                    res.end(JSON.stringify({ ok: false, error: "Document path not allowed" }));
+                    return;
+                }
+            }
             if (url.pathname === "/edit" || url.pathname.startsWith("/edit/")) {
                 if (!editorDist.dir || !editorDist.indexPath) {
                     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...noCacheHeaders() });
@@ -341,6 +404,16 @@ export async function startViewerServer(options) {
                 res.end(current.render.css);
                 return;
             }
+            if (url.pathname === "/preview") {
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...noCacheHeaders() });
+                res.end(buildPreviewHtml(current));
+                return;
+            }
+            if (url.pathname === "/preview.js") {
+                res.writeHead(200, { "Content-Type": "application/javascript; charset=utf-8", ...noCacheHeaders() });
+                res.end(getPreviewJs());
+                return;
+            }
             if (url.pathname === "/api/config") {
                 sendJson(res, {
                     docPath,
@@ -361,59 +434,138 @@ export async function startViewerServer(options) {
                 sendJson(res, { outline: buildOutline() });
                 return;
             }
+            if (url.pathname === "/api/edit/node") {
+                const id = url.searchParams.get("id");
+                if (!id) {
+                    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+                    res.end(JSON.stringify({ ok: false, error: "Missing node id" }));
+                    return;
+                }
+                if (!baseDoc) {
+                    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+                    res.end(JSON.stringify({ ok: false, error: "Document not loaded", diagnostics: current.diagnostics }));
+                    return;
+                }
+                const node = findNodeById(baseDoc.body?.nodes ?? [], id);
+                if (!node) {
+                    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+                    res.end(JSON.stringify({ ok: false, error: "Node not found" }));
+                    return;
+                }
+                sendJson(res, buildInspectorPayload(node));
+                return;
+            }
             if (url.pathname === "/api/edit/transform" && req.method === "POST") {
                 const payload = await readJson(req);
-                if (payload?.docPath && path.resolve(payload.docPath) !== docPath) {
+                const requestedPath = typeof payload?.file === "string" ? payload.file : payload?.docPath;
+                if (requestedPath && path.resolve(requestedPath) !== docPath) {
                     res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
                     res.end(JSON.stringify({ ok: false, error: "Document path not allowed" }));
                     return;
                 }
                 const op = payload?.op;
                 const args = payload?.args ?? {};
-                const toOptions = () => {
-                    if (op === "addSection") {
-                        return {
-                            kind: "section",
-                            heading: typeof args.heading === "string" ? args.heading : undefined,
-                            noHeading: typeof args.noHeading === "boolean" ? args.noHeading : undefined,
-                        };
-                    }
-                    if (op === "addFigure") {
-                        return {
-                            kind: "figure",
-                            bankName: typeof args.bankName === "string" ? args.bankName : undefined,
-                            tags: Array.isArray(args.tags) ? args.tags.map((tag) => String(tag)) : undefined,
-                            caption: typeof args.caption === "string" ? args.caption : undefined,
-                            label: typeof args.label === "string" ? args.label : undefined,
-                            reserve: args.reserve,
-                            fit: typeof args.fit === "string" ? args.fit : undefined,
-                        };
-                    }
-                    throw new Error("Unsupported edit operation");
-                };
-                try {
-                    const source = await fs.readFile(docPath, "utf8");
-                    const parsed = parseSource(source);
-                    if (!parsed.doc) {
-                        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-                        res.end(JSON.stringify({ ok: false, error: parsed.errors.join("; ") }));
+                const source = await fs.readFile(docPath, "utf8");
+                const parsed = parseSource(source);
+                if (!parsed.doc || parsed.errors.length) {
+                    sendJson(res, {
+                        ok: false,
+                        diagnostics: parsed.diagnostics,
+                        error: parsed.errors.join("; "),
+                    });
+                    return;
+                }
+                let nextSource = null;
+                let selectedId;
+                if (op === "setText") {
+                    const id = typeof args.id === "string" ? args.id : "";
+                    const text = typeof args.text === "string" ? args.text : "";
+                    const result = applySetTextTransform(source, parsed.doc, id, text, docPath);
+                    if (!result.ok) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) });
                         return;
                     }
-                    const nextSource = formatFluxSource(applyAddTransform(source, parsed.doc, toOptions()));
-                    await fs.writeFile(docPath, nextSource);
-                    currentSource = nextSource;
-                    rebuildFromSource(nextSource);
-                    broadcastDocChanged();
+                    nextSource = formatFluxSource(result.source);
+                    selectedId = id;
+                }
+                else {
+                    const toOptions = () => {
+                        if (op === "addSection") {
+                            return {
+                                kind: "section",
+                                heading: typeof args.heading === "string" ? args.heading : undefined,
+                                noHeading: typeof args.noHeading === "boolean" ? args.noHeading : undefined,
+                            };
+                        }
+                        if (op === "addParagraph") {
+                            return {
+                                kind: "paragraph",
+                                text: typeof args.text === "string" ? args.text : undefined,
+                            };
+                        }
+                        if (op === "addFigure") {
+                            return {
+                                kind: "figure",
+                                bankName: typeof args.bankName === "string" ? args.bankName : undefined,
+                                tags: Array.isArray(args.tags) ? args.tags.map((tag) => String(tag)) : undefined,
+                                caption: typeof args.caption === "string" ? args.caption : undefined,
+                                label: typeof args.label === "string" ? args.label : undefined,
+                                reserve: args.reserve,
+                                fit: typeof args.fit === "string" ? args.fit : undefined,
+                            };
+                        }
+                        if (op === "addCallout") {
+                            return {
+                                kind: "callout",
+                                label: typeof args.tone === "string" ? args.tone : undefined,
+                                text: typeof args.text === "string" ? args.text : undefined,
+                            };
+                        }
+                        if (op === "addTable") {
+                            return { kind: "table" };
+                        }
+                        throw new Error("Unsupported edit operation");
+                    };
+                    try {
+                        nextSource = formatFluxSource(applyAddTransform(source, parsed.doc, toOptions()));
+                    }
+                    catch (err) {
+                        sendJson(res, {
+                            ok: false,
+                            diagnostics: buildDiagnosticsBundle([
+                                buildDiagnosticFromMessage(String(err?.message ?? err), source, docPath, "fail"),
+                            ]),
+                        });
+                        return;
+                    }
+                }
+                if (!nextSource) {
+                    sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "No changes produced" });
+                    return;
+                }
+                const validated = parseSource(nextSource);
+                if (!validated.doc || validated.errors.length) {
                     sendJson(res, {
-                        ok: current.errors.length === 0,
-                        diagnostics: { errors: current.errors },
-                        updatedState: await buildEditState(),
+                        ok: false,
+                        diagnostics: validated.diagnostics,
+                        error: validated.errors.join("; "),
                     });
+                    return;
                 }
-                catch (err) {
-                    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-                    res.end(JSON.stringify({ ok: false, error: String(err?.message ?? err) }));
-                }
+                await writeFileAtomic(docPath, nextSource);
+                currentSource = nextSource;
+                revision += 1;
+                lastValidRevision = revision;
+                rebuildFromSource(nextSource);
+                broadcastDocChanged();
+                sendJson(res, {
+                    ok: current.errors.length === 0,
+                    newRevision: revision,
+                    diagnostics: current.diagnostics,
+                    outline: buildOutline(),
+                    selectedId,
+                    state: await buildEditState(),
+                });
                 return;
             }
             if (url.pathname === "/api/render") {
@@ -1132,6 +1284,99 @@ function buildEmptyIR() {
         body: [],
     };
 }
+function buildPreviewHtml(state) {
+    const content = state.errors.length ? buildErrorHtml(state.errors) : state.render.html;
+    return [
+        "<!doctype html>",
+        "<html>",
+        "<head>",
+        '<meta charset="utf-8">',
+        "<title>Flux Preview</title>",
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        '<link rel="stylesheet" href="/render.css">',
+        "<style>",
+        "  body { margin: 0; background: #111827; color: #f8fafc; }",
+        "  .preview-shell { min-height: 100vh; padding: 24px 20px 40px; display: flex; justify-content: center; }",
+        "  .preview-shell .flux-doc { max-width: 100%; }",
+        "  .preview-shell .flux-page { margin-bottom: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.35); }",
+        "  @media (max-width: 900px) { .preview-shell { padding: 16px; } }",
+        "</style>",
+        "</head>",
+        "<body>",
+        `<div class="preview-shell">${content}</div>`,
+        '<script src="/preview.js" defer></script>',
+        "</body>",
+        "</html>",
+    ].join("\n");
+}
+function getPreviewJs() {
+    return `
+(() => {
+  const fitsWithin = (container, inner) => inner.scrollWidth <= container.clientWidth && inner.scrollHeight <= container.clientHeight;
+
+  const applyFit = (slot) => {
+    const fit = slot.getAttribute("data-flux-fit");
+    const inner = slot.querySelector("[data-flux-slot-inner]");
+    if (!inner) return;
+    const isInline = slot.getAttribute("data-flux-inline") === "true";
+    inner.style.transform = "";
+    inner.style.fontSize = "";
+    inner.style.whiteSpace = "";
+    inner.style.textOverflow = "";
+    inner.style.webkitLineClamp = "";
+    inner.style.webkitBoxOrient = "";
+    inner.style.display = "";
+
+    if (fit === "shrink") {
+      const style = window.getComputedStyle(inner);
+      const base = parseFloat(style.fontSize) || 14;
+      let lo = 6;
+      let hi = base;
+      let best = base;
+      for (let i = 0; i < 10; i += 1) {
+        const mid = (lo + hi) / 2;
+        inner.style.fontSize = mid + "px";
+        if (fitsWithin(slot, inner)) {
+          best = mid;
+          lo = mid + 0.1;
+        } else {
+          hi = mid - 0.1;
+        }
+      }
+      inner.style.fontSize = best + "px";
+    } else if (fit === "scaleDown") {
+      inner.style.transformOrigin = "top left";
+      const scaleX = slot.clientWidth / inner.scrollWidth;
+      const scaleY = slot.clientHeight / inner.scrollHeight;
+      const scale = Math.min(1, scaleX, scaleY);
+      inner.style.transform = "scale(" + scale + ")";
+    } else if (fit === "ellipsis") {
+      if (isInline) {
+        inner.style.display = "inline-block";
+        inner.style.whiteSpace = "nowrap";
+        inner.style.textOverflow = "ellipsis";
+        inner.style.overflow = "hidden";
+      } else {
+        const lineHeight = parseFloat(window.getComputedStyle(inner).lineHeight) || 16;
+        const maxLines = Math.max(1, Math.floor(slot.clientHeight / lineHeight));
+        inner.style.display = "-webkit-box";
+        inner.style.webkitBoxOrient = "vertical";
+        inner.style.webkitLineClamp = String(maxLines);
+        inner.style.overflow = "hidden";
+      }
+    }
+  };
+
+  const applyFits = () => {
+    document.querySelectorAll("[data-flux-fit]").forEach((slot) => applyFit(slot));
+  };
+
+  window.addEventListener("load", () => {
+    requestAnimationFrame(applyFits);
+  });
+})();
+`.trim();
+}
 function buildErrorHtml(errors) {
     const items = errors.map((err) => `<li>${escapeHtml(err)}</li>`).join("");
     return [
@@ -1173,5 +1418,240 @@ function getLiteralString(value) {
     if (!value || value.kind !== "LiteralValue")
         return null;
     return typeof value.value === "string" ? value.value : null;
+}
+function buildDiagnosticsBundle(items) {
+    const summary = { pass: 0, warn: 0, fail: 0 };
+    for (const item of items) {
+        summary[item.level] += 1;
+    }
+    return { summary, items };
+}
+function buildDiagnosticFromMessage(message, source, fallbackFile, level = "fail") {
+    let file = fallbackFile;
+    let line = null;
+    let column = null;
+    let endLine = null;
+    let endColumn = null;
+    let detail = message;
+    const checkMatch = message.match(/^(.*?):(\d+):(\d+):\s*(.*)$/);
+    if (checkMatch) {
+        file = checkMatch[1];
+        line = Number(checkMatch[2]);
+        column = Number(checkMatch[3]);
+        detail = checkMatch[4];
+    }
+    const parseMatch = message.match(/Parse error at (\d+):(\d+) near '([^']*)':\s*(.*)$/);
+    if (parseMatch) {
+        line = Number(parseMatch[1]);
+        column = Number(parseMatch[2]);
+        detail = `Parse error near '${parseMatch[3]}': ${parseMatch[4]}`;
+    }
+    const lexMatch = message.match(/Lexer error at (\d+):(\d+)\s*-\s*(.*)$/);
+    if (lexMatch) {
+        line = Number(lexMatch[1]);
+        column = Number(lexMatch[2]);
+        detail = `Lexer error: ${lexMatch[3]}`;
+    }
+    if (line != null && column != null) {
+        return buildDiagnosticFromSpan({ level, message: detail, file }, source, { line, column, endLine, endColumn });
+    }
+    if (source.trim().length) {
+        return buildDiagnosticFromSpan({ level, message: detail, file }, source, { line: 1, column: 1 });
+    }
+    return { level, message: detail, file, location: file };
+}
+function buildDiagnosticFromSpan(base, source, span) {
+    const startLine = Math.max(1, span.line);
+    const startColumn = Math.max(1, span.column);
+    const endLine = Math.max(startLine, span.endLine ?? span.line);
+    const endColumn = Math.max(startColumn + 1, span.endColumn ?? startColumn + 1);
+    const range = {
+        start: {
+            line: startLine,
+            column: startColumn,
+            offset: lineColumnToOffset(source, startLine, startColumn),
+        },
+        end: {
+            line: endLine,
+            column: endColumn,
+            offset: lineColumnToOffset(source, endLine, endColumn),
+        },
+    };
+    const excerpt = buildExcerpt(source, startLine, startColumn, endLine, endColumn);
+    const location = base.file
+        ? `${base.file}:${startLine}:${startColumn}-${endLine}:${endColumn}`
+        : `${startLine}:${startColumn}-${endLine}:${endColumn}`;
+    return { ...base, range, excerpt, location };
+}
+function buildExcerpt(source, line, column, endLine, endColumn) {
+    const lines = source.split("\n");
+    const lineIndex = Math.max(1, Math.min(line, lines.length));
+    const textLine = lines[lineIndex - 1] ?? "";
+    const startCol = Math.max(1, Math.min(column, textLine.length + 1));
+    const endCol = endLine === lineIndex ? Math.max(startCol + 1, Math.min(endColumn, textLine.length + 1)) : textLine.length + 1;
+    const caretLength = Math.max(1, endCol - startCol);
+    const caret = `${" ".repeat(Math.max(0, startCol - 1))}${"^".repeat(caretLength)}`;
+    return { line: lineIndex, text: textLine, caret };
+}
+function lineColumnToOffset(source, line, column) {
+    const lines = source.split("\n");
+    const clampedLine = Math.max(1, Math.min(line, lines.length));
+    let offset = 0;
+    for (let i = 0; i < clampedLine - 1; i += 1) {
+        offset += lines[i].length + 1;
+    }
+    const colIndex = Math.max(1, column) - 1;
+    return offset + colIndex;
+}
+function offsetToLineColumn(source, offset) {
+    const lines = source.split("\n");
+    let remaining = Math.max(0, offset);
+    for (let i = 0; i < lines.length; i += 1) {
+        const lineLength = lines[i].length + 1;
+        if (remaining < lineLength) {
+            return { line: i + 1, column: remaining + 1 };
+        }
+        remaining -= lineLength;
+    }
+    const lastLine = Math.max(1, lines.length);
+    return { line: lastLine, column: (lines[lastLine - 1]?.length ?? 0) + 1 };
+}
+function findNodeById(nodes, id) {
+    for (const node of nodes ?? []) {
+        if (node.id === id)
+            return node;
+        const child = findNodeById(node.children ?? [], id);
+        if (child)
+            return child;
+    }
+    return null;
+}
+function buildInspectorPayload(node) {
+    const content = getLiteralString(node.props?.content);
+    const isEditable = node.kind === "text" && content != null && (!node.children || node.children.length === 0);
+    const style = getLiteralString(node.props?.style);
+    const role = getLiteralString(node.props?.role);
+    const isHeading = Boolean(style && /^H\d/.test(style)) || Boolean(role && ["title", "subtitle", "heading"].includes(role));
+    return {
+        id: node.id,
+        kind: node.kind,
+        props: node.props,
+        text: content ?? null,
+        editable: isEditable,
+        textKind: isEditable ? (isHeading ? "heading" : "paragraph") : null,
+        childCount: node.children?.length ?? 0,
+    };
+}
+function applySetTextTransform(source, doc, id, text, docPath) {
+    if (!id) {
+        return {
+            ok: false,
+            diagnostic: buildDiagnosticFromMessage("Missing node id", source, docPath, "fail"),
+        };
+    }
+    const node = findNodeById(doc.body?.nodes ?? [], id);
+    if (!node) {
+        const found = findIdInSource(source, id);
+        if (found) {
+            return {
+                ok: false,
+                diagnostic: buildDiagnosticFromSpan({
+                    level: "fail",
+                    message: `Node '${id}' was not found in the document.`,
+                    file: docPath,
+                    suggestion: "Check the outline for a valid node id.",
+                }, source, { line: found.line, column: found.column }),
+            };
+        }
+        return {
+            ok: false,
+            diagnostic: {
+                level: "fail",
+                message: `Node '${id}' was not found in the document.`,
+                file: docPath,
+                suggestion: "Check the outline for a valid node id.",
+                location: docPath,
+            },
+        };
+    }
+    if (node.kind !== "text") {
+        return {
+            ok: false,
+            diagnostic: buildDiagnosticFromNode(node, source, docPath, `Only text nodes can be edited in Phase 1 (selected ${node.kind}).`),
+        };
+    }
+    if (node.children && node.children.length > 0) {
+        return {
+            ok: false,
+            diagnostic: buildDiagnosticFromNode(node, source, docPath, "Rich text nodes with inline children are not editable yet."),
+        };
+    }
+    const content = getLiteralString(node.props?.content);
+    if (content == null) {
+        return {
+            ok: false,
+            diagnostic: buildDiagnosticFromNode(node, source, docPath, "Text nodes without a literal content value cannot be edited yet."),
+        };
+    }
+    const loc = node.loc;
+    if (!loc?.line || !loc?.column || !loc.endLine || !loc.endColumn) {
+        return {
+            ok: false,
+            diagnostic: buildDiagnosticFromMessage(`Missing source span for node '${id}'.`, source, docPath, "fail"),
+        };
+    }
+    const startIndex = lineColumnToOffset(source, loc.line, loc.column);
+    const endIndex = lineColumnToOffset(source, loc.endLine, loc.endColumn);
+    const block = source.slice(startIndex, endIndex);
+    const updatedBlock = replaceContentLiteral(block, text);
+    if (!updatedBlock) {
+        return {
+            ok: false,
+            diagnostic: buildDiagnosticFromNode(node, source, docPath, "Unable to locate content property for this node."),
+        };
+    }
+    const nextSource = source.slice(0, startIndex) + updatedBlock + source.slice(endIndex);
+    return { ok: true, source: nextSource };
+}
+function replaceContentLiteral(block, text) {
+    const contentRegex = /(content\s*=\s*)(\"(?:\\.|[^"])*\"|'(?:\\.|[^'])*')/s;
+    if (!contentRegex.test(block))
+        return null;
+    const escaped = escapeStringLiteral(text);
+    return block.replace(contentRegex, `$1"${escaped}"`);
+}
+function escapeStringLiteral(value) {
+    return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+function buildDiagnosticFromNode(node, source, docPath, message, suggestion) {
+    const loc = node.loc;
+    if (!loc?.line || !loc?.column) {
+        return {
+            level: "fail",
+            message,
+            file: docPath,
+            suggestion,
+            location: docPath,
+            nodeId: node.id,
+        };
+    }
+    return buildDiagnosticFromSpan({ level: "fail", message, file: docPath, suggestion, nodeId: node.id }, source, { line: loc.line, column: loc.column, endLine: loc.endLine, endColumn: loc.endColumn });
+}
+function findIdInSource(source, id) {
+    if (!id)
+        return null;
+    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`\\b${escaped}\\b`);
+    const match = regex.exec(source);
+    if (!match || match.index == null)
+        return null;
+    return offsetToLineColumn(source, match.index);
+}
+async function writeFileAtomic(filePath, contents) {
+    const dir = path.dirname(filePath);
+    const base = path.basename(filePath);
+    const tempPath = path.join(dir, `.${base}.${process.pid}.${Date.now()}.tmp`);
+    await fs.writeFile(tempPath, contents, "utf8");
+    await fs.rename(tempPath, filePath);
 }
 //# sourceMappingURL=index.js.map

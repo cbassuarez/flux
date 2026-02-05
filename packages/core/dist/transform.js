@@ -11,6 +11,8 @@ export function applyAddTransform(source, doc, options) {
             return insertIntoBody(source, buildPageSnippet(makeId("page"), options.heading));
         case "section":
             return insertIntoLastPage(source, doc, buildSectionSnippet(makeId("section"), options));
+        case "paragraph":
+            return insertIntoLastSection(source, doc, buildParagraphSnippet(makeId("paragraph"), options));
         case "figure":
             return insertIntoLastPage(source, doc, buildFigureSnippet(makeId("figure"), doc, options));
         case "callout":
@@ -141,6 +143,31 @@ function insertIntoLastPage(source, doc, snippet) {
     const childIndent = indent + INDENT;
     return insertSnippet(source, index, childIndent, snippet);
 }
+function insertIntoLastSection(source, doc, snippet) {
+    const sections = [];
+    const visit = (node) => {
+        if (node.kind === "section")
+            sections.push(node);
+        for (const child of node.children ?? []) {
+            visit(child);
+        }
+    };
+    for (const node of doc.body?.nodes ?? []) {
+        visit(node);
+    }
+    if (!sections.length) {
+        return insertIntoLastPage(source, doc, snippet);
+    }
+    const last = sections[sections.length - 1];
+    const loc = last.loc;
+    if (!loc?.endLine || !loc?.endColumn) {
+        return insertIntoLastPage(source, doc, snippet);
+    }
+    const index = lineColumnToIndex(source, loc.endLine, loc.endColumn);
+    const indent = getLineIndent(source, loc.endLine);
+    const childIndent = indent + INDENT;
+    return insertSnippet(source, index, childIndent, snippet);
+}
 function lineColumnToIndex(source, line, column) {
     const lines = source.split("\n");
     const clampedLine = Math.max(1, Math.min(line, lines.length));
@@ -209,6 +236,10 @@ function buildSectionSnippet(id, options) {
     lines.push(`${INDENT}text ${id}Body { content = "Start writing here."; }`);
     lines.push(`}`);
     return lines.join("\n");
+}
+function buildParagraphSnippet(id, options) {
+    const content = options.text ?? "New paragraph.";
+    return [`text ${id} { content = "${escapeString(content)}"; }`].join("\n");
 }
 function buildFigureSnippet(id, doc, options) {
     const label = options.label ?? `${id}`;

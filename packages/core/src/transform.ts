@@ -6,6 +6,7 @@ export type AddTransformKind =
   | "title"
   | "page"
   | "section"
+  | "paragraph"
   | "figure"
   | "callout"
   | "table"
@@ -41,6 +42,8 @@ export function applyAddTransform(source: string, doc: FluxDocument, options: Ad
       return insertIntoBody(source, buildPageSnippet(makeId("page"), options.heading));
     case "section":
       return insertIntoLastPage(source, doc, buildSectionSnippet(makeId("section"), options));
+    case "paragraph":
+      return insertIntoLastSection(source, doc, buildParagraphSnippet(makeId("paragraph"), options));
     case "figure":
       return insertIntoLastPage(source, doc, buildFigureSnippet(makeId("figure"), doc, options));
     case "callout":
@@ -177,6 +180,31 @@ function insertIntoLastPage(source: string, doc: FluxDocument, snippet: string):
   return insertSnippet(source, index, childIndent, snippet);
 }
 
+function insertIntoLastSection(source: string, doc: FluxDocument, snippet: string): string {
+  const sections: DocumentNode[] = [];
+  const visit = (node: DocumentNode) => {
+    if (node.kind === "section") sections.push(node);
+    for (const child of node.children ?? []) {
+      visit(child);
+    }
+  };
+  for (const node of doc.body?.nodes ?? []) {
+    visit(node);
+  }
+  if (!sections.length) {
+    return insertIntoLastPage(source, doc, snippet);
+  }
+  const last = sections[sections.length - 1];
+  const loc = last.loc;
+  if (!loc?.endLine || !loc?.endColumn) {
+    return insertIntoLastPage(source, doc, snippet);
+  }
+  const index = lineColumnToIndex(source, loc.endLine, loc.endColumn);
+  const indent = getLineIndent(source, loc.endLine);
+  const childIndent = indent + INDENT;
+  return insertSnippet(source, index, childIndent, snippet);
+}
+
 function lineColumnToIndex(source: string, line: number, column: number): number {
   const lines = source.split("\n");
   const clampedLine = Math.max(1, Math.min(line, lines.length));
@@ -252,6 +280,11 @@ function buildSectionSnippet(id: string, options: AddTransformOptions): string {
   lines.push(`${INDENT}text ${id}Body { content = "Start writing here."; }`);
   lines.push(`}`);
   return lines.join("\n");
+}
+
+function buildParagraphSnippet(id: string, options: AddTransformOptions): string {
+  const content = options.text ?? "New paragraph.";
+  return [`text ${id} { content = "${escapeString(content)}"; }`].join("\n");
 }
 
 function buildFigureSnippet(id: string, doc: FluxDocument, options: AddTransformOptions): string {

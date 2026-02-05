@@ -1,6 +1,6 @@
 import type { FluxDocument } from "./ast.js";
 export type SlotFitPolicy = "clip" | "ellipsis" | "shrink" | "scaleDown";
-export type AddTransformKind = "title" | "page" | "section" | "figure" | "callout" | "table" | "slot" | "inline-slot" | "bibliography-stub";
+export type AddTransformKind = "title" | "page" | "section" | "paragraph" | "figure" | "callout" | "table" | "slot" | "inline-slot" | "bibliography-stub";
 export interface AddTransformOptions {
     kind: AddTransformKind;
     text?: string;

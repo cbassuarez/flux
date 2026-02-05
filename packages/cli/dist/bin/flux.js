@@ -70,6 +70,8 @@ async function main(argv) {
             return runStep(rest);
         case "view":
             return runView(rest, parsed);
+        case "edit":
+            return runEdit(rest, parsed);
         case "pdf":
             return runPdf(rest, parsed);
         case "config":
@@ -159,6 +161,8 @@ function printCommandHelp(cmd) {
         return printStepHelp();
     if (cmd === "view")
         return printViewHelp();
+    if (cmd === "edit")
+        return printEditHelp();
     if (cmd === "pdf")
         return printPdfHelp();
     if (cmd === "config")
@@ -182,6 +186,7 @@ function printGlobalHelp() {
         "  flux tick [options] <file>",
         "  flux step [options] <file>",
         "  flux view <file>",
+        "  flux edit <file>",
         "  flux pdf <file> --out <file.pdf>",
         "  flux config [set <key> <value>]",
         "  flux new <template> [options]",
@@ -195,6 +200,7 @@ function printGlobalHelp() {
         "  tick    Advance time and render the updated document.",
         "  step    Advance docsteps and render the updated document.",
         "  view    View a Flux document in a local web preview.",
+        "  edit    Edit a Flux document in the local web editor.",
         "  pdf     Export a Flux document snapshot to PDF.",
         "  config  View or edit configuration.",
         "  new     Create a new Flux document.",
@@ -319,6 +325,25 @@ function printViewHelp() {
         "  --editor-dist <p>   Serve editor assets from this dist folder.",
         "  --no-time           Disable automatic time advancement.",
         "  --tty               Use the legacy TTY grid viewer.",
+        "  -h, --help          Show this message.",
+        "",
+    ].join("\n"));
+}
+function printEditHelp() {
+    console.log([
+        "Usage:",
+        "  flux edit [options] <file>",
+        "",
+        "Description:",
+        "  Open the local web editor for a Flux document.",
+        "",
+        "Options:",
+        "  --port <n>          Port for the local server (default: auto).",
+        "  --docstep-ms <n>    Docstep interval in milliseconds.",
+        "  --seed <n>          Seed for deterministic rendering.",
+        "  --allow-net <orig>  Allow remote assets for origin (repeatable or comma-separated).",
+        "  --editor-dist <p>   Serve editor assets from this dist folder.",
+        "  --no-time           Disable automatic time advancement.",
         "  -h, --help          Show this message.",
         "",
     ].join("\n"));
@@ -740,6 +765,127 @@ async function runView(args, globals) {
     }
     if (!globals.quiet) {
         openBrowser(session.url);
+    }
+    if (session.close) {
+        await new Promise((resolve) => {
+            const shutdown = async () => {
+                await session.close?.();
+                resolve();
+            };
+            process.on("SIGINT", shutdown);
+            process.on("SIGTERM", shutdown);
+        });
+    }
+    return 0;
+}
+async function runEdit(args, globals) {
+    let port;
+    let docstepMs;
+    let seed;
+    let editorDist;
+    const allowNet = [];
+    let file;
+    let advanceTime = true;
+    let advanceTimeExplicit = false;
+    try {
+        for (let i = 0; i < args.length; i += 1) {
+            const arg = args[i];
+            if (arg === "--no-time") {
+                advanceTime = false;
+                advanceTimeExplicit = true;
+            }
+            else if (arg === "--port") {
+                port = parseNumberFlag("--port", args[i + 1]);
+                i += 1;
+            }
+            else if (arg.startsWith("--port=")) {
+                port = parseNumberFlag("--port", arg.slice("--port=".length));
+            }
+            else if (arg === "--docstep-ms") {
+                docstepMs = parseNumberFlag("--docstep-ms", args[i + 1]);
+                i += 1;
+            }
+            else if (arg.startsWith("--docstep-ms=")) {
+                docstepMs = parseNumberFlag("--docstep-ms", arg.slice("--docstep-ms=".length));
+            }
+            else if (arg === "--seed") {
+                seed = parseNumberFlag("--seed", args[i + 1]);
+                i += 1;
+            }
+            else if (arg.startsWith("--seed=")) {
+                seed = parseNumberFlag("--seed", arg.slice("--seed=".length));
+            }
+            else if (arg === "--allow-net") {
+                const raw = args[i + 1] ?? "";
+                allowNet.push(...raw.split(",").map((item) => item.trim()).filter(Boolean));
+                i += 1;
+            }
+            else if (arg.startsWith("--allow-net=")) {
+                const raw = arg.slice("--allow-net=".length);
+                allowNet.push(...raw.split(",").map((item) => item.trim()).filter(Boolean));
+            }
+            else if (arg === "--editor-dist") {
+                editorDist = args[i + 1];
+                i += 1;
+            }
+            else if (arg.startsWith("--editor-dist=")) {
+                editorDist = arg.slice("--editor-dist=".length);
+            }
+            else if (!arg.startsWith("-")) {
+                file = arg;
+            }
+        }
+    }
+    catch (error) {
+        console.error(`flux edit: ${error?.message ?? error}`);
+        return 1;
+    }
+    const resolved = await resolveConfig({ cwd: process.cwd(), env: process.env });
+    if (docstepMs === undefined) {
+        docstepMs = resolved.config.docstepMs;
+    }
+    if (!advanceTimeExplicit) {
+        advanceTime = resolved.config.advanceTime;
+    }
+    if (!file) {
+        console.error("flux edit: No input file specified.");
+        printEditHelp();
+        return 1;
+    }
+    if (file === "-") {
+        console.error("flux edit: stdin input is not supported for the web editor.");
+        return 1;
+    }
+    const result = await viewCommand({
+        cwd: process.cwd(),
+        docPath: file,
+        port,
+        docstepMs,
+        seed,
+        allowNet,
+        advanceTime,
+        editorDist,
+    });
+    if (!result.ok || !result.data) {
+        console.error(result.error?.message ?? "flux edit failed");
+        return 1;
+    }
+    await updateRecents(process.cwd(), path.resolve(file));
+    const session = result.data.session;
+    const absolutePath = path.resolve(file);
+    const editorUrl = `${session.url}/edit?file=${encodeURIComponent(absolutePath)}`;
+    if (globals.json) {
+        process.stdout.write(JSON.stringify({ ...session, editorUrl }) + "\n");
+    }
+    else if (!globals.quiet) {
+        console.log(`Flux editor running at ${editorUrl}`);
+        if (session.attached) {
+            console.log("Attached to existing editor.");
+        }
+        console.log("Press Ctrl+C to stop.");
+    }
+    if (!globals.quiet) {
+        openBrowser(editorUrl);
     }
     if (session.close) {
         await new Promise((resolve) => {
