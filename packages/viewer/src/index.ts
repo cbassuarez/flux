@@ -378,6 +378,27 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
         return;
       }
 
+      if (editorDist.dir && editorDist.indexPath) {
+        const rawPath = url.pathname;
+        if (
+          rawPath !== "/" &&
+          !rawPath.startsWith("/api/") &&
+          !rawPath.startsWith("/assets/") &&
+          rawPath !== "/asset" &&
+          rawPath !== "/viewer.js" &&
+          rawPath !== "/viewer.css" &&
+          rawPath !== "/render.css"
+        ) {
+          const decoded = decodeURIComponent(rawPath.slice(1));
+          const candidate = path.resolve(editorDist.dir, decoded);
+          const resolved = await resolveStaticPath(editorDist.dir, candidate);
+          if (resolved) {
+            await serveFile(res, resolved, noCacheHeaders());
+            return;
+          }
+        }
+      }
+
       if (url.pathname === "/") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         res.end(buildIndexHtml(path.basename(docPath)));

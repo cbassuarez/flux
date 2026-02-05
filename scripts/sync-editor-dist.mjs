@@ -38,6 +38,17 @@ async function main() {
     process.exit(1);
   }
 
+  const indexPath = path.join(from, "index.html");
+  try {
+    const html = await fs.readFile(indexPath, "utf8");
+    if (!html.includes('="/edit/') && !html.includes("='/edit/")) {
+      console.warn("[sync-editor] Warning: editor bundle does not appear to be built with base /edit/.");
+      console.warn("[sync-editor] Run `npm --prefix ../flux-site run build:edit` then sync again.");
+    }
+  } catch {
+    console.warn(`[sync-editor] Warning: unable to read ${indexPath} to verify base path.`);
+  }
+
   await fs.rm(to, { recursive: true, force: true });
   await fs.mkdir(to, { recursive: true });
   await fs.cp(from, to, { recursive: true });

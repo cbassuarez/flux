@@ -20,11 +20,17 @@ import { FormatScreen } from "../screens/FormatScreen.js";
 import { EditScreen } from "../screens/EditScreen.js";
 import { SettingsScreen } from "../screens/SettingsScreen.js";
 import { MouseProvider } from "../state/mouse.js";
+import { defaultFocusForRoute } from "../state/focus.js";
+import { applyOpenSearchInput, shouldEnterOpenSearch, shouldExitOpenSearch } from "../state/open-search.js";
 import { useToasts } from "../state/toasts.js";
 import { useProgress } from "../state/progress.js";
 import { resolveActionRoute, resolveRouteAfterOpen } from "../state/dashboard-machine.js";
 import { buildPaletteItems, filterPaletteItems, groupPaletteItems } from "../palette/index.js";
 import { accent, color, truncateMiddle } from "../theme/index.js";
+import { hasControlChars, sanitizePrintableInput } from "../ui/input.js";
+import { getLayoutMetrics, isTerminalTooSmall, MIN_COLS, MIN_ROWS } from "../ui/layout.js";
+import { useDebouncedValue } from "../ui/useDebouncedValue.js";
+import { useTerminalDimensions } from "../ui/useTerminalDimensions.js";
 import { PaneFrame } from "../components/PaneFrame.js";
 const TEMPLATE_OPTIONS = [
     { label: "Demo", value: "demo", hint: "Live slots + assets + annotations" },
@@ -67,19 +73,23 @@ const BACKEND_LABEL = "typesetter";
 const FILE_INDEX_CAP = 20000;
 const FILE_INDEX_DEPTH = 7;
 const SEARCH_DEBOUNCE_MS = 200;
+const FILE_SCAN_BATCH_MS = 75;
 export function App(props) {
     const { exit } = useApp();
+    const initialRoute = props.mode === "new" ? "new" : "open";
+    const initialFocusTarget = props.helpCommand || props.version ? "modal" : defaultFocusForRoute(initialRoute);
     const [recents, setRecents] = useState([]);
     const [recentsPath, setRecentsPath] = useState(undefined);
     const [currentDocument, setCurrentDocument] = useState(null);
     const [pinnedDirs, setPinnedDirs] = useState([]);
     const [lastUsedDir, setLastUsedDirState] = useState(null);
     const [navIndex, setNavIndex] = useState(1);
-    const [focus, setFocus] = useState("pane");
-    const [route, setRoute] = useState(props.mode === "new" ? "new" : "open");
+    const [route, setRoute] = useState(initialRoute);
+    const [focusTarget, setFocusTarget] = useState(() => initialFocusTarget);
+    const focusBeforeOverlay = useRef(defaultFocusForRoute(initialRoute));
+    const routeBeforeOverlay = useRef(initialRoute);
     const [pendingAction, setPendingAction] = useState(null);
     const [openQuery, setOpenQuery] = useState("");
-    const [openDebouncedQuery, setOpenDebouncedQuery] = useState("");
     const [openShowAll, setOpenShowAll] = useState(false);
     const [openRoot, setOpenRoot] = useState(props.cwd);
     const [openRootInitialized, setOpenRootInitialized] = useState(false);
@@ -136,8 +146,7 @@ export function App(props) {
     const [streamOk, setStreamOk] = useState(false);
     const [config, setConfig] = useState(null);
     const [fluxFiles, setFluxFiles] = useState([]);
-    const [cols, setCols] = useState(() => process.stdout.columns ?? 80);
-    const [rows, setRows] = useState(() => process.stdout.rows ?? 24);
+    const { columns: cols, rows } = useTerminalDimensions();
     const [debugLayout, setDebugLayout] = useState(false);
     const [doctorSummary, setDoctorSummary] = useState("Run Doctor to check this document.");
     const [doctorLogs, setDoctorLogs] = useState([]);
@@ -176,27 +185,11 @@ export function App(props) {
     const filteredPalette = useMemo(() => filterPaletteItems(paletteItems, paletteQuery), [paletteItems, paletteQuery]);
     const limitedPalette = useMemo(() => filteredPalette.slice(0, 12), [filteredPalette]);
     const paletteGroups = useMemo(() => groupPaletteItems(limitedPalette), [limitedPalette]);
-    const innerWidth = Math.max(20, cols - 4);
-    const overlayWidth = Math.max(28, Math.min(72, innerWidth - 4));
-    const navWidth = Math.min(32, Math.max(20, Math.floor(innerWidth * 0.34)));
-    const paneWidth = Math.max(20, innerWidth - navWidth - 2);
-    const navContentWidth = Math.max(12, navWidth - 4);
-    const paneContentWidth = Math.max(20, paneWidth - 4);
-    const navListHeight = Math.max(8, rows - 14);
+    const layout = useMemo(() => getLayoutMetrics(cols, rows), [cols, rows]);
+    const { innerWidth, overlayWidth, navWidth, navContentWidth, paneContentWidth, navListHeight, } = layout;
+    const terminalTooSmall = useMemo(() => isTerminalTooSmall(cols, rows), [cols, rows]);
+    const openDebouncedQuery = useDebouncedValue(openQuery, SEARCH_DEBOUNCE_MS);
     const mouseDisabled = paletteOpen || helpOpen || versionOpen;
-    useEffect(() => {
-        const stdout = process.stdout;
-        if (!stdout?.on || !stdout?.off)
-            return;
-        const handleResize = () => {
-            setCols(stdout.columns ?? 80);
-            setRows(stdout.rows ?? 24);
-        };
-        stdout.on("resize", handleResize);
-        return () => {
-            stdout.off("resize", handleResize);
-        };
-    }, []);
     useEffect(() => {
         void refreshRecents();
         void refreshPinnedDirs();
@@ -232,10 +225,6 @@ export function App(props) {
         void handleInitialRoute(initialArgs).finally(() => setInitialRouteHandled(true));
     }, [config, helpOpen, versionOpen, initialRouteHandled, props.initialArgs, props.mode]);
     useEffect(() => {
-        const timer = setTimeout(() => setOpenDebouncedQuery(openQuery), SEARCH_DEBOUNCE_MS);
-        return () => clearTimeout(timer);
-    }, [openQuery]);
-    useEffect(() => {
         if (!openRootInitialized)
             return;
         void setLastUsedDir(props.cwd, openRoot).then((store) => setLastUsedDirState(store.dir ?? null)).catch(() => null);
@@ -247,6 +236,31 @@ export function App(props) {
         const controller = new AbortController();
         openScanController.current = controller;
         const scanId = ++openScanId.current;
+        let pendingFiles = [];
+        let flushTimer = null;
+        const flushPending = () => {
+            if (openScanId.current !== scanId)
+                return;
+            if (pendingFiles.length === 0)
+                return;
+            const batch = pendingFiles;
+            pendingFiles = [];
+            setOpenFiles((prev) => {
+                if (prev.length >= FILE_INDEX_CAP)
+                    return prev;
+                const remaining = FILE_INDEX_CAP - prev.length;
+                const next = batch.slice(0, remaining);
+                return next.length === 0 ? prev : [...prev, ...next];
+            });
+        };
+        const scheduleFlush = () => {
+            if (flushTimer)
+                return;
+            flushTimer = setTimeout(() => {
+                flushTimer = null;
+                flushPending();
+            }, FILE_SCAN_BATCH_MS);
+        };
         setOpenIndexing(true);
         setOpenTruncated(false);
         setOpenFiles([]);
@@ -271,9 +285,15 @@ export function App(props) {
                 if (openScanId.current !== scanId)
                     return;
                 if (event.type === "file") {
-                    setOpenFiles((prev) => (prev.length >= FILE_INDEX_CAP ? prev : [...prev, event.path]));
+                    pendingFiles.push(event.path);
+                    scheduleFlush();
                 }
                 else if (event.type === "done") {
+                    if (flushTimer) {
+                        clearTimeout(flushTimer);
+                        flushTimer = null;
+                    }
+                    flushPending();
                     setOpenIndexing(false);
                     setOpenTruncated(event.truncated);
                 }
@@ -282,7 +302,11 @@ export function App(props) {
         void loadOpenFolders(openRoot);
         setOpenSelectedIndex(0);
         setOpenFolderIndex(0);
-        return () => controller.abort();
+        return () => {
+            controller.abort();
+            if (flushTimer)
+                clearTimeout(flushTimer);
+        };
     }, [openRoot, openRootInitialized]);
     const openResults = useMemo(() => {
         const query = openDebouncedQuery.trim().toLowerCase();
@@ -419,28 +443,23 @@ export function App(props) {
             exit();
             return;
         }
-        if (input && input.includes("\u001b[<")) {
-            return;
-        }
-        if (input?.toLowerCase() === "q" && !paletteOpen && !helpOpen && !versionOpen) {
-            exit();
+        if (shouldExitOpenSearch({ focusTarget, key })) {
+            setFocusTarget("open.results");
             return;
         }
         if (versionOpen) {
             if (key.escape || key.return)
-                setVersionOpen(false);
+                closeVersion();
             return;
         }
         if (helpOpen) {
             if (key.escape || key.return)
-                setHelpOpen(false);
+                closeHelp();
             return;
         }
         if (paletteOpen) {
             if (key.escape) {
-                setPaletteOpen(false);
-                setPaletteQuery("");
-                setPaletteIndex(0);
+                closePalette();
                 return;
             }
             if (key.return) {
@@ -448,9 +467,7 @@ export function App(props) {
                 if (item) {
                     await handlePaletteSelect(item);
                 }
-                setPaletteOpen(false);
-                setPaletteQuery("");
-                setPaletteIndex(0);
+                closePalette();
                 return;
             }
             if (key.downArrow) {
@@ -465,66 +482,77 @@ export function App(props) {
                 setPaletteQuery((prev) => prev.slice(0, -1));
                 return;
             }
-            if (input) {
-                setPaletteQuery((prev) => prev + input);
+            const paletteInput = sanitizePrintableInput(input);
+            if (paletteInput) {
+                setPaletteQuery((prev) => prev + paletteInput);
                 return;
             }
-            return;
-        }
-        if (key.ctrl && input === "k") {
-            setPaletteOpen(true);
-            setPaletteQuery("");
-            setPaletteIndex(0);
-            return;
-        }
-        if (input === "/") {
-            setPaletteOpen(true);
-            setPaletteQuery("");
-            setPaletteIndex(0);
-            return;
-        }
-        if (input === "?") {
-            setHelpOpen(true);
-            return;
-        }
-        if (key.tab) {
-            setFocus((prev) => (prev === "nav" ? "pane" : "nav"));
             return;
         }
         if (key.escape) {
             resetToDefault();
             return;
         }
-        if (route === "new") {
-            await handleWizardInput(input, key);
+        const hasControl = hasControlChars(input);
+        const hasSpecialKey = Boolean(key.return || key.backspace || key.delete || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab);
+        if (hasControl && !hasSpecialKey) {
             return;
         }
-        if (focus === "nav") {
+        if (shouldEnterOpenSearch({ route, focusTarget, input, key })) {
+            setFocusTarget("open.search");
+            return;
+        }
+        if (key.ctrl && input === "k") {
+            openPalette();
+            return;
+        }
+        if (input === "/" && route !== "open") {
+            openPalette();
+            return;
+        }
+        if (input === "?" && focusTarget !== "open.search") {
+            openHelp();
+            return;
+        }
+        if (input?.toLowerCase() === "q" && focusTarget !== "open.search") {
+            exit();
+            return;
+        }
+        if (key.tab) {
+            toggleFocus();
+            return;
+        }
+        const printableInput = sanitizePrintableInput(input);
+        if (route === "new") {
+            await handleWizardInput(printableInput, key);
+            return;
+        }
+        if (focusTarget === "nav") {
             await handleNavInput(input, key);
             return;
         }
         if (route === "open") {
-            await handleOpenInput(input, key);
+            await handleOpenInput({ input, key });
             return;
         }
         if (route === "doc") {
-            await handleDocInput(input, key);
+            await handleDocInput(printableInput, key);
             return;
         }
         if (route === "export") {
-            await handleExportInput(input, key);
+            await handleExportInput(printableInput, key);
             return;
         }
         if (route === "doctor") {
-            await handleDoctorInput(input, key);
+            await handleDoctorInput(printableInput, key);
             return;
         }
         if (route === "format") {
-            await handleFormatInput(input, key);
+            await handleFormatInput(printableInput, key);
             return;
         }
         if (route === "edit") {
-            await handleEditInput(input, key);
+            await handleEditInput(printableInput, key);
             return;
         }
     });
@@ -578,84 +606,89 @@ export function App(props) {
         { id: "doctor", label: "Doctor", icon: "✓", onClick: () => void goToDoctor(), active: docActionIndex === 3 },
         { id: "format", label: "Format", icon: "≡", onClick: () => void goToFormat(), active: docActionIndex === 4 },
     ]), [docActionIndex]);
+    if (terminalTooSmall) {
+        const cardWidth = Math.max(20, Math.min(innerWidth, cols));
+        const cardRuleWidth = Math.max(10, cardWidth - 6);
+        return (_jsx(MouseProvider, { disabled: true, children: _jsx(AppFrame, { debug: debugLayout, children: _jsx(Box, { flexGrow: 1, alignItems: "center", justifyContent: "center", children: _jsx(Card, { title: "Flux", meta: "", accent: true, ruleWidth: cardRuleWidth, width: cardWidth, debug: debugLayout, children: _jsx(Text, { color: color.muted, children: `Terminal too small (need ≥ ${MIN_COLS}×${MIN_ROWS}). Resize to continue.` }) }) }) }) }));
+    }
     const rightPane = (() => {
         if (route === "new") {
             const step = wizardSteps[wizardStep] ?? null;
             return (_jsx(NewWizardScreen, { width: paneContentWidth, step: step, stepIndex: wizardStep, stepsCount: wizardSteps.length, values: wizardValues, selectedIndex: step?.kind === "select" ? wizardIndexes[step.key] ?? 0 : 0, created: wizardCreated, postCreate: wizardPostCreate, outputDir: resolveWizardOutDir() ?? props.cwd, debug: debugLayout }));
         }
         if (route === "open") {
-            return (_jsx(OpenScreen, { width: paneContentWidth, query: openQuery, showAll: openShowAll, rootDir: openRoot, results: openResultItems, selectedIndex: openSelectedIndex, folders: openFolders, folderIndex: openFolderIndex, activeList: openActiveList, pinnedDirs: pinnedDirs, recentDirs: recentDirs, isPinned: isPinned, indexing: openIndexing, truncated: openTruncated, preview: openPreview, onToggleShowAll: () => setOpenShowAll((prev) => !prev), onOpenSelected: () => {
-                    setFocus("pane");
+            return (_jsx(OpenScreen, { width: paneContentWidth, query: openQuery, showAll: openShowAll, rootDir: openRoot, results: openResultItems, selectedIndex: openSelectedIndex, folders: openFolders, folderIndex: openFolderIndex, activeList: openActiveList, pinnedDirs: pinnedDirs, recentDirs: recentDirs, isPinned: isPinned, indexing: openIndexing, truncated: openTruncated, preview: openPreview, searchFocused: focusTarget === "open.search", onToggleShowAll: () => setOpenShowAll((prev) => !prev), onOpenSelected: () => {
+                    setFocusTarget("open.results");
                     void openSelectedFile();
                 }, onSelectResult: (index) => {
-                    setFocus("pane");
+                    setFocusTarget("open.results");
                     setOpenSelectedIndex(index);
                 }, onSelectFolder: (index) => {
-                    setFocus("pane");
+                    setFocusTarget("open.results");
                     setOpenFolderIndex(index);
                     const folder = openFolders[index];
                     if (folder)
                         changeOpenRoot(folder);
                 }, onSelectPinned: (dir) => {
-                    setFocus("pane");
+                    setFocusTarget("open.results");
                     changeOpenRoot(dir);
                 }, onSelectRecent: (dir) => {
-                    setFocus("pane");
+                    setFocusTarget("open.results");
                     changeOpenRoot(dir);
                 }, onTogglePin: () => {
-                    setFocus("pane");
+                    setFocusTarget("open.results");
                     void togglePinForCurrent();
-                }, debug: debugLayout }));
+                }, onFocusSearch: () => setFocusTarget("open.search"), onFocusResults: () => setFocusTarget("open.results"), debug: debugLayout }));
         }
         if (route === "doc") {
             return (_jsx(DocDetailsScreen, { width: paneContentWidth, docPath: currentDocument, preview: docPreview, primaryActions: docPrimaryActions, secondaryActions: docSecondaryActions, debug: debugLayout }));
         }
         if (route === "export") {
             return (_jsx(ExportScreen, { width: paneContentWidth, docPath: currentDocument, outputPath: currentDocument ? currentDocument.replace(/\.flux$/i, ".pdf") : null, progress: progress, resultPath: exportResultPath, actionIndex: exportActionIndex, onExport: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     void handleExport();
                 }, onOpenFile: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     void handleOpenFileResult();
                 }, onReveal: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     void handleRevealResult();
                 }, onCopyPath: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     void handleCopyResultPath();
                 }, debug: debugLayout }));
         }
         if (route === "doctor") {
             return (_jsx(DoctorScreen, { width: paneContentWidth, docPath: currentDocument, summary: doctorSummary, logs: doctorLogs, logsOpen: doctorLogsOpen, progress: progress, onToggleLogs: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     setDoctorLogsOpen((prev) => !prev);
                 }, onRun: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     void handleCheck();
                 }, debug: debugLayout }));
         }
         if (route === "format") {
             return (_jsx(FormatScreen, { width: paneContentWidth, docPath: currentDocument, summary: formatSummary, logs: formatLogs, logsOpen: formatLogsOpen, onToggleLogs: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     setFormatLogsOpen((prev) => !prev);
                 }, onRun: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     void handleFormat();
                 }, debug: debugLayout }));
         }
         if (route === "edit") {
             const viewerUrl = getViewerUrl();
             return (_jsx(EditScreen, { width: paneContentWidth, docPath: currentDocument, title: docPreview?.title ?? null, viewerUrl: viewerUrl, onCopyUrl: () => void handleCopyEditorUrl(), onExport: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     void handleExport();
                 }, onDoctor: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     void handleCheck();
                 }, onFormat: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     void handleFormat();
                 }, logs: editLogs, logsOpen: editLogsOpen, onToggleLogs: () => {
-                    setFocus("pane");
+                    focusPaneForRoute();
                     setEditLogsOpen((prev) => !prev);
                 }, debug: debugLayout }));
         }
@@ -664,26 +697,26 @@ export function App(props) {
         }
         const viewerUrl = getViewerUrl();
         return (_jsx(EditScreen, { width: paneContentWidth, docPath: currentDocument, title: docPreview?.title ?? null, viewerUrl: viewerUrl, onCopyUrl: () => void handleCopyEditorUrl(), onExport: () => {
-                setFocus("pane");
+                focusPaneForRoute();
                 void handleExport();
             }, onDoctor: () => {
-                setFocus("pane");
+                focusPaneForRoute();
                 void handleCheck();
             }, onFormat: () => {
-                setFocus("pane");
+                focusPaneForRoute();
                 void handleFormat();
             }, logs: editLogs, logsOpen: editLogsOpen, onToggleLogs: () => {
-                setFocus("pane");
+                focusPaneForRoute();
                 setEditLogsOpen((prev) => !prev);
             }, debug: debugLayout }));
     })();
-    return (_jsx(MouseProvider, { disabled: mouseDisabled, children: _jsxs(AppFrame, { debug: debugLayout, children: [_jsxs(Box, { flexDirection: "row", gap: 2, height: "100%", children: [_jsx(PaneFrame, { focused: focus === "nav", width: navWidth, height: "100%", children: _jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: accent("FLUX") }), _jsxs(Box, { flexDirection: "row", gap: 1, children: [_jsx(Text, { color: streamOk ? "green" : color.muted, children: streamOk ? "●" : "○" }), _jsx(Text, { color: color.muted, children: `Flux ${props.version ?? "0.x"} · ${streamOk ? "online" : "offline"} · backend: ${BACKEND_LABEL}` })] })] }), _jsx(Card, { title: "Navigation", meta: "", accent: focus === "nav", ruleWidth: navContentWidth - 2, debug: debugLayout, footer: (_jsx(Text, { color: color.muted, children: "/ palette \u00B7 Tab focus \u00B7 q quit \u00B7 ? help" })), children: _jsx(NavList, { items: navItems, selectedIndex: navIndex, onSelect: (index) => {
+    return (_jsx(MouseProvider, { disabled: mouseDisabled, children: _jsxs(AppFrame, { debug: debugLayout, children: [_jsxs(Box, { flexDirection: "row", gap: 2, height: "100%", children: [_jsx(PaneFrame, { focused: focusTarget === "nav", width: navWidth, height: "100%", children: _jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: accent("FLUX") }), _jsxs(Box, { flexDirection: "row", gap: 1, children: [_jsx(Text, { color: streamOk ? "green" : color.muted, children: streamOk ? "●" : "○" }), _jsx(Text, { color: color.muted, children: `Flux ${props.version ?? "0.x"} · ${streamOk ? "online" : "offline"} · backend: ${BACKEND_LABEL}` })] })] }), _jsx(Card, { title: "Navigation", meta: "", accent: focusTarget === "nav", ruleWidth: navContentWidth - 2, debug: debugLayout, footer: (_jsx(Text, { color: color.muted, children: "Ctrl+K palette \u00B7 / search \u00B7 Tab focus \u00B7 q quit \u00B7 ? help" })), children: _jsx(NavList, { items: navItems, selectedIndex: navIndex, onSelect: (index) => {
                                                 setNavIndex(index);
-                                                setFocus("nav");
+                                                setFocusTarget("nav");
                                                 const item = navItems[index];
                                                 if (item)
                                                     void activateNavItem(item);
-                                            }, width: navContentWidth, maxHeight: navListHeight, debug: debugLayout }) })] }) }), _jsx(PaneFrame, { focused: focus === "pane", flexGrow: 1, height: "100%", children: _jsx(Clickable, { id: "pane-focus", onClick: () => setFocus("pane"), priority: 0, children: _jsx(Box, { flexDirection: "column", gap: 1, children: rightPane }) }) })] }), _jsx(Box, { marginTop: 1, children: _jsx(ToastHost, { toasts: toasts, busy: busy, progress: progress }) }), paletteOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsx(CommandPaletteModal, { query: paletteQuery, groups: paletteGroups, selectedId: limitedPalette[paletteIndex]?.id, width: overlayWidth, debug: debugLayout }) })) : null, helpOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsx(HelpOverlay, { width: overlayWidth, version: props.version, recentsPath: recentsPath, backend: BACKEND_LABEL, extraLines: props.helpCommand ? getHelpLines(props.helpCommand) : undefined }) })) : null, versionOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsxs(Card, { title: "Flux CLI", meta: "", accent: true, ruleWidth: overlayWidth - 6, debug: debugLayout, children: [_jsx(Text, { color: color.muted, children: props.version ?? "version unknown" }), _jsx(Text, { color: color.muted, children: "Press Esc to close" })] }) })) : null] }) }));
+                                            }, width: navContentWidth, maxHeight: navListHeight, debug: debugLayout }) })] }) }), _jsx(PaneFrame, { focused: focusTarget !== "nav", flexGrow: 1, height: "100%", children: _jsx(Clickable, { id: "pane-focus", onClick: () => focusPaneForRoute(), priority: 0, children: _jsx(Box, { flexDirection: "column", gap: 1, children: rightPane }) }) })] }), _jsx(Box, { marginTop: 1, children: _jsx(ToastHost, { toasts: toasts, busy: busy, progress: progress }) }), paletteOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsx(CommandPaletteModal, { query: paletteQuery, groups: paletteGroups, selectedId: limitedPalette[paletteIndex]?.id, width: overlayWidth, debug: debugLayout }) })) : null, helpOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsx(HelpOverlay, { width: overlayWidth, version: props.version, recentsPath: recentsPath, backend: BACKEND_LABEL, extraLines: props.helpCommand ? getHelpLines(props.helpCommand) : undefined }) })) : null, versionOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsxs(Card, { title: "Flux CLI", meta: "", accent: true, ruleWidth: overlayWidth - 6, debug: debugLayout, children: [_jsx(Text, { color: color.muted, children: props.version ?? "version unknown" }), _jsx(Text, { color: color.muted, children: "Press Esc to close" })] }) })) : null] }) }));
     async function refreshRecents() {
         const store = await getRecentsStore(props.cwd);
         const list = store.entries.map((entry) => ({
@@ -733,14 +766,58 @@ export function App(props) {
             next += delta;
         }
     }
+    function setRouteWithFocus(nextRoute) {
+        setRoute(nextRoute);
+        setFocusTarget(defaultFocusForRoute(nextRoute));
+    }
+    function focusPaneForRoute(nextRoute = route) {
+        setFocusTarget(defaultFocusForRoute(nextRoute));
+    }
+    function toggleFocus() {
+        setFocusTarget((prev) => (prev === "nav" ? defaultFocusForRoute(route) : "nav"));
+    }
+    function restoreFocusAfterOverlay() {
+        if (routeBeforeOverlay.current !== route) {
+            setFocusTarget(defaultFocusForRoute(route));
+            return;
+        }
+        setFocusTarget(focusBeforeOverlay.current ?? defaultFocusForRoute(route));
+    }
+    function openPalette() {
+        focusBeforeOverlay.current = focusTarget;
+        routeBeforeOverlay.current = route;
+        setPaletteOpen(true);
+        setPaletteQuery("");
+        setPaletteIndex(0);
+        setFocusTarget("palette");
+    }
+    function closePalette() {
+        setPaletteOpen(false);
+        setPaletteQuery("");
+        setPaletteIndex(0);
+        restoreFocusAfterOverlay();
+    }
+    function openHelp() {
+        focusBeforeOverlay.current = focusTarget;
+        routeBeforeOverlay.current = route;
+        setHelpOpen(true);
+        setFocusTarget("modal");
+    }
+    function closeHelp() {
+        setHelpOpen(false);
+        restoreFocusAfterOverlay();
+    }
+    function closeVersion() {
+        setVersionOpen(false);
+        restoreFocusAfterOverlay();
+    }
     async function activateNavItem(item) {
         if (item.type !== "action")
             return;
         switch (item.id) {
             case "open":
                 setPendingAction(null);
-                setRoute("open");
-                setFocus("pane");
+                setRouteWithFocus("open");
                 return;
             case "new":
                 openWizard();
@@ -763,23 +840,22 @@ export function App(props) {
     }
     function resetToDefault() {
         setPendingAction(null);
-        setRoute("open");
+        setRouteWithFocus("open");
         selectNavAction("open");
-        setFocus("pane");
+        setFocusTarget("open.results");
     }
     async function requireDocAndRoute(action) {
         const resolved = resolveActionRoute(currentDocument, action);
         setPendingAction(resolved.pendingAction);
         if (resolved.route === "open") {
-            setRoute("open");
+            setRouteWithFocus("open");
             selectNavAction("open");
-            setFocus("pane");
+            setFocusTarget("open.results");
             showToast("Select a document to continue.", "info");
             return;
         }
         selectNavAction(action);
-        setRoute(resolved.route);
-        setFocus("pane");
+        setRouteWithFocus(resolved.route);
     }
     function goToEdit() {
         void requireDocAndRoute("edit");
@@ -835,12 +911,10 @@ export function App(props) {
         setPendingAction(resolved.pendingAction);
         if (resolved.route !== "doc") {
             selectNavAction(resolved.route);
-            setRoute(resolved.route);
-            setFocus("pane");
+            setRouteWithFocus(resolved.route);
             return;
         }
-        setRoute("doc");
-        setFocus("pane");
+        setRouteWithFocus("doc");
     }
     async function handleNavInput(_input, key) {
         if (key.downArrow) {
@@ -857,7 +931,7 @@ export function App(props) {
                 await activateNavItem(item);
         }
     }
-    async function handleOpenInput(input, key) {
+    async function handleOpenInput({ input, key }) {
         if (key.ctrl && input === "f") {
             setOpenShowAll((prev) => !prev);
             return;
@@ -891,19 +965,16 @@ export function App(props) {
             }
             return;
         }
-        if (key.backspace || key.delete) {
-            if (openQuery.length > 0) {
-                setOpenQuery((prev) => prev.slice(0, -1));
-            }
-            else {
-                const parent = path.dirname(openRoot);
-                if (parent && parent !== openRoot)
-                    changeOpenRoot(parent);
-            }
+        if (focusTarget === "open.search") {
+            const nextQuery = applyOpenSearchInput({ focusTarget, query: openQuery, input, key });
+            if (nextQuery !== openQuery)
+                setOpenQuery(nextQuery);
             return;
         }
-        if (input) {
-            setOpenQuery((prev) => prev + input);
+        if (key.backspace || key.delete) {
+            const parent = path.dirname(openRoot);
+            if (parent && parent !== openRoot)
+                changeOpenRoot(parent);
         }
     }
     async function handleDocInput(_input, key) {
@@ -1003,7 +1074,7 @@ export function App(props) {
                 if (wizardPostCreate.openViewer) {
                     await handleView(created.docPath);
                 }
-                setRoute(shouldSetCurrent ? "doc" : "open");
+                setRouteWithFocus(shouldSetCurrent ? "doc" : "open");
                 return;
             }
             if (key.escape) {
@@ -1359,14 +1430,13 @@ export function App(props) {
         }
         if (item.kind === "doc" || item.kind === "file") {
             await selectCurrentDoc(item.payload.path);
-            setRoute("doc");
+            setRouteWithFocus("doc");
             return;
         }
         if (item.kind === "action") {
             if (item.payload.action === "open") {
                 setPendingAction(null);
-                setRoute("open");
-                setFocus("pane");
+                setRouteWithFocus("open");
                 return;
             }
             if (item.payload.action === "new") {
@@ -1435,10 +1505,10 @@ export function App(props) {
         await selectCurrentDoc(result.data.docPath);
         showToast("Document created", "success");
         if (template === "blank") {
-            setRoute("edit");
+            setRouteWithFocus("edit");
         }
         else {
-            setRoute("doc");
+            setRouteWithFocus("doc");
         }
     }
     function buildWizardDefaults(cfg) {
@@ -1564,7 +1634,7 @@ export function App(props) {
         if (values.template === "blank") {
             await selectCurrentDoc(result.data.docPath);
             setWizardCreated(null);
-            setRoute("edit");
+            setRouteWithFocus("edit");
             showToast("Document created", "success");
             return;
         }
@@ -1573,8 +1643,7 @@ export function App(props) {
         showToast("Document created", "success");
     }
     function openWizard(reset = true) {
-        setRoute("new");
-        setFocus("pane");
+        setRouteWithFocus("new");
         if (reset) {
             const defaults = buildWizardDefaults(config);
             applyWizardValues(defaults, config);
@@ -1664,7 +1733,7 @@ export function App(props) {
                     advanceTime: parsed.advanceTime,
                     editorDist: parsed.editorDist,
                 });
-                setRoute("doc");
+                setRouteWithFocus("doc");
                 return;
             }
             case "check": {
@@ -1674,7 +1743,7 @@ export function App(props) {
                     return;
                 }
                 await selectCurrentDoc(target);
-                setRoute("doctor");
+                setRouteWithFocus("doctor");
                 await handleCheck(target);
                 return;
             }
@@ -1685,7 +1754,7 @@ export function App(props) {
                     return;
                 }
                 await selectCurrentDoc(target);
-                setRoute("format");
+                setRouteWithFocus("format");
                 await handleFormat(target);
                 return;
             }
@@ -1695,7 +1764,7 @@ export function App(props) {
                     await runAdd(parsed.kind, parsed.file, parsed);
                     if (parsed.file)
                         await selectCurrentDoc(parsed.file);
-                    setRoute("edit");
+                    setRouteWithFocus("edit");
                 }
                 else {
                     showToast("flux add: missing <kind> (use --no-ui for prompts)", "error");
@@ -1719,11 +1788,11 @@ export function App(props) {
                 setExportResultPath(parsed.outPath);
                 setExportActionIndex(1);
                 await selectCurrentDoc(parsed.file);
-                setRoute("export");
+                setRouteWithFocus("export");
                 return;
             }
             case "config": {
-                setRoute("settings");
+                setRouteWithFocus("settings");
                 return;
             }
             case "parse":

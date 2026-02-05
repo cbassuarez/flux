@@ -1,6 +1,6 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { createContext, useCallback, useContext, useEffect, useRef } from "react";
-import { measureElement } from "ink";
+import { measureElement, useInput } from "ink";
 const MouseContext = createContext(null);
 export function MouseProvider({ children, disabled }) {
     const regionsRef = useRef(new Map());
@@ -21,42 +21,34 @@ export function MouseProvider({ children, disabled }) {
             stdout.write("\u001b[?1000l\u001b[?1006l");
         };
     }, [disabled]);
-    useEffect(() => {
+    useInput((input) => {
         if (disabled)
             return;
-        const stdin = process.stdin;
-        if (!stdin?.on || !stdin.isTTY)
+        if (!input || !input.includes("\u001b[<"))
             return;
-        const handleData = (data) => {
-            const input = data.toString("utf8");
-            const events = parseMouseSequences(input);
-            for (const event of events) {
-                if (!event.pressed || event.button !== 0)
-                    continue;
-                const x = event.x - 1;
-                const y = event.y - 1;
-                const matches = Array.from(regionsRef.current.values()).filter((region) => {
-                    const withinX = x >= region.bounds.x && x < region.bounds.x + region.bounds.width;
-                    const withinY = y >= region.bounds.y && y < region.bounds.y + region.bounds.height;
-                    return withinX && withinY;
-                });
-                if (matches.length === 0)
-                    continue;
-                matches.sort((a, b) => {
-                    if (b.priority !== a.priority)
-                        return b.priority - a.priority;
-                    const areaA = a.bounds.width * a.bounds.height;
-                    const areaB = b.bounds.width * b.bounds.height;
-                    return areaA - areaB;
-                });
-                matches[0]?.onClick();
-            }
-        };
-        stdin.on("data", handleData);
-        return () => {
-            stdin.off("data", handleData);
-        };
-    }, [disabled]);
+        const events = parseMouseSequences(input);
+        for (const event of events) {
+            if (!event.pressed || event.button !== 0)
+                continue;
+            const x = event.x - 1;
+            const y = event.y - 1;
+            const matches = Array.from(regionsRef.current.values()).filter((region) => {
+                const withinX = x >= region.bounds.x && x < region.bounds.x + region.bounds.width;
+                const withinY = y >= region.bounds.y && y < region.bounds.y + region.bounds.height;
+                return withinX && withinY;
+            });
+            if (matches.length === 0)
+                continue;
+            matches.sort((a, b) => {
+                if (b.priority !== a.priority)
+                    return b.priority - a.priority;
+                const areaA = a.bounds.width * a.bounds.height;
+                const areaB = b.bounds.width * b.bounds.height;
+                return areaA - areaB;
+            });
+            matches[0]?.onClick();
+        }
+    }, { isActive: !disabled });
     return (_jsx(MouseContext.Provider, { value: { register, unregister }, children: children }));
 }
 export function useMouseRegion(id, onClick, priority = 0) {
