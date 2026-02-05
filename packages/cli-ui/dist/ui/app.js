@@ -5,10 +5,10 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { getRecentsStore, updateRecents, getPinnedDirsStore, addPinnedDir, removePinnedDir, getLastUsedDirStore, setLastUsedDir, indexFiles, walkFilesFromFs, resolveConfig, viewCommand, pdfCommand, checkCommand, formatCommand, addCommand, newCommand, fetchViewerPatch, fetchViewerStatus, requestViewerPdf, } from "@flux-lang/cli-core";
 import { AppFrame } from "../components/AppFrame.js";
+import { Card } from "../components/Card.js";
 import { NavList } from "../components/NavList.js";
 import { CommandPaletteModal } from "../components/CommandPaletteModal.js";
 import { ToastHost } from "../components/ToastHost.js";
-import { Card } from "../components/Card.js";
 import { HelpOverlay } from "../components/HelpOverlay.js";
 import { Clickable } from "../components/Clickable.js";
 import { NewWizardScreen } from "../screens/NewWizardScreen.js";
@@ -20,7 +20,7 @@ import { FormatScreen } from "../screens/FormatScreen.js";
 import { EditScreen } from "../screens/EditScreen.js";
 import { SettingsScreen } from "../screens/SettingsScreen.js";
 import { MouseProvider } from "../state/mouse.js";
-import { defaultFocusForRoute } from "../state/focus.js";
+import { defaultFocusForRoute, isModalFocus } from "../state/focus.js";
 import { applyOpenSearchInput, shouldEnterOpenSearch, shouldExitOpenSearch } from "../state/open-search.js";
 import { useToasts } from "../state/toasts.js";
 import { useProgress } from "../state/progress.js";
@@ -31,6 +31,7 @@ import { hasControlChars, sanitizePrintableInput } from "../ui/input.js";
 import { getLayoutMetrics, isTerminalTooSmall, MIN_COLS, MIN_ROWS } from "../ui/layout.js";
 import { useDebouncedValue } from "../ui/useDebouncedValue.js";
 import { useTerminalDimensions } from "../ui/useTerminalDimensions.js";
+import { ModalOverlay, getModalLayout } from "../ui/ModalOverlay.js";
 import { PaneFrame } from "../components/PaneFrame.js";
 const TEMPLATE_OPTIONS = [
     { label: "Demo", value: "demo", hint: "Live slots + assets + annotations" },
@@ -77,7 +78,7 @@ const FILE_SCAN_BATCH_MS = 75;
 export function App(props) {
     const { exit } = useApp();
     const initialRoute = props.mode === "new" ? "new" : "open";
-    const initialFocusTarget = props.helpCommand || props.version ? "modal" : defaultFocusForRoute(initialRoute);
+    const initialFocusTarget = props.helpCommand ? "help" : props.version ? "modal" : defaultFocusForRoute(initialRoute);
     const [recents, setRecents] = useState([]);
     const [recentsPath, setRecentsPath] = useState(undefined);
     const [currentDocument, setCurrentDocument] = useState(null);
@@ -186,10 +187,12 @@ export function App(props) {
     const limitedPalette = useMemo(() => filteredPalette.slice(0, 12), [filteredPalette]);
     const paletteGroups = useMemo(() => groupPaletteItems(limitedPalette), [limitedPalette]);
     const layout = useMemo(() => getLayoutMetrics(cols, rows), [cols, rows]);
-    const { innerWidth, overlayWidth, navWidth, navContentWidth, paneContentWidth, navListHeight, } = layout;
+    const { innerWidth, navWidth, navContentWidth, paneContentWidth, navListHeight, } = layout;
+    const modalLayout = useMemo(() => getModalLayout({ columns: cols, rows }), [cols, rows]);
     const terminalTooSmall = useMemo(() => isTerminalTooSmall(cols, rows), [cols, rows]);
     const openDebouncedQuery = useDebouncedValue(openQuery, SEARCH_DEBOUNCE_MS);
-    const mouseDisabled = paletteOpen || helpOpen || versionOpen;
+    const isModalOpen = paletteOpen || helpOpen || versionOpen;
+    const mouseDisabled = isModalOpen;
     useEffect(() => {
         void refreshRecents();
         void refreshPinnedDirs();
@@ -443,25 +446,20 @@ export function App(props) {
             exit();
             return;
         }
-        if (shouldExitOpenSearch({ focusTarget, key })) {
-            setFocusTarget("open.results");
+        if (key.escape) {
             return;
         }
         if (versionOpen) {
-            if (key.escape || key.return)
+            if (key.return)
                 closeVersion();
             return;
         }
         if (helpOpen) {
-            if (key.escape || key.return)
+            if (key.return)
                 closeHelp();
             return;
         }
         if (paletteOpen) {
-            if (key.escape) {
-                closePalette();
-                return;
-            }
             if (key.return) {
                 const item = limitedPalette[paletteIndex];
                 if (item) {
@@ -487,6 +485,16 @@ export function App(props) {
                 setPaletteQuery((prev) => prev + paletteInput);
                 return;
             }
+            return;
+        }
+    }, { isActive: isModalOpen });
+    useInput(async (input, key) => {
+        if (key.ctrl && input === "c") {
+            exit();
+            return;
+        }
+        if (shouldExitOpenSearch({ focusTarget, key })) {
+            setFocusTarget("open.results");
             return;
         }
         if (key.escape) {
@@ -555,7 +563,7 @@ export function App(props) {
             await handleEditInput(printableInput, key);
             return;
         }
-    });
+    }, { isActive: !isModalOpen && !isModalFocus(focusTarget) });
     const wizardSteps = useMemo(() => {
         const steps = [
             { kind: "select", key: "template", label: "Template", options: TEMPLATE_OPTIONS },
@@ -710,13 +718,13 @@ export function App(props) {
                 setEditLogsOpen((prev) => !prev);
             }, debug: debugLayout }));
     })();
-    return (_jsx(MouseProvider, { disabled: mouseDisabled, children: _jsxs(AppFrame, { debug: debugLayout, children: [_jsxs(Box, { flexDirection: "row", gap: 2, height: "100%", children: [_jsx(PaneFrame, { focused: focusTarget === "nav", width: navWidth, height: "100%", children: _jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: accent("FLUX") }), _jsxs(Box, { flexDirection: "row", gap: 1, children: [_jsx(Text, { color: streamOk ? "green" : color.muted, children: streamOk ? "●" : "○" }), _jsx(Text, { color: color.muted, children: `Flux ${props.version ?? "0.x"} · ${streamOk ? "online" : "offline"} · backend: ${BACKEND_LABEL}` })] })] }), _jsx(Card, { title: "Navigation", meta: "", accent: focusTarget === "nav", ruleWidth: navContentWidth - 2, debug: debugLayout, footer: (_jsx(Text, { color: color.muted, children: "Ctrl+K palette \u00B7 / search \u00B7 Tab focus \u00B7 q quit \u00B7 ? help" })), children: _jsx(NavList, { items: navItems, selectedIndex: navIndex, onSelect: (index) => {
-                                                setNavIndex(index);
-                                                setFocusTarget("nav");
-                                                const item = navItems[index];
-                                                if (item)
-                                                    void activateNavItem(item);
-                                            }, width: navContentWidth, maxHeight: navListHeight, debug: debugLayout }) })] }) }), _jsx(PaneFrame, { focused: focusTarget !== "nav", flexGrow: 1, height: "100%", children: _jsx(Clickable, { id: "pane-focus", onClick: () => focusPaneForRoute(), priority: 0, children: _jsx(Box, { flexDirection: "column", gap: 1, children: rightPane }) }) })] }), _jsx(Box, { marginTop: 1, children: _jsx(ToastHost, { toasts: toasts, busy: busy, progress: progress }) }), paletteOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsx(CommandPaletteModal, { query: paletteQuery, groups: paletteGroups, selectedId: limitedPalette[paletteIndex]?.id, width: overlayWidth, debug: debugLayout }) })) : null, helpOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsx(HelpOverlay, { width: overlayWidth, version: props.version, recentsPath: recentsPath, backend: BACKEND_LABEL, extraLines: props.helpCommand ? getHelpLines(props.helpCommand) : undefined }) })) : null, versionOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsxs(Card, { title: "Flux CLI", meta: "", accent: true, ruleWidth: overlayWidth - 6, debug: debugLayout, children: [_jsx(Text, { color: color.muted, children: props.version ?? "version unknown" }), _jsx(Text, { color: color.muted, children: "Press Esc to close" })] }) })) : null] }) }));
+    return (_jsx(MouseProvider, { disabled: mouseDisabled, children: _jsxs(Box, { position: "relative", width: "100%", height: "100%", children: [_jsxs(AppFrame, { debug: debugLayout, children: [_jsxs(Box, { flexDirection: "row", gap: 2, height: "100%", children: [_jsx(PaneFrame, { focused: focusTarget === "nav", width: navWidth, height: "100%", children: _jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: accent("FLUX") }), _jsxs(Box, { flexDirection: "row", gap: 1, children: [_jsx(Text, { color: streamOk ? "green" : color.muted, children: streamOk ? "●" : "○" }), _jsx(Text, { color: color.muted, children: `Flux ${props.version ?? "0.x"} · ${streamOk ? "online" : "offline"} · backend: ${BACKEND_LABEL}` })] })] }), _jsx(Card, { title: "Navigation", meta: "", accent: focusTarget === "nav", ruleWidth: navContentWidth - 2, debug: debugLayout, footer: (_jsx(Text, { color: color.muted, children: "Ctrl+K palette \u00B7 / search \u00B7 Tab focus \u00B7 q quit \u00B7 ? help" })), children: _jsx(NavList, { items: navItems, selectedIndex: navIndex, onSelect: (index) => {
+                                                        setNavIndex(index);
+                                                        setFocusTarget("nav");
+                                                        const item = navItems[index];
+                                                        if (item)
+                                                            void activateNavItem(item);
+                                                    }, width: navContentWidth, maxHeight: navListHeight, debug: debugLayout }) })] }) }), _jsx(PaneFrame, { focused: focusTarget !== "nav", flexGrow: 1, height: "100%", children: _jsx(Clickable, { id: "pane-focus", onClick: () => focusPaneForRoute(), priority: 0, children: _jsx(Box, { flexDirection: "column", gap: 1, children: rightPane }) }) })] }), _jsx(Box, { marginTop: 1, children: _jsx(ToastHost, { toasts: toasts, busy: busy, progress: progress }) })] }), _jsx(ModalOverlay, { isOpen: paletteOpen, title: "Command Palette", subtitle: "Esc to close \u00B7 \u2191\u2193 to navigate \u00B7 Enter to run", width: modalLayout.width, height: modalLayout.height, onRequestClose: closePalette, children: _jsx(CommandPaletteModal, { query: paletteQuery, groups: paletteGroups, selectedId: limitedPalette[paletteIndex]?.id, width: modalLayout.contentWidth, debug: debugLayout }) }), _jsx(ModalOverlay, { isOpen: helpOpen, title: "Help", subtitle: "Esc to close", width: modalLayout.width, height: modalLayout.height, onRequestClose: closeHelp, children: _jsx(HelpOverlay, { width: modalLayout.contentWidth, version: props.version, recentsPath: recentsPath, backend: BACKEND_LABEL, extraLines: props.helpCommand ? getHelpLines(props.helpCommand) : undefined }) }), _jsx(ModalOverlay, { isOpen: versionOpen, title: "Flux CLI", subtitle: "Esc to close", width: modalLayout.width, height: modalLayout.height, onRequestClose: closeVersion, children: _jsx(Box, { flexDirection: "column", gap: 1, children: _jsx(Text, { color: color.muted, children: props.version ?? "version unknown" }) }) })] }) }));
     async function refreshRecents() {
         const store = await getRecentsStore(props.cwd);
         const list = store.entries.map((entry) => ({
@@ -801,7 +809,7 @@ export function App(props) {
         focusBeforeOverlay.current = focusTarget;
         routeBeforeOverlay.current = route;
         setHelpOpen(true);
-        setFocusTarget("modal");
+        setFocusTarget("help");
     }
     function closeHelp() {
         setHelpOpen(false);

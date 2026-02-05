@@ -21,6 +21,9 @@ export function defaultFocusForRoute(route) {
     }
 }
 export function isPaneFocus(target) {
-    return target !== "nav" && target !== "palette" && target !== "modal";
+    return target !== "nav" && target !== "palette" && target !== "help" && target !== "modal";
+}
+export function isModalFocus(target) {
+    return target === "palette" || target === "help" || target === "modal";
 }
 //# sourceMappingURL=focus.js.map
