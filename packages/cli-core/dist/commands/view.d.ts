@@ -8,6 +8,7 @@ export interface ViewOptions {
     seed?: number;
     allowNet?: string[];
     advanceTime?: boolean;
+    timeRate?: number;
     editorDist?: string;
 }
 export interface ViewData {

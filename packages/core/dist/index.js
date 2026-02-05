@@ -4,7 +4,7 @@
 export * from "./ast.js";
 // Parser
 export { parseDocument } from "./parser.js";
-export { createDocumentRuntime, renderDocument, createDocumentRuntimeIR, renderDocumentIR } from "./render.js";
+export { createDocumentRuntime, renderDocument, createDocumentRuntimeIR, renderDocumentIR, didFire, } from "./render.js";
 // Runtime kernel entry points
 export { initRuntimeState, runDocstepOnce, handleEvent } from "./runtime/kernel.js";
 export { createRuntime, getDocstepIntervalHint } from "./runtime.js";

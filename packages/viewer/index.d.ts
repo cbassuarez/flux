@@ -6,6 +6,7 @@ export interface ViewerServerOptions {
   port?: number;
   host?: string;
   docstepMs?: number;
+  timeRate?: number;
   seed?: number;
   allowNet?: string[];
   docstepStart?: number;
@@ -30,4 +31,5 @@ export function advanceViewerRuntime(
   renderOptions: RenderHtmlOptions | undefined,
   advanceTime: boolean,
   dtSeconds: number,
+  timeRate: number,
 ): { ir: RenderDocumentIR; render: RenderHtmlResult };

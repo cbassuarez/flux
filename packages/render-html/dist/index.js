@@ -360,12 +360,107 @@ code,
 .flux-slot-inner {
   width: 100%;
   height: 100%;
+  position: relative;
 }
 
 .flux-inline-slot .flux-slot-inner {
   display: inline-block;
   min-width: 100%;
   line-height: inherit;
+}
+
+.flux-transition {
+  position: relative;
+  --flux-dur: 220ms;
+  --flux-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.flux-transition .flux-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.flux-transition .flux-layer--sizer {
+  position: relative;
+  inset: auto;
+  width: auto;
+  height: auto;
+  visibility: hidden;
+}
+
+.flux-transition .flux-layer--old {
+  z-index: 1;
+}
+
+.flux-transition .flux-layer--new {
+  z-index: 2;
+}
+
+.flux-transition .flux-layer--flash {
+  z-index: 3;
+}
+
+.flux-transition--fade .flux-layer--old {
+  opacity: 1;
+}
+
+.flux-transition--fade .flux-layer--new {
+  opacity: 0;
+}
+
+.flux-transition--fade.is-active .flux-layer--old {
+  opacity: 0;
+  transition: opacity var(--flux-dur) var(--flux-ease);
+}
+
+.flux-transition--fade.is-active .flux-layer--new {
+  opacity: 1;
+  transition: opacity var(--flux-dur) var(--flux-ease);
+}
+
+.flux-transition--wipe .flux-layer--new {
+  clip-path: inset(0 100% 0 0);
+}
+
+.flux-transition--wipe[data-flux-wipe="right"] .flux-layer--new {
+  clip-path: inset(0 0 0 100%);
+}
+
+.flux-transition--wipe[data-flux-wipe="up"] .flux-layer--new {
+  clip-path: inset(100% 0 0 0);
+}
+
+.flux-transition--wipe[data-flux-wipe="down"] .flux-layer--new {
+  clip-path: inset(0 0 100% 0);
+}
+
+.flux-transition--wipe.is-active .flux-layer--new {
+  clip-path: inset(0 0 0 0);
+  transition: clip-path var(--flux-dur) var(--flux-ease);
+}
+
+.flux-transition--flash .flux-layer--flash {
+  background: rgba(255, 241, 200, 0.75);
+  opacity: 0;
+}
+
+.flux-transition--flash.is-active .flux-layer--flash {
+  animation: flux-flash var(--flux-dur) var(--flux-ease);
+}
+
+@keyframes flux-flash {
+  0% {
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 body[data-debug-slots="1"] .flux-slot,
@@ -858,7 +953,7 @@ function resolveImageUrl(fallback, assetId, raw, assetUrl, rawUrl) {
     return fallback;
 }
 function buildAttrs(node, inline) {
-    const refresh = node.refresh?.kind ?? "onLoad";
+    const refresh = node.refresh?.kind ?? "never";
     const isInline = inline || node.kind === "inline_slot";
     const attrs = [
         `data-flux-id="${escapeAttr(node.nodeId)}"`,

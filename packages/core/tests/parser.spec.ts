@@ -967,18 +967,20 @@ describe("Flux parser v0.2", () => {
 
         body {
           page p1 {
-            refresh = onLoad;
-
-            text t1 {
-              content = @"Hello " + params.name;
+            slot s1 {
+              refresh = docstep;
+              transition = fade(duration=220ms, ease="inOut");
+              text t1 {
+                content = @"Hello " + params.name;
+              }
             }
 
             image heroImg {
               src = @assets.pick(tags=["hero"], strategy=weighted, seed=7).path;
             }
 
-            section s1 {
-              refresh = every(30s);
+            slot s2 {
+              refresh = every("30s");
               text t2 { content = "Static"; }
             }
 
@@ -996,9 +998,13 @@ describe("Flux parser v0.2", () => {
 
         const page = doc.body?.nodes[0];
         expect(page?.kind).toBe("page");
-        expect(page?.refresh?.kind).toBe("onLoad");
+        expect(page?.refresh).toBeUndefined();
 
-        const t1: any = page?.children[0];
+        const slot1: any = page?.children[0];
+        expect(slot1.kind).toBe("slot");
+        expect(slot1.refresh.kind).toBe("docstep");
+        expect(slot1.transition.kind).toBe("fade");
+        const t1: any = slot1.children[0];
         expect(t1.kind).toBe("text");
         expect(t1.props.content.kind).toBe("DynamicValue");
 
@@ -1008,10 +1014,9 @@ describe("Flux parser v0.2", () => {
         expect(srcExpr.expr.object.kind).toBe("CallExpression");
         expect(srcExpr.expr.object.args.length).toBeGreaterThan(0);
 
-        const section: any = page?.children[2];
-        expect(section.refresh.kind).toBe("every");
-        expect(section.refresh.amount).toBe(30);
-        expect(section.refresh.unit).toBe("s");
+        const slot2: any = page?.children[2];
+        expect(slot2.refresh.kind).toBe("every");
+        expect(slot2.refresh.intervalSec).toBe(30);
 
         const t3: any = page?.children[3];
         expect(t3.props.items.kind).toBe("DynamicValue");

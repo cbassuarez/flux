@@ -410,7 +410,7 @@ function buildSlotSnippet(id: string): string {
     `slot ${id} {`,
     `${INDENT}reserve = fixed(200, 80, px);`,
     `${INDENT}fit = shrink;`,
-    `${INDENT}refresh = onDocstep;`,
+    `${INDENT}refresh = docstep;`,
     `${INDENT}text ${id}Text { content = @docstep; }`,
     `}`,
   ].join("\n");
@@ -423,7 +423,7 @@ function buildInlineSlotSnippet(id: string): string {
     `${INDENT}inline_slot ${id} {`,
     `${INDENT}${INDENT}reserve = fixedWidth(8, ch);`,
     `${INDENT}${INDENT}fit = ellipsis;`,
-    `${INDENT}${INDENT}refresh = onDocstep;`,
+    `${INDENT}${INDENT}refresh = docstep;`,
     `${INDENT}${INDENT}text ${id}Value { content = @docstep; }`,
     `${INDENT}}`,
     `}`,

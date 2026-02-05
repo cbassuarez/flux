@@ -56,7 +56,7 @@ export function createDocumentRuntime(doc, options = {}) {
             styleRegistry,
             counterRegistry,
         };
-        const renderedBody = body.nodes.map((node, index) => renderNode(node, ctx, nodeCache, "root", undefined, index, false));
+        const renderedBody = body.nodes.map((node, index) => renderNode(node, ctx, nodeCache, "root", undefined, undefined, index, false));
         return {
             meta: doc.meta,
             seed,
@@ -171,20 +171,22 @@ function ensureBody(doc) {
             kind: "page",
             props: {},
             children: pageNodes,
-            refresh: { kind: "onDocstep" },
+            refresh: { kind: "docstep" },
         });
     }
     return { nodes };
 }
 function buildRenderDocumentIR(rendered, body, styleRegistry, counterRegistry) {
+    const slotMeta = {};
     return {
         ...rendered,
-        body: buildRenderNodesIR(body.nodes, rendered.body, "root", undefined, counterRegistry),
+        body: buildRenderNodesIR(body.nodes, rendered.body, "root", undefined, counterRegistry, slotMeta, { seed: rendered.seed, time: rendered.time, docstep: rendered.docstep }),
         theme: styleRegistry.theme,
         styles: styleRegistry.renderStyles,
+        slotMeta,
     };
 }
-function buildRenderNodesIR(astNodes, renderedNodes, parentPath, parentPolicy, counterRegistry) {
+function buildRenderNodesIR(astNodes, renderedNodes, parentPath, parentPolicy, counterRegistry, slotMeta, presentationCtx) {
     const count = Math.max(astNodes.length, renderedNodes.length);
     const result = [];
     for (let index = 0; index < count; index += 1) {
@@ -200,9 +202,25 @@ function buildRenderNodesIR(astNodes, renderedNodes, parentPath, parentPolicy, c
             children: [],
         };
         const nodePath = `${parentPath}/${astNode.kind}:${astNode.id}:${index}`;
-        const effectivePolicy = astNode.refresh ?? parentPolicy ?? { kind: "onLoad" };
-        const children = buildRenderNodesIR(astNode.children ?? [], renderedNode.children ?? [], nodePath, effectivePolicy, counterRegistry);
+        const isSlot = astNode.kind === "slot" || astNode.kind === "inline_slot";
+        const effectivePolicy = isSlot ? astNode.refresh ?? { kind: "never" } : astNode.refresh ?? parentPolicy ?? { kind: "never" };
+        const children = buildRenderNodesIR(astNode.children ?? [], renderedNode.children ?? [], nodePath, effectivePolicy, counterRegistry, slotMeta, presentationCtx);
         const slot = buildSlotInfo(astNode.kind, renderedNode.props);
+        if (isSlot) {
+            const transition = normalizeTransitionSpec(astNode.transition);
+            const trigger = didFire(effectivePolicy, {
+                seed: presentationCtx.seed,
+                slotId: nodePath,
+                timeSec: presentationCtx.time,
+                docstep: presentationCtx.docstep,
+            });
+            slotMeta[nodePath] = {
+                valueHash: computeSlotValueHash(renderedNode),
+                shouldRefresh: trigger.fired,
+                transition,
+                eventMeta: trigger.meta,
+            };
+        }
         result.push({
             ...renderedNode,
             nodeId: nodePath,
@@ -223,6 +241,51 @@ function buildSlotInfo(kind, props) {
     if (!reserve && !fit)
         return undefined;
     return { reserve, fit };
+}
+function normalizeTransitionSpec(spec) {
+    if (!spec || spec.kind === "none") {
+        return { type: "none", durationMs: 0, ease: "linear" };
+    }
+    switch (spec.kind) {
+        case "appear":
+            return { type: "appear", durationMs: 0, ease: "linear" };
+        case "fade":
+            return {
+                type: "fade",
+                durationMs: Math.max(0, spec.durationMs ?? 220),
+                ease: spec.ease ?? "inOut",
+            };
+        case "wipe":
+            return {
+                type: "wipe",
+                durationMs: Math.max(0, spec.durationMs ?? 260),
+                ease: spec.ease ?? "inOut",
+                direction: spec.direction ?? "left",
+            };
+        case "flash":
+            return {
+                type: "flash",
+                durationMs: Math.max(0, spec.durationMs ?? 120),
+                ease: "linear",
+            };
+        default: {
+            const _exhaustive = spec;
+            return _exhaustive;
+        }
+    }
+}
+function computeSlotValueHash(slotNode) {
+    const signature = slotNode.children.map((child) => buildValueSignature(child));
+    const hash = stableHash("slot", signature);
+    return hash.toString(16).padStart(8, "0");
+}
+function buildValueSignature(node) {
+    return {
+        kind: node.kind,
+        props: node.props,
+        children: (node.children ?? []).map((child) => buildValueSignature(child)),
+        grid: node.grid ?? undefined,
+    };
 }
 function parseSlotFit(value) {
     if (typeof value !== "string")
@@ -323,18 +386,20 @@ function buildParams(params) {
     }
     return values;
 }
-function renderNode(node, ctx, cache, parentPath, parentPolicy, index, insideSlot) {
+function renderNode(node, ctx, cache, parentPath, parentPolicy, parentRefreshOwnerId, index, insideSlot) {
     const nodePath = `${parentPath}/${node.kind}:${node.id}:${index}`;
-    const effectivePolicy = node.refresh ?? parentPolicy ?? { kind: "onLoad" };
-    const refreshKey = computeRefreshKey(effectivePolicy, ctx.time, ctx.docstep);
+    const isSlot = node.kind === "slot" || node.kind === "inline_slot";
+    const effectivePolicy = isSlot ? node.refresh ?? { kind: "never" } : node.refresh ?? parentPolicy ?? { kind: "never" };
+    const refreshOwnerId = isSlot ? nodePath : parentRefreshOwnerId ?? nodePath;
     const cached = cache.get(nodePath);
+    const refreshState = computeRefreshState(effectivePolicy, { seed: ctx.seed, time: ctx.time, docstep: ctx.docstep, refreshOwnerId }, cached);
+    const refreshKey = refreshState.refreshKey;
     let props;
     let evalTime = cached?.time ?? 0;
     let evalDocstep = cached?.docstep ?? 0;
     if (!cached || cached.refreshKey !== refreshKey) {
-        const ctxWindow = computeEvalWindow(effectivePolicy, ctx.time, ctx.docstep);
-        evalTime = ctxWindow.time;
-        evalDocstep = ctxWindow.docstep;
+        evalTime = refreshState.evalTime;
+        evalDocstep = refreshState.evalDocstep;
         props = resolveProps(node.props, {
             params: ctx.params,
             time: evalTime,
@@ -354,8 +419,8 @@ function renderNode(node, ctx, cache, parentPath, parentPolicy, index, insideSlo
     else {
         props = cached.props;
     }
-    const nextInsideSlot = insideSlot || node.kind === "slot" || node.kind === "inline_slot";
-    const children = node.children.map((child, childIndex) => renderNode(child, ctx, cache, nodePath, effectivePolicy, childIndex, nextInsideSlot));
+    const nextInsideSlot = insideSlot || isSlot;
+    const children = node.children.map((child, childIndex) => renderNode(child, ctx, cache, nodePath, effectivePolicy, refreshOwnerId, childIndex, nextInsideSlot));
     const style = resolveNodeStyle(node, props, ctx, {
         time: evalTime,
         docstep: evalDocstep,
@@ -1050,20 +1115,73 @@ function isLayoutSensitiveStyleKey(key) {
             return false;
     }
 }
-function computeEvalWindow(policy, time, docstep) {
+// Deterministic time buckets (avoid tick-rate dependence).
+const AT_BUCKET_SEC = 0.1;
+const POISSON_BUCKET_SEC = 0.25;
+export function didFire(policy, ctx) {
     switch (policy.kind) {
-        case "onLoad":
         case "never":
-            return { time, docstep };
-        case "onDocstep":
-            return { time, docstep };
+            return { fired: false };
+        case "docstep":
+            return { fired: true, meta: { bucket: ctx.docstep, firedAt: ctx.timeSec } };
         case "every": {
-            const seconds = durationToSeconds(policy.amount, policy.unit);
-            if (seconds == null || seconds <= 0) {
-                throw new Error(`Unsupported refresh duration unit '${policy.unit}'`);
+            if (policy.intervalSec <= 0)
+                return { fired: false };
+            if (ctx.timeSec < policy.phaseSec) {
+                return { fired: false, meta: { nextTime: policy.phaseSec } };
             }
-            const bucket = Math.floor(time / seconds);
-            return { time: bucket * seconds, docstep };
+            const bucket = Math.floor((ctx.timeSec - policy.phaseSec) / policy.intervalSec);
+            const firedAt = policy.phaseSec + bucket * policy.intervalSec;
+            return {
+                fired: true,
+                meta: { bucket, firedAt, nextTime: firedAt + policy.intervalSec },
+            };
+        }
+        case "at": {
+            const bucket = Math.floor(ctx.timeSec / AT_BUCKET_SEC);
+            const targetBucket = Math.floor(policy.timeSec / AT_BUCKET_SEC);
+            return {
+                fired: bucket === targetBucket,
+                meta: { bucket: targetBucket, firedAt: policy.timeSec },
+            };
+        }
+        case "atEach": {
+            const bucket = Math.floor(ctx.timeSec / AT_BUCKET_SEC);
+            let firedAt;
+            let nextTime;
+            for (const t of policy.timesSec ?? []) {
+                const tBucket = Math.floor(t / AT_BUCKET_SEC);
+                if (tBucket === bucket) {
+                    firedAt = firedAt ?? t;
+                }
+                else if (t > ctx.timeSec && nextTime == null) {
+                    nextTime = t;
+                }
+            }
+            if (firedAt == null) {
+                return { fired: false, meta: nextTime != null ? { nextTime } : undefined };
+            }
+            return { fired: true, meta: { bucket, firedAt, nextTime } };
+        }
+        case "poisson": {
+            const bucket = Math.floor(ctx.timeSec / POISSON_BUCKET_SEC);
+            const firedAt = bucket * POISSON_BUCKET_SEC;
+            const rate = Math.max(0, policy.ratePerSec);
+            const p = 1 - Math.exp(-rate * POISSON_BUCKET_SEC);
+            const fired = rand01(ctx.seed, ctx.slotId, `poisson:${bucket}`) < p;
+            return { fired, meta: fired ? { bucket, firedAt } : undefined };
+        }
+        case "chance": {
+            const p = Math.max(0, Math.min(1, policy.p));
+            if (policy.every.kind === "docstep") {
+                const bucket = ctx.docstep;
+                const fired = rand01(ctx.seed, ctx.slotId, `chance:docstep:${bucket}`) < p;
+                return { fired, meta: fired ? { bucket, firedAt: ctx.timeSec } : undefined };
+            }
+            const bucket = Math.floor(ctx.timeSec / policy.every.intervalSec);
+            const firedAt = bucket * policy.every.intervalSec;
+            const fired = rand01(ctx.seed, ctx.slotId, `chance:${bucket}`) < p;
+            return { fired, meta: fired ? { bucket, firedAt } : undefined };
         }
         default: {
             const _exhaustive = policy;
@@ -1071,25 +1189,89 @@ function computeEvalWindow(policy, time, docstep) {
         }
     }
 }
-function computeRefreshKey(policy, time, docstep) {
+function computeRefreshState(policy, ctx, cached) {
+    const trigger = didFire(policy, {
+        seed: ctx.seed,
+        slotId: ctx.refreshOwnerId,
+        timeSec: ctx.time,
+        docstep: ctx.docstep,
+    });
+    const shouldRefresh = trigger.fired;
+    let refreshKey = cached?.refreshKey ?? 0;
+    let evalTime = cached?.time ?? ctx.time;
+    let evalDocstep = cached?.docstep ?? ctx.docstep;
     switch (policy.kind) {
-        case "onLoad":
-        case "never":
-            return 0;
-        case "onDocstep":
-            return docstep;
-        case "every": {
-            const seconds = durationToSeconds(policy.amount, policy.unit);
-            if (seconds == null || seconds <= 0) {
-                throw new Error(`Unsupported refresh duration unit '${policy.unit}'`);
+        case "never": {
+            refreshKey = 0;
+            if (!cached) {
+                evalTime = ctx.time;
+                evalDocstep = ctx.docstep;
             }
-            return Math.floor(time / seconds);
+            break;
+        }
+        case "docstep": {
+            refreshKey = ctx.docstep;
+            evalTime = ctx.time;
+            evalDocstep = ctx.docstep;
+            break;
+        }
+        case "every": {
+            if (ctx.time < policy.phaseSec) {
+                if (!cached) {
+                    evalTime = ctx.time;
+                    evalDocstep = ctx.docstep;
+                }
+                break;
+            }
+            const bucket = Math.floor((ctx.time - policy.phaseSec) / policy.intervalSec);
+            refreshKey = bucket;
+            evalTime = policy.phaseSec + bucket * policy.intervalSec;
+            evalDocstep = ctx.docstep;
+            break;
+        }
+        case "at": {
+            if (trigger.fired) {
+                refreshKey = trigger.meta?.bucket ?? refreshKey;
+                evalTime = policy.timeSec;
+                evalDocstep = ctx.docstep;
+            }
+            else if (!cached) {
+                evalTime = ctx.time;
+                evalDocstep = ctx.docstep;
+            }
+            break;
+        }
+        case "atEach": {
+            if (trigger.fired) {
+                refreshKey = trigger.meta?.bucket ?? refreshKey;
+                evalTime = trigger.meta?.firedAt ?? ctx.time;
+                evalDocstep = ctx.docstep;
+            }
+            else if (!cached) {
+                evalTime = ctx.time;
+                evalDocstep = ctx.docstep;
+            }
+            break;
+        }
+        case "poisson":
+        case "chance": {
+            if (trigger.fired) {
+                refreshKey = trigger.meta?.bucket ?? refreshKey;
+                evalTime = trigger.meta?.firedAt ?? ctx.time;
+                evalDocstep = ctx.docstep;
+            }
+            else if (!cached) {
+                evalTime = ctx.time;
+                evalDocstep = ctx.docstep;
+            }
+            break;
         }
         default: {
             const _exhaustive = policy;
             return _exhaustive;
         }
     }
+    return { refreshKey, evalTime, evalDocstep, shouldRefresh, eventMeta: trigger.meta };
 }
 function resolveGridData(node, props, ctx) {
     const snapshot = ctx.legacySnapshot;
@@ -1723,40 +1905,17 @@ function normalizePath(value) {
         return "";
     return value.split(path.sep).join("/").replace(/\/+/g, "/").replace(/^\.\//, "");
 }
-function durationToSeconds(amount, unit) {
-    switch (unit) {
-        case "ms":
-        case "millisecond":
-        case "milliseconds":
-            return amount / 1000;
-        case "s":
-        case "sec":
-        case "secs":
-        case "second":
-        case "seconds":
-            return amount;
-        case "m":
-        case "min":
-        case "mins":
-        case "minute":
-        case "minutes":
-            return amount * 60;
-        case "h":
-        case "hr":
-        case "hrs":
-        case "hour":
-        case "hours":
-            return amount * 3600;
-        default:
-            return null;
-    }
-}
 function isResolvedAsset(value) {
     return Boolean(value && typeof value === "object" && value.__asset);
 }
 function makeAssetId(prefix, name, kind, pathValue) {
     const hash = stableHash(prefix, name, kind, pathValue);
     return `${prefix}_${hash.toString(16).padStart(8, "0")}`;
+}
+function rand01(seed, slotId, key) {
+    const hash = stableHash(seed, slotId, key);
+    const rng = mulberry32(hash);
+    return rng();
 }
 function stableHash(...values) {
     const serialized = values.map((value) => stableSerialize(value)).join("|");

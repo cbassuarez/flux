@@ -8,7 +8,7 @@ function makeSlot(content: string): RenderNodeIR {
     id: "s1",
     kind: "slot",
     props: {},
-    refresh: { kind: "onDocstep" },
+    refresh: { kind: "docstep" },
     slot: {
       reserve: { kind: "fixed", width: 200, height: 80, units: "px" },
       fit: "clip",
@@ -19,27 +19,34 @@ function makeSlot(content: string): RenderNodeIR {
         id: "t1",
         kind: "text",
         props: { content: content as any },
-        refresh: { kind: "onDocstep" },
+        refresh: { kind: "docstep" },
         children: [],
       },
     ],
   };
 }
 
-function makeDoc(slot: RenderNodeIR): RenderDocumentIR {
+function makeDoc(slot: RenderNodeIR, valueHash: string): RenderDocumentIR {
   return {
     meta: { version: "0.2.0" },
     seed: 0,
     time: 0,
     docstep: 0,
     assets: [],
+    slotMeta: {
+      [slot.nodeId]: {
+        valueHash,
+        shouldRefresh: false,
+        transition: { type: "none", durationMs: 0, ease: "linear" },
+      },
+    },
     body: [
       {
         nodeId: "root/page:p1:0",
         id: "p1",
         kind: "page",
         props: {},
-        refresh: { kind: "onLoad" },
+        refresh: { kind: "never" },
         children: [slot],
       },
     ],
@@ -48,8 +55,8 @@ function makeDoc(slot: RenderNodeIR): RenderDocumentIR {
 
 describe("viewer patching", () => {
   it("diffs by nodeId and only returns changed slots", () => {
-    const first = makeDoc(makeSlot("hello"));
-    const second = makeDoc(makeSlot("world"));
+    const first = makeDoc(makeSlot("hello"), "hello");
+    const second = makeDoc(makeSlot("world"), "world");
     const prev = collectSlotHashes(first);
     const next = collectSlotHashes(second);
     expect(diffSlotIds(prev, next)).toEqual(["root/page:p1:0/slot:s1:0"]);

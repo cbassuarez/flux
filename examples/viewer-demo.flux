@@ -156,14 +156,14 @@ document {
           inline_slot editionStep {
             reserve = fixedWidth(6, ch);
             fit = ellipsis;
-            refresh = onDocstep;
+            refresh = docstep;
             text editionStepValue { content = @docstep; }
           }
           text editionMid { content = " · time "; }
           inline_slot editionTime {
             reserve = fixedWidth(7, ch);
             fit = ellipsis;
-            refresh = onDocstep;
+            refresh = every("1s");
             text editionTimeValue { content = @time; }
           }
           text editionSuffix { content = "s"; }
@@ -208,16 +208,17 @@ document {
           inline_slot pill {
             reserve = fixedWidth(9, ch);
             fit = ellipsis;
-            refresh = onDocstep;
+            refresh = every("1.2s");
+            transition = fade(duration=220ms, ease="inOut");
             text pillValue {
-              content = @chooseStep([
-                "malleable",
-                "deterministic",
-                "alive",
-                "precise",
-                "modular",
-                "paced"
-              ]);
+              content = @cycle([
+                "moving",
+                "adaptive",
+                "dynamic",
+                "live",
+                "procedural",
+                "stochastic"
+              ], index=time / 1.2);
             }
           }
           text tail { content = " text updates without reflow."; }
@@ -234,8 +235,9 @@ document {
           slot imageSlot {
             reserve = fixed(360, 240, px);
             fit = scaleDown;
-            refresh = onDocstep;
-            image heroImg { asset = @assets.pick(tags=["swap"], noRepeatSteps=2); }
+            refresh = poisson(ratePerSec=0.15);
+            transition = wipe(direction="left", duration=280ms, ease="inOut");
+            image heroImg { asset = @assets.pick(tags=["swap"]); }
           }
           text heroCaption {
             role = "caption";
@@ -258,7 +260,7 @@ document {
             slot clipSlot {
               reserve = fixed(240, 56, px);
               fit = clip;
-              refresh = onDocstep;
+              refresh = every("2s");
               text clipText {
                 content = @chooseStep([
                   "Fits cleanly.",
@@ -272,7 +274,7 @@ document {
             slot ellipsisSlot {
               reserve = fixed(240, 56, px);
               fit = ellipsis;
-              refresh = onDocstep;
+              refresh = every("2s");
               text ellipsisText {
                 content = @chooseStep([
                   "Fits cleanly.",
@@ -288,7 +290,7 @@ document {
             slot shrinkSlot {
               reserve = fixed(240, 56, px);
               fit = shrink;
-              refresh = onDocstep;
+              refresh = every("2s");
               text shrinkText {
                 content = @chooseStep([
                   "Fits cleanly.",
@@ -302,7 +304,7 @@ document {
             slot scaleSlot {
               reserve = fixed(240, 56, px);
               fit = scaleDown;
-              refresh = onDocstep;
+              refresh = every("2s");
               text scaleText {
                 content = @chooseStep([
                   "Fits cleanly.",
@@ -312,10 +314,34 @@ document {
             }
           }
         }
+        row timedRow {
+          column timedCol1 {
+            text labelReveal { style = "H2"; content = "delayed reveal"; }
+            slot revealSlot {
+              reserve = fixed(200, 48, px);
+              fit = clip;
+              refresh = at("3s");
+              transition = appear();
+              text revealText { content = @cycle(["", "Revealed"], index=time / 3); }
+            }
+          }
+          column timedCol2 {
+            text labelFlash { style = "H2"; content = "flash"; }
+            slot flashSlot {
+              reserve = fixed(200, 48, px);
+              fit = clip;
+              refresh = chance(p=0.05, every="250ms");
+              transition = flash(duration=120ms);
+              text flashText {
+                content = @choose(["pulse", "glint", "spark"]);
+              }
+            }
+          }
+        }
         callout invariants {
           tone = "note";
           text calloutBody {
-            content = "Slots reserve geometry and fit dynamic content without reflow. Only slot interiors change on docstep ticks; neighboring layout remains fixed.";
+            content = "Slots reserve geometry and fit dynamic content without reflow. Only slot interiors change on refresh ticks; neighboring layout remains fixed.";
           }
         }
         table policyTable {

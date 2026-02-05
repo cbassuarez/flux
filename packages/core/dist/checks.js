@@ -31,6 +31,12 @@ export function checkDocument(file, doc) {
         const refCalls = [];
         const diagnostics = [];
         const visit = (node) => {
+            if (node.refresh && node.kind !== "slot" && node.kind !== "inline_slot") {
+                diagnostics.push(`${formatNodeLocation(file, node)}: Check error: refresh is only allowed on slot/inline_slot`);
+            }
+            if (node.transition && node.kind !== "slot" && node.kind !== "inline_slot") {
+                diagnostics.push(`${formatNodeLocation(file, node)}: Check error: transition is only allowed on slot/inline_slot`);
+            }
             const labelProp = node.props?.label;
             if (labelProp) {
                 if (labelProp.kind !== "LiteralValue" || typeof labelProp.value !== "string") {

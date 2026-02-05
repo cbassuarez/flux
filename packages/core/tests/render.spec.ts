@@ -40,7 +40,10 @@ describe("Flux render IR v0.2", () => {
         meta { version = "0.2.0"; }
         body {
           page p1 {
-            text t1 { refresh = onDocstep; content = @chooseStep(["a", "b", "c"]); }
+            slot s1 {
+              refresh = docstep;
+              text t1 { content = @chooseStep(["a", "b", "c"]); }
+            }
           }
         }
       }
@@ -51,9 +54,9 @@ describe("Flux render IR v0.2", () => {
     const step1 = renderDocument(doc, { docstep: 1 });
     const step3 = renderDocument(doc, { docstep: 3 });
 
-    const v0 = step0.body[0].children[0].props.content;
-    const v1 = step1.body[0].children[0].props.content;
-    const v3 = step3.body[0].children[0].props.content;
+    const v0 = findNodeById(step0.body, "t1")?.props?.content;
+    const v1 = findNodeById(step1.body, "t1")?.props?.content;
+    const v3 = findNodeById(step3.body, "t1")?.props?.content;
 
     expect(v0).toBe("a");
     expect(v1).toBe("b");
@@ -116,14 +119,20 @@ describe("Flux render IR v0.2", () => {
     );
   });
 
-  it("scopes refresh to onLoad vs onDocstep", () => {
+  it("scopes refresh to never vs docstep", () => {
     const src = `
       document {
         meta { version = "0.2.0"; }
         body {
           page p1 {
-            text static { refresh = onLoad; content = @"step " + docstep; }
-            text dynamic { refresh = onDocstep; content = @"step " + docstep; }
+            slot staticSlot {
+              refresh = never;
+              text static { content = @"step " + docstep; }
+            }
+            slot dynamicSlot {
+              refresh = docstep;
+              text dynamic { content = @"step " + docstep; }
+            }
           }
         }
       }
@@ -135,10 +144,10 @@ describe("Flux render IR v0.2", () => {
     const first = runtime.render();
     const second = runtime.step(1);
 
-    const firstStatic = first.body[0].children[0].props.content;
-    const firstDynamic = first.body[0].children[1].props.content;
-    const secondStatic = second.body[0].children[0].props.content;
-    const secondDynamic = second.body[0].children[1].props.content;
+    const firstStatic = findNodeById(first.body, "static")?.props?.content;
+    const firstDynamic = findNodeById(first.body, "dynamic")?.props?.content;
+    const secondStatic = findNodeById(second.body, "static")?.props?.content;
+    const secondDynamic = findNodeById(second.body, "dynamic")?.props?.content;
 
     expect(firstStatic).toBe("step 0");
     expect(secondStatic).toBe("step 0");
@@ -152,7 +161,10 @@ describe("Flux render IR v0.2", () => {
         meta { version = "0.2.0"; }
         body {
           page p1 {
-            text t1 { refresh = every(5s); content = @"t=" + time; }
+            slot s1 {
+              refresh = every("5s");
+              text t1 { content = @"t=" + time; }
+            }
           }
         }
       }
@@ -165,9 +177,9 @@ describe("Flux render IR v0.2", () => {
     const mid = runtime.tick(3);
     const later = runtime.tick(2);
 
-    expect(first.body[0].children[0].props.content).toBe("t=0");
-    expect(mid.body[0].children[0].props.content).toBe("t=0");
-    expect(later.body[0].children[0].props.content).toBe("t=5");
+    expect(findNodeById(first.body, "t1")?.props?.content).toBe("t=0");
+    expect(findNodeById(mid.body, "t1")?.props?.content).toBe("t=0");
+    expect(findNodeById(later.body, "t1")?.props?.content).toBe("t=5");
   });
 
   it("resolves assets.pick to stable asset refs", () => {
@@ -206,7 +218,8 @@ describe("Flux render IR v0.2", () => {
     const assetCwd = path.dirname(demoPath);
 
     const step0 = renderDocument(doc, { seed: 1, docstep: 0, time: 0, assetCwd });
-    const step1 = renderDocument(doc, { seed: 1, docstep: 1, time: 1, assetCwd });
+    const step1 = renderDocument(doc, { seed: 1, docstep: 0, time: 1.2, assetCwd });
+    const step3 = renderDocument(doc, { seed: 1, docstep: 0, time: 3, assetCwd });
 
     const hero0 = findNodeById(step0.body, "heroImg");
     const hero1 = findNodeById(step1.body, "heroImg");
@@ -217,21 +230,9 @@ describe("Flux render IR v0.2", () => {
     const word1 = findNodeById(step1.body, "pillValue");
     expect(word0?.props?.content).not.toBe(word1?.props?.content);
 
-    const editionStep0 = findNodeById(step0.body, "editionStepValue");
-    const editionStep1 = findNodeById(step1.body, "editionStepValue");
-    expect(editionStep0?.props?.content).not.toBe(editionStep1?.props?.content);
-
-    const editionTime0 = findNodeById(step0.body, "editionTimeValue");
-    const editionTime1 = findNodeById(step1.body, "editionTimeValue");
-    expect(editionTime0?.props?.content).not.toBe(editionTime1?.props?.content);
-
-    const assetIds = Array.from({ length: 6 }, (_, index) => {
-      const rendered = renderDocument(doc, { seed: 1, docstep: index, assetCwd });
-      const hero = findNodeById(rendered.body, "heroImg");
-      return hero?.props?.asset?.id ?? null;
-    });
-    const distinct = new Set(assetIds);
-    expect(distinct.size).toBeGreaterThan(1);
+    const reveal0 = findNodeById(step0.body, "revealText");
+    const reveal3 = findNodeById(step3.body, "revealText");
+    expect(reveal0?.props?.content ?? "").not.toBe(reveal3?.props?.content ?? "");
   });
 
   it("resolves refs with section/figure/table counters", () => {

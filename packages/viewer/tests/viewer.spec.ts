@@ -16,7 +16,11 @@ describe("viewer server", () => {
         meta { version = "0.2.0"; }
         body {
           page p1 {
-            text t1 { refresh = every(1s); content = @"t=" + time; }
+            slot s1 {
+              reserve = fixed(120, 32, px);
+              refresh = every(1s);
+              text t1 { content = @"t=" + time; }
+            }
           }
         }
       }
@@ -26,8 +30,8 @@ describe("viewer server", () => {
     const runtime = createDocumentRuntimeIR(doc, { seed: 1 });
     const initial = runtime.render();
 
-    const tick1 = advanceViewerRuntime(runtime, {}, true, 0.5);
-    const tick2 = advanceViewerRuntime(runtime, {}, true, 0.5);
+    const tick1 = advanceViewerRuntime(runtime, {}, true, 0.5, 1);
+    const tick2 = advanceViewerRuntime(runtime, {}, true, 0.5, 1);
 
     expect(tick1.ir.docstep).toBe(initial.docstep + 1);
     expect(tick2.ir.docstep).toBe(initial.docstep + 2);
@@ -43,7 +47,7 @@ describe("viewer server", () => {
           page p1 {
             slot s1 {
               reserve = fixed(120, 40, px);
-              refresh = onDocstep;
+              refresh = docstep;
               text t1 { content = @"step " + docstep; }
             }
           }
@@ -111,5 +115,10 @@ describe("viewer server", () => {
     expect(third.time).toBeGreaterThanOrEqual(second.time);
     const patchKeys = Object.keys(second.slotPatches ?? {});
     expect(patchKeys.some((key) => key.includes("/slot:s1"))).toBe(true);
+    expect(second.slotMeta).toBeTruthy();
+    if (second.slotMeta) {
+      const metaEntry = Object.entries(second.slotMeta)[0]?.[1];
+      expect(metaEntry && metaEntry.valueHash).toBeTruthy();
+    }
   });
 });

@@ -9,6 +9,7 @@ export interface ViewerServerOptions {
     allowNet?: string[];
     docstepStart?: number;
     advanceTime?: boolean;
+    timeRate?: number;
     editorDist?: string;
 }
 export interface ViewerServer {
@@ -18,7 +19,7 @@ export interface ViewerServer {
 }
 type ViewerRenderOptions = Parameters<typeof renderHtml>[1];
 export declare function noCacheHeaders(extra?: Record<string, string>): Record<string, string>;
-export declare function advanceViewerRuntime(runtime: ReturnType<typeof createDocumentRuntimeIR>, renderOptions: ViewerRenderOptions, advanceTime: boolean, dtSeconds: number): {
+export declare function advanceViewerRuntime(runtime: ReturnType<typeof createDocumentRuntimeIR>, renderOptions: ViewerRenderOptions, advanceTime: boolean, dtSeconds: number, timeRate: number): {
     ir: RenderDocumentIR;
     render: RenderHtmlResult;
 };

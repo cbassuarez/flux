@@ -101,6 +101,23 @@ export interface RenderNodeStyle {
     className?: string;
     inline?: Record<string, RenderValue>;
 }
+export interface RefreshEventMeta {
+    nextTime?: number;
+    firedAt?: number;
+    bucket?: number;
+}
+export interface NormalizedTransitionSpec {
+    type: "none" | "appear" | "fade" | "wipe" | "flash";
+    durationMs: number;
+    ease: string;
+    direction?: string;
+}
+export interface SlotPresentation {
+    valueHash: string;
+    shouldRefresh: boolean;
+    transition: NormalizedTransitionSpec;
+    eventMeta?: RefreshEventMeta;
+}
 export interface RenderDocumentIR {
     meta: FluxMeta;
     seed: number;
@@ -111,6 +128,7 @@ export interface RenderDocumentIR {
     body: RenderNodeIR[];
     theme?: string;
     styles?: RenderStyleDefinition[];
+    slotMeta?: Record<string, SlotPresentation>;
 }
 export interface RenderOptions {
     seed?: number;
@@ -144,4 +162,13 @@ export declare function createDocumentRuntime(doc: FluxDocument, options?: Rende
 export declare function renderDocument(doc: FluxDocument, options?: RenderOptions): RenderDocument;
 export declare function createDocumentRuntimeIR(doc: FluxDocument, options?: RenderOptions): DocumentRuntimeIR;
 export declare function renderDocumentIR(doc: FluxDocument, options?: RenderOptions): RenderDocumentIR;
+export declare function didFire(policy: RefreshPolicy, ctx: {
+    seed: number;
+    slotId: string;
+    timeSec: number;
+    docstep: number;
+}): {
+    fired: boolean;
+    meta?: RefreshEventMeta;
+};
 //# sourceMappingURL=render.d.ts.map

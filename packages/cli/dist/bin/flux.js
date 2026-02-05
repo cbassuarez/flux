@@ -320,6 +320,7 @@ function printViewHelp() {
         "Options:",
         "  --port <n>          Port for the local server (default: auto).",
         "  --docstep-ms <n>    Docstep interval in milliseconds.",
+        "  --time-rate <n>     Time multiplier for viewer ticks (default: 1).",
         "  --seed <n>          Seed for deterministic rendering.",
         "  --allow-net <orig>  Allow remote assets for origin (repeatable or comma-separated).",
         "  --editor-dist <p>   Serve editor assets from this dist folder.",
@@ -340,6 +341,7 @@ function printEditHelp() {
         "Options:",
         "  --port <n>          Port for the local server (default: auto).",
         "  --docstep-ms <n>    Docstep interval in milliseconds.",
+        "  --time-rate <n>     Time multiplier for viewer ticks (default: 1).",
         "  --seed <n>          Seed for deterministic rendering.",
         "  --allow-net <orig>  Allow remote assets for origin (repeatable or comma-separated).",
         "  --editor-dist <p>   Serve editor assets from this dist folder.",
@@ -645,6 +647,7 @@ async function runStep(args) {
 async function runView(args, globals) {
     let port;
     let docstepMs;
+    let timeRate;
     let seed;
     let useTty = false;
     let editorDist;
@@ -675,6 +678,13 @@ async function runView(args, globals) {
             }
             else if (arg.startsWith("--docstep-ms=")) {
                 docstepMs = parseNumberFlag("--docstep-ms", arg.slice("--docstep-ms=".length));
+            }
+            else if (arg === "--time-rate") {
+                timeRate = parseNumberFlag("--time-rate", args[i + 1]);
+                i += 1;
+            }
+            else if (arg.startsWith("--time-rate=")) {
+                timeRate = parseNumberFlag("--time-rate", arg.slice("--time-rate=".length));
             }
             else if (arg === "--seed") {
                 seed = parseNumberFlag("--seed", args[i + 1]);
@@ -745,6 +755,7 @@ async function runView(args, globals) {
         seed,
         allowNet,
         advanceTime,
+        timeRate,
         editorDist,
     });
     if (!result.ok || !result.data) {
@@ -781,6 +792,7 @@ async function runView(args, globals) {
 async function runEdit(args, globals) {
     let port;
     let docstepMs;
+    let timeRate;
     let seed;
     let editorDist;
     const allowNet = [];
@@ -807,6 +819,13 @@ async function runEdit(args, globals) {
             }
             else if (arg.startsWith("--docstep-ms=")) {
                 docstepMs = parseNumberFlag("--docstep-ms", arg.slice("--docstep-ms=".length));
+            }
+            else if (arg === "--time-rate") {
+                timeRate = parseNumberFlag("--time-rate", args[i + 1]);
+                i += 1;
+            }
+            else if (arg.startsWith("--time-rate=")) {
+                timeRate = parseNumberFlag("--time-rate", arg.slice("--time-rate=".length));
             }
             else if (arg === "--seed") {
                 seed = parseNumberFlag("--seed", args[i + 1]);
@@ -864,6 +883,7 @@ async function runEdit(args, globals) {
         seed,
         allowNet,
         advanceTime,
+        timeRate,
         editorDist,
     });
     if (!result.ok || !result.data) {

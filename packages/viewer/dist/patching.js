@@ -1,5 +1,13 @@
 export function collectSlotHashes(ir) {
     const map = new Map();
+    if (ir.slotMeta) {
+        for (const [id, meta] of Object.entries(ir.slotMeta)) {
+            if (meta?.valueHash) {
+                map.set(id, meta.valueHash);
+            }
+        }
+        return map;
+    }
     for (const node of ir.body) {
         collect(node, map);
     }

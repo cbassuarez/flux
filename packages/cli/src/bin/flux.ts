@@ -360,6 +360,7 @@ function printViewHelp(): void {
       "Options:",
       "  --port <n>          Port for the local server (default: auto).",
       "  --docstep-ms <n>    Docstep interval in milliseconds.",
+      "  --time-rate <n>     Time multiplier for viewer ticks (default: 1).",
       "  --seed <n>          Seed for deterministic rendering.",
       "  --allow-net <orig>  Allow remote assets for origin (repeatable or comma-separated).",
       "  --editor-dist <p>   Serve editor assets from this dist folder.",
@@ -383,6 +384,7 @@ function printEditHelp(): void {
       "Options:",
       "  --port <n>          Port for the local server (default: auto).",
       "  --docstep-ms <n>    Docstep interval in milliseconds.",
+      "  --time-rate <n>     Time multiplier for viewer ticks (default: 1).",
       "  --seed <n>          Seed for deterministic rendering.",
       "  --allow-net <orig>  Allow remote assets for origin (repeatable or comma-separated).",
       "  --editor-dist <p>   Serve editor assets from this dist folder.",
@@ -695,6 +697,7 @@ async function runStep(args: string[]): Promise<ExitCode> {
 async function runView(args: string[], globals: ReturnType<typeof parseGlobalArgs>): Promise<ExitCode> {
   let port: number | undefined;
   let docstepMs: number | undefined;
+  let timeRate: number | undefined;
   let seed: number | undefined;
   let useTty = false;
   let editorDist: string | undefined;
@@ -721,6 +724,11 @@ async function runView(args: string[], globals: ReturnType<typeof parseGlobalArg
         i += 1;
       } else if (arg.startsWith("--docstep-ms=")) {
         docstepMs = parseNumberFlag("--docstep-ms", arg.slice("--docstep-ms=".length));
+      } else if (arg === "--time-rate") {
+        timeRate = parseNumberFlag("--time-rate", args[i + 1]);
+        i += 1;
+      } else if (arg.startsWith("--time-rate=")) {
+        timeRate = parseNumberFlag("--time-rate", arg.slice("--time-rate=".length));
       } else if (arg === "--seed") {
         seed = parseNumberFlag("--seed", args[i + 1]);
         i += 1;
@@ -786,6 +794,7 @@ async function runView(args: string[], globals: ReturnType<typeof parseGlobalArg
     seed,
     allowNet,
     advanceTime,
+    timeRate,
     editorDist,
   });
 
@@ -828,6 +837,7 @@ async function runView(args: string[], globals: ReturnType<typeof parseGlobalArg
 async function runEdit(args: string[], globals: ReturnType<typeof parseGlobalArgs>): Promise<ExitCode> {
   let port: number | undefined;
   let docstepMs: number | undefined;
+  let timeRate: number | undefined;
   let seed: number | undefined;
   let editorDist: string | undefined;
   const allowNet: string[] = [];
@@ -851,6 +861,11 @@ async function runEdit(args: string[], globals: ReturnType<typeof parseGlobalArg
         i += 1;
       } else if (arg.startsWith("--docstep-ms=")) {
         docstepMs = parseNumberFlag("--docstep-ms", arg.slice("--docstep-ms=".length));
+      } else if (arg === "--time-rate") {
+        timeRate = parseNumberFlag("--time-rate", args[i + 1]);
+        i += 1;
+      } else if (arg.startsWith("--time-rate=")) {
+        timeRate = parseNumberFlag("--time-rate", arg.slice("--time-rate=".length));
       } else if (arg === "--seed") {
         seed = parseNumberFlag("--seed", args[i + 1]);
         i += 1;
@@ -903,6 +918,7 @@ async function runEdit(args: string[], globals: ReturnType<typeof parseGlobalArg
     seed,
     allowNet,
     advanceTime,
+    timeRate,
     editorDist,
   });
 

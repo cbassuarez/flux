@@ -1197,9 +1197,14 @@ class Parser {
         const props = {};
         const children = [];
         let refresh;
+        let transition;
         while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
             if (this.checkIdentifier("refresh")) {
                 refresh = this.parseRefreshPolicy();
+                continue;
+            }
+            if (this.checkIdentifier("transition")) {
+                transition = this.parseTransitionSpec();
                 continue;
             }
             if (this.looksLikeNodeDecl()) {
@@ -1229,6 +1234,7 @@ class Parser {
             props,
             children,
             refresh,
+            transition,
             loc: { line: kindTok.line, column: kindTok.column, endLine: endTok.line, endColumn: endTok.column },
         };
     }
@@ -1299,17 +1305,17 @@ class Parser {
     parseRefreshPolicy() {
         this.expectIdentifier("refresh", "Expected 'refresh'");
         this.consume(TokenType.Equals, "Expected '=' after 'refresh'");
-        if (this.checkIdentifier("onLoad")) {
-            this.advance();
-            this.consumeOptional(TokenType.Semicolon);
-            return { kind: "onLoad" };
-        }
-        if (this.checkIdentifier("onDocstep")) {
-            this.advance();
-            this.consumeOptional(TokenType.Semicolon);
-            return { kind: "onDocstep" };
-        }
         if (this.checkIdentifier("never")) {
+            this.advance();
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "never" };
+        }
+        if (this.checkIdentifier("docstep") || this.checkIdentifier("onDocstep")) {
+            this.advance();
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "docstep" };
+        }
+        if (this.checkIdentifier("onLoad")) {
             this.advance();
             this.consumeOptional(TokenType.Semicolon);
             return { kind: "never" };
@@ -1317,12 +1323,292 @@ class Parser {
         if (this.checkIdentifier("every")) {
             this.advance();
             this.consume(TokenType.LParen, "Expected '(' after 'every'");
-            const { amount, unit } = this.parseDurationSpec();
+            const intervalSec = this.parseTimeSeconds("Expected refresh interval");
+            let phaseSec = 0;
+            if (this.match(TokenType.Comma)) {
+                if (!this.checkIdentifier("phase")) {
+                    throw this.errorAtToken(this.peek(), "Expected 'phase' in every(...)");
+                }
+                this.advance();
+                this.consume(TokenType.Equals, "Expected '=' after 'phase'");
+                phaseSec = this.parseTimeSeconds("Expected phase duration", true);
+            }
             this.consume(TokenType.RParen, "Expected ')' after every(...)");
             this.consumeOptional(TokenType.Semicolon);
-            return { kind: "every", amount, unit };
+            return { kind: "every", intervalSec, phaseSec };
+        }
+        if (this.checkIdentifier("atEach")) {
+            this.advance();
+            this.consume(TokenType.LParen, "Expected '(' after 'atEach'");
+            this.consume(TokenType.LBracket, "Expected '[' to start atEach list");
+            const timesSec = [];
+            if (!this.check(TokenType.RBracket)) {
+                timesSec.push(this.parseTimeSeconds("Expected atEach time", true));
+                while (this.match(TokenType.Comma)) {
+                    timesSec.push(this.parseTimeSeconds("Expected atEach time", true));
+                }
+            }
+            this.consume(TokenType.RBracket, "Expected ']' after atEach list");
+            this.consume(TokenType.RParen, "Expected ')' after atEach(...)");
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "atEach", timesSec };
+        }
+        if (this.checkIdentifier("at")) {
+            this.advance();
+            this.consume(TokenType.LParen, "Expected '(' after 'at'");
+            const timeSec = this.parseTimeSeconds("Expected at(...) time", true);
+            this.consume(TokenType.RParen, "Expected ')' after at(...)");
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "at", timeSec };
+        }
+        if (this.checkIdentifier("poisson")) {
+            this.advance();
+            this.consume(TokenType.LParen, "Expected '(' after 'poisson'");
+            let ratePerSec = null;
+            while (!this.check(TokenType.RParen) && !this.isAtEnd()) {
+                if (this.check(TokenType.Identifier) && this.peek(1).type === TokenType.Equals) {
+                    const nameTok = this.advance();
+                    this.consume(TokenType.Equals, "Expected '=' after argument name");
+                    if (nameTok.lexeme !== "ratePerSec") {
+                        throw this.errorAtToken(nameTok, `Unknown poisson argument '${nameTok.lexeme}'`);
+                    }
+                    const valueTok = this.consumeNumber("Expected numeric ratePerSec");
+                    ratePerSec = Number(valueTok.value);
+                }
+                else {
+                    const valueTok = this.consumeNumber("Expected numeric ratePerSec");
+                    ratePerSec = Number(valueTok.value);
+                }
+                if (!this.match(TokenType.Comma))
+                    break;
+            }
+            this.consume(TokenType.RParen, "Expected ')' after poisson(...)");
+            this.consumeOptional(TokenType.Semicolon);
+            if (ratePerSec == null) {
+                throw this.errorAtToken(this.peek(), "poisson(ratePerSec=...) requires ratePerSec");
+            }
+            return { kind: "poisson", ratePerSec };
+        }
+        if (this.checkIdentifier("chance")) {
+            this.advance();
+            this.consume(TokenType.LParen, "Expected '(' after 'chance'");
+            let p = null;
+            let every = null;
+            while (!this.check(TokenType.RParen) && !this.isAtEnd()) {
+                if (this.check(TokenType.Identifier) && this.peek(1).type === TokenType.Equals) {
+                    const nameTok = this.advance();
+                    this.consume(TokenType.Equals, "Expected '=' after argument name");
+                    if (nameTok.lexeme === "p") {
+                        const valueTok = this.consumeNumber("Expected numeric p");
+                        p = Number(valueTok.value);
+                    }
+                    else if (nameTok.lexeme === "every") {
+                        every = this.parseChanceEvery();
+                    }
+                    else {
+                        throw this.errorAtToken(nameTok, `Unknown chance argument '${nameTok.lexeme}'`);
+                    }
+                }
+                else if (p == null) {
+                    const valueTok = this.consumeNumber("Expected numeric p");
+                    p = Number(valueTok.value);
+                }
+                else {
+                    throw this.errorAtToken(this.peek(), "Unexpected chance(...) argument");
+                }
+                if (!this.match(TokenType.Comma))
+                    break;
+            }
+            this.consume(TokenType.RParen, "Expected ')' after chance(...)");
+            this.consumeOptional(TokenType.Semicolon);
+            if (p == null) {
+                throw this.errorAtToken(this.peek(), "chance(p=..., every=...) requires p");
+            }
+            if (!every) {
+                every = { kind: "docstep" };
+            }
+            return { kind: "chance", p, every };
+        }
+        if (this.checkIdentifier("beat")) {
+            throw this.errorAtToken(this.peek(), "beat(...) refresh is not supported yet");
         }
         throw this.errorAtToken(this.peek(), "Invalid refresh policy");
+    }
+    parseTransitionSpec() {
+        this.expectIdentifier("transition", "Expected 'transition'");
+        this.consume(TokenType.Equals, "Expected '=' after 'transition'");
+        if (this.checkIdentifier("none")) {
+            this.advance();
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "none" };
+        }
+        if (this.checkIdentifier("appear")) {
+            this.advance();
+            if (this.match(TokenType.LParen)) {
+                this.consume(TokenType.RParen, "Expected ')' after appear(");
+            }
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "appear" };
+        }
+        if (this.checkIdentifier("fade")) {
+            this.advance();
+            const args = this.parseTransitionArgs(["duration", "ease"]);
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "fade", durationMs: args.durationMs, ease: args.ease };
+        }
+        if (this.checkIdentifier("wipe")) {
+            this.advance();
+            const args = this.parseTransitionArgs(["duration", "ease", "direction"]);
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "wipe", durationMs: args.durationMs, ease: args.ease, direction: args.direction };
+        }
+        if (this.checkIdentifier("flash")) {
+            this.advance();
+            const args = this.parseTransitionArgs(["duration"]);
+            this.consumeOptional(TokenType.Semicolon);
+            return { kind: "flash", durationMs: args.durationMs };
+        }
+        throw this.errorAtToken(this.peek(), "Invalid transition spec");
+    }
+    parseTransitionArgs(allowed) {
+        const args = {};
+        this.consume(TokenType.LParen, "Expected '(' after transition");
+        while (!this.check(TokenType.RParen) && !this.isAtEnd()) {
+            if (this.check(TokenType.Identifier) && this.peek(1).type === TokenType.Equals) {
+                const nameTok = this.advance();
+                const name = nameTok.lexeme;
+                this.consume(TokenType.Equals, "Expected '=' after argument name");
+                if (!allowed.includes(name)) {
+                    throw this.errorAtToken(nameTok, `Unknown transition argument '${name}'`);
+                }
+                if (name === "duration") {
+                    args.durationMs = this.parseDurationMs("Expected transition duration");
+                }
+                else if (name === "ease") {
+                    const ease = this.parseTransitionString("Expected transition ease");
+                    if (!isTransitionEase(ease)) {
+                        throw this.errorAtToken(nameTok, `Unknown transition ease '${ease}'`);
+                    }
+                    args.ease = ease;
+                }
+                else if (name === "direction") {
+                    const direction = this.parseTransitionString("Expected wipe direction");
+                    if (!isTransitionDirection(direction)) {
+                        throw this.errorAtToken(nameTok, `Unknown wipe direction '${direction}'`);
+                    }
+                    args.direction = direction;
+                }
+            }
+            else {
+                throw this.errorAtToken(this.peek(), "Expected named transition argument");
+            }
+            if (!this.match(TokenType.Comma))
+                break;
+        }
+        this.consume(TokenType.RParen, "Expected ')' after transition arguments");
+        return args;
+    }
+    parseTransitionString(message) {
+        const tok = this.peek();
+        if (tok.type === TokenType.String || tok.type === TokenType.Identifier) {
+            this.advance();
+            return String(tok.value ?? tok.lexeme);
+        }
+        throw this.errorAtToken(tok, message);
+    }
+    parseChanceEvery() {
+        if (this.check(TokenType.Identifier)) {
+            const tok = this.peek();
+            if (tok.lexeme === "docstep") {
+                this.advance();
+                return { kind: "docstep" };
+            }
+        }
+        if (this.check(TokenType.String)) {
+            const tok = this.advance();
+            const raw = String(tok.value ?? tok.lexeme);
+            if (raw === "docstep") {
+                return { kind: "docstep" };
+            }
+            const seconds = parseTimeString(raw);
+            if (seconds == null) {
+                throw this.errorAtToken(tok, `Invalid duration '${raw}'`);
+            }
+            if (seconds <= 0) {
+                throw this.errorAtToken(tok, "Duration must be positive");
+            }
+            return { kind: "time", intervalSec: seconds };
+        }
+        if (this.check(TokenType.Int) || this.check(TokenType.Float)) {
+            const seconds = this.parseTimeSeconds("Expected duration");
+            return { kind: "time", intervalSec: seconds };
+        }
+        throw this.errorAtToken(this.peek(), "Expected 'docstep' or duration for chance every");
+    }
+    parseTimeSeconds(message, allowZero = false) {
+        const tok = this.peek();
+        if (tok.type === TokenType.String) {
+            this.advance();
+            const raw = String(tok.value ?? tok.lexeme);
+            const seconds = parseTimeString(raw);
+            if (seconds == null) {
+                throw this.errorAtToken(tok, `Invalid duration '${raw}'`);
+            }
+            if (seconds < 0 || (!allowZero && seconds === 0)) {
+                throw this.errorAtToken(tok, allowZero ? "Duration must be non-negative" : "Duration must be positive");
+            }
+            return seconds;
+        }
+        if (tok.type === TokenType.Int || tok.type === TokenType.Float) {
+            const { amount, unit } = this.parseDurationSpec();
+            const seconds = durationToSeconds(amount, unit);
+            if (seconds == null) {
+                throw this.errorAtToken(tok, `Unsupported duration unit '${unit}'`);
+            }
+            if (seconds < 0 || (!allowZero && seconds === 0)) {
+                throw this.errorAtToken(tok, allowZero ? "Duration must be non-negative" : "Duration must be positive");
+            }
+            return seconds;
+        }
+        throw this.errorAtToken(tok, message);
+    }
+    parseDurationMs(message) {
+        const tok = this.peek();
+        if (tok.type === TokenType.String) {
+            this.advance();
+            const raw = String(tok.value ?? tok.lexeme);
+            const seconds = parseTimeString(raw);
+            if (seconds == null) {
+                throw this.errorAtToken(tok, `Invalid duration '${raw}'`);
+            }
+            if (seconds < 0) {
+                throw this.errorAtToken(tok, "Duration must be non-negative");
+            }
+            return seconds * 1000;
+        }
+        if (tok.type === TokenType.Int || tok.type === TokenType.Float) {
+            if (this.peek(1).type === TokenType.Identifier) {
+                const { amount, unit } = this.parseDurationSpec();
+                const seconds = durationToSeconds(amount, unit);
+                if (seconds == null) {
+                    throw this.errorAtToken(tok, `Unsupported duration unit '${unit}'`);
+                }
+                if (seconds < 0) {
+                    throw this.errorAtToken(tok, "Duration must be non-negative");
+                }
+                return seconds * 1000;
+            }
+            this.advance();
+            const amount = Number(tok.value);
+            if (!Number.isFinite(amount)) {
+                throw this.errorAtToken(tok, message);
+            }
+            if (amount < 0) {
+                throw this.errorAtToken(tok, "Duration must be non-negative");
+            }
+            return amount;
+        }
+        throw this.errorAtToken(tok, message);
     }
     looksLikeNodeDecl() {
         return (this.check(TokenType.Identifier) &&
@@ -2085,6 +2371,12 @@ class Parser {
         return new Error(`Parse error at ${token.line}:${token.column} near '${token.lexeme}': ${message}`);
     }
 }
+function isTransitionEase(value) {
+    return value === "linear" || value === "inOut" || value === "in" || value === "out";
+}
+function isTransitionDirection(value) {
+    return value === "left" || value === "right" || value === "up" || value === "down";
+}
 const DEFAULT_INCLUDE_BYTES = 1024 * 1024;
 const DEFAULT_INCLUDE_DEPTH = 8;
 export function parseDocument(source, options = {}) {
@@ -2159,6 +2451,52 @@ function resolveIncludePath(node, ctx, nodePath) {
         throw new Error(`Include path must target a .flux file: '${raw}'`);
     }
     return resolved;
+}
+function parseTimeString(raw) {
+    const trimmed = raw.trim();
+    const match = trimmed.match(/^([0-9]*\.?[0-9]+)\s*(ms|s|m)$/i);
+    if (!match)
+        return null;
+    const value = Number(match[1]);
+    if (!Number.isFinite(value) || value < 0)
+        return null;
+    const unit = match[2].toLowerCase();
+    switch (unit) {
+        case "ms":
+            return value / 1000;
+        case "s":
+            return value;
+        case "m":
+            return value * 60;
+        default:
+            return null;
+    }
+}
+function durationToSeconds(amount, unit) {
+    switch (unit) {
+        case "ms":
+            return amount / 1000;
+        case "s":
+        case "sec":
+        case "secs":
+        case "second":
+        case "seconds":
+            return amount;
+        case "m":
+        case "min":
+        case "mins":
+        case "minute":
+        case "minutes":
+            return amount * 60;
+        case "h":
+        case "hr":
+        case "hrs":
+        case "hour":
+        case "hours":
+            return amount * 3600;
+        default:
+            return null;
+    }
 }
 function loadIncludedDocument(filePath, ctx, depth) {
     if (ctx.seen.has(filePath)) {

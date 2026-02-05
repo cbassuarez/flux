@@ -257,16 +257,61 @@ export interface FluxRule {
     thenBranch: FluxStmt[];
     elseBranch?: FluxStmt[];
 }
-export type RefreshPolicyKind = "onLoad" | "onDocstep" | "never" | "every";
-export interface RefreshPolicyBase {
-    kind: "onLoad" | "onDocstep" | "never";
+export type RefreshPolicyKind = "never" | "docstep" | "every" | "at" | "atEach" | "poisson" | "chance";
+export interface RefreshNeverPolicy {
+    kind: "never";
+}
+export interface RefreshDocstepPolicy {
+    kind: "docstep";
 }
 export interface RefreshEveryPolicy {
     kind: "every";
-    amount: number;
-    unit: TimerUnit;
+    intervalSec: number;
+    phaseSec: number;
 }
-export type RefreshPolicy = RefreshPolicyBase | RefreshEveryPolicy;
+export interface RefreshAtPolicy {
+    kind: "at";
+    timeSec: number;
+}
+export interface RefreshAtEachPolicy {
+    kind: "atEach";
+    timesSec: number[];
+}
+export interface RefreshPoissonPolicy {
+    kind: "poisson";
+    ratePerSec: number;
+}
+export type RefreshChanceEvery = {
+    kind: "docstep";
+} | {
+    kind: "time";
+    intervalSec: number;
+};
+export interface RefreshChancePolicy {
+    kind: "chance";
+    p: number;
+    every: RefreshChanceEvery;
+}
+export type RefreshPolicy = RefreshNeverPolicy | RefreshDocstepPolicy | RefreshEveryPolicy | RefreshAtPolicy | RefreshAtEachPolicy | RefreshPoissonPolicy | RefreshChancePolicy;
+export type TransitionEase = "inOut" | "linear" | "in" | "out";
+export type TransitionDirection = "left" | "right" | "up" | "down";
+export type TransitionSpec = {
+    kind: "none";
+} | {
+    kind: "appear";
+} | {
+    kind: "fade";
+    durationMs?: number;
+    ease?: TransitionEase;
+} | {
+    kind: "wipe";
+    durationMs?: number;
+    ease?: TransitionEase;
+    direction?: TransitionDirection;
+} | {
+    kind: "flash";
+    durationMs?: number;
+};
 export type NodeKind = "page" | "section" | "row" | "column" | "spacer" | "text" | "em" | "strong" | "code" | "smallcaps" | "sub" | "sup" | "mark" | "link" | "quote" | "blockquote" | "codeblock" | "callout" | "image" | "figure" | "table" | "ul" | "ol" | "li" | "hr" | "footnote" | "grid" | "slot" | "inline_slot" | "include";
 export interface DocumentNode {
     id: string;
@@ -274,6 +319,7 @@ export interface DocumentNode {
     props: Record<string, NodePropValue>;
     children: DocumentNode[];
     refresh?: RefreshPolicy;
+    transition?: TransitionSpec;
     loc?: SourceSpan;
 }
 export interface BodyBlock {

@@ -16,9 +16,11 @@ const NO_CACHE_HEADERS = {
 export function noCacheHeaders(extra = {}) {
     return { ...NO_CACHE_HEADERS, ...extra };
 }
-export function advanceViewerRuntime(runtime, renderOptions, advanceTime, dtSeconds) {
-    if (advanceTime && dtSeconds > 0) {
-        runtime.tick(dtSeconds);
+export function advanceViewerRuntime(runtime, renderOptions, advanceTime, dtSeconds, timeRate) {
+    const rate = Number.isFinite(timeRate) ? timeRate : 1;
+    const scaledSeconds = dtSeconds * Math.max(0, rate);
+    if (advanceTime && scaledSeconds > 0) {
+        runtime.tick(scaledSeconds);
     }
     const nextIr = runtime.step(1);
     return {
@@ -85,6 +87,7 @@ export async function startViewerServer(options) {
     let nextTickAt = Date.now() + intervalMs;
     let lastTickAt = Date.now();
     const advanceTime = options.advanceTime !== false;
+    const timeRate = Number.isFinite(options.timeRate) ? options.timeRate : 1;
     const sseClients = new Set();
     let keepAliveTimer = null;
     const diffSlotPatches = (prev, next) => {
@@ -101,14 +104,28 @@ export async function startViewerServer(options) {
         }
         return patches;
     };
-    const buildPatchPayload = (slotPatches) => {
+    const pickSlotMeta = (slotPatches, slotMetaAll) => {
+        if (!slotMetaAll)
+            return undefined;
+        const meta = {};
+        for (const id of Object.keys(slotPatches)) {
+            meta[id] = slotMetaAll[id] ?? null;
+        }
+        return meta;
+    };
+    const buildPatchPayload = (slotPatches, slotMetaAll) => {
         if (current.errors.length) {
             return { errors: current.errors };
         }
-        return { docstep: current.ir.docstep, time: current.ir.time, slotPatches };
+        return {
+            docstep: current.ir.docstep,
+            time: current.ir.time,
+            slotPatches,
+            slotMeta: pickSlotMeta(slotPatches, slotMetaAll),
+        };
     };
     let lastSlotMap = current.render.slots;
-    let lastPatchPayload = buildPatchPayload(current.render.slots);
+    let lastPatchPayload = buildPatchPayload(current.render.slots, current.ir.slotMeta);
     const rebuildCurrent = (nextRuntime, nextErrors, nextDiagnostics) => {
         const nextIr = nextRuntime ? nextRuntime.render() : buildEmptyIR();
         const nextRender = renderHtml(nextIr, renderOptions);
@@ -120,7 +137,7 @@ export async function startViewerServer(options) {
             diagnostics: nextDiagnostics,
         };
         lastSlotMap = nextRender.slots;
-        lastPatchPayload = buildPatchPayload(nextRender.slots);
+        lastPatchPayload = buildPatchPayload(nextRender.slots, nextIr.slotMeta);
     };
     const rebuildFromSource = (nextSource) => {
         const parsed = parseSource(nextSource);
@@ -206,7 +223,7 @@ export async function startViewerServer(options) {
         const elapsedMs = Math.max(0, now - lastTickAt);
         lastTickAt = now;
         const dtSeconds = Math.min(elapsedMs / 1000, MAX_TICK_SECONDS);
-        const next = advanceViewerRuntime(runtime, renderOptions, advanceTime, dtSeconds);
+        const next = advanceViewerRuntime(runtime, renderOptions, advanceTime, dtSeconds, timeRate);
         const slotPatches = diffSlotPatches(lastSlotMap, next.render.slots);
         lastSlotMap = next.render.slots;
         current = {
@@ -214,7 +231,7 @@ export async function startViewerServer(options) {
             ir: next.ir,
             render: next.render,
         };
-        lastPatchPayload = buildPatchPayload(slotPatches);
+        lastPatchPayload = buildPatchPayload(slotPatches, next.ir.slotMeta);
         broadcastPatchUpdate(lastPatchPayload);
         nextTickAt += intervalMs;
         scheduleTick();
@@ -429,6 +446,7 @@ export async function startViewerServer(options) {
                     seed: runtime?.seed ?? 0,
                     docstep: runtime?.docstep ?? 0,
                     time: runtime?.time ?? 0,
+                    timeRate,
                 });
                 return;
             }
@@ -679,7 +697,7 @@ export async function startViewerServer(options) {
                 });
                 res.write(": connected\n\n");
                 sseClients.add(res);
-                res.write(`data: ${JSON.stringify(buildPatchPayload(current.render.slots))}\n\n`);
+                res.write(`data: ${JSON.stringify(buildPatchPayload(current.render.slots, current.ir.slotMeta))}\n\n`);
                 req.on("close", () => {
                     sseClients.delete(res);
                     res.end();
@@ -949,6 +967,13 @@ export function getViewerJs() {
   let advanceTimeEnabled = null;
   let logPatches = false;
   let fullTitle = titleEl ? titleEl.textContent || "Flux Viewer" : "Flux Viewer";
+  const prefersReducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const slotHashCache = new Map();
+  const slotHtmlCache = new Map();
+  const slotTransitionTimers = new Map();
 
   const fetchJson = async (url, options) => {
     const res = await fetch(url, options);
@@ -1171,7 +1196,47 @@ export function getViewerJs() {
     }, 250);
   };
 
-  const applySlotPatches = (slotPatches) => {
+  const resolveEase = (ease) => {
+    const name = String(ease || "inOut");
+    if (name === "linear") return "linear";
+    if (name === "in") return "cubic-bezier(0.4, 0, 1, 1)";
+    if (name === "out") return "cubic-bezier(0, 0, 0.2, 1)";
+    return "cubic-bezier(0.4, 0, 0.2, 1)";
+  };
+
+  const resetTransitionStyles = (inner) => {
+    inner.classList.remove(
+      "flux-transition",
+      "flux-transition--fade",
+      "flux-transition--wipe",
+      "flux-transition--flash",
+      "is-active",
+    );
+    inner.removeAttribute("data-flux-wipe");
+    inner.style.removeProperty("--flux-dur");
+    inner.style.removeProperty("--flux-ease");
+  };
+
+  const clearSlotTransition = (id, inner) => {
+    const timer = slotTransitionTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      slotTransitionTimers.delete(id);
+    }
+    if (inner) {
+      resetTransitionStyles(inner);
+    }
+  };
+
+  const finalizeSlotPatch = (id, slot, inner, html, win) => {
+    clearSlotTransition(id, inner);
+    inner.innerHTML = html || "";
+    slotHtmlCache.set(id, html || "");
+    applyAssets(inner);
+    requestAnimationFrame(() => applyFit(slot, win));
+  };
+
+  const applySlotPatches = (slotPatches, slotMeta) => {
     if (!slotPatches) return;
     const root = getPreviewDocument();
     const win = getPreviewWindow();
@@ -1187,9 +1252,98 @@ export function getViewerJs() {
         warnMissingSlot(id);
         return;
       }
-      inner.innerHTML = html || "";
+
+      if (slotTransitionTimers.has(id)) {
+        clearSlotTransition(id, inner);
+        const cachedHtml = slotHtmlCache.get(id);
+        if (typeof cachedHtml === "string") {
+          inner.innerHTML = cachedHtml;
+        }
+      }
+
+      const meta = slotMeta ? slotMeta[id] : null;
+      const nextHash = meta && meta.valueHash ? meta.valueHash : null;
+      const prevHash = slotHashCache.get(id);
+      if (nextHash) {
+        slotHashCache.set(id, nextHash);
+      } else if (meta === null) {
+        slotHashCache.delete(id);
+      }
+
+      const transition = meta && meta.transition ? meta.transition : null;
+      const shouldAnimate =
+        !prefersReducedMotion &&
+        transition &&
+        transition.type &&
+        transition.type !== "none" &&
+        transition.type !== "appear" &&
+        prevHash &&
+        nextHash &&
+        prevHash !== nextHash;
+
+      if (!shouldAnimate) {
+        finalizeSlotPatch(id, slot, inner, html, win);
+        return;
+      }
+
+      const durationMs = Math.max(0, Number(transition.durationMs) || 0);
+
+      if (transition.type === "flash") {
+        finalizeSlotPatch(id, slot, inner, html, win);
+        inner.classList.add("flux-transition", "flux-transition--flash");
+        inner.style.setProperty("--flux-dur", durationMs + "ms");
+        inner.style.setProperty("--flux-ease", resolveEase(transition.ease));
+        const flashLayer = document.createElement("span");
+        flashLayer.className = "flux-layer flux-layer--flash";
+        inner.appendChild(flashLayer);
+        inner.getBoundingClientRect();
+        inner.classList.add("is-active");
+        const timer = setTimeout(() => {
+          clearSlotTransition(id, inner);
+          if (flashLayer.parentNode) {
+            flashLayer.parentNode.removeChild(flashLayer);
+          }
+        }, durationMs + 60);
+        slotTransitionTimers.set(id, timer);
+        return;
+      }
+
+      const previousHtml = slotHtmlCache.get(id);
+      const oldHtml = typeof previousHtml === "string" ? previousHtml : inner.innerHTML;
+      const sizerHtml = oldHtml || html || "";
+      const layerTag = slot.getAttribute("data-flux-inline") === "true" ? "span" : "div";
+
+      inner.innerHTML = "";
+      const sizerLayer = document.createElement(layerTag);
+      sizerLayer.className = "flux-layer flux-layer--sizer";
+      sizerLayer.setAttribute("aria-hidden", "true");
+      sizerLayer.innerHTML = sizerHtml;
+      const oldLayer = document.createElement(layerTag);
+      oldLayer.className = "flux-layer flux-layer--old";
+      oldLayer.innerHTML = oldHtml || "";
+      const newLayer = document.createElement(layerTag);
+      newLayer.className = "flux-layer flux-layer--new";
+      newLayer.innerHTML = html || "";
+      inner.appendChild(sizerLayer);
+      inner.appendChild(oldLayer);
+      inner.appendChild(newLayer);
+
       applyAssets(inner);
-      requestAnimationFrame(() => applyFit(slot, win));
+
+      inner.classList.add("flux-transition", "flux-transition--" + transition.type);
+      inner.style.setProperty("--flux-dur", durationMs + "ms");
+      inner.style.setProperty("--flux-ease", resolveEase(transition.ease));
+      if (transition.type === "wipe") {
+        inner.setAttribute("data-flux-wipe", transition.direction || "left");
+      }
+
+      inner.getBoundingClientRect();
+      inner.classList.add("is-active");
+
+      const timer = setTimeout(() => {
+        finalizeSlotPatch(id, slot, inner, html, win);
+      }, durationMs + 60);
+      slotTransitionTimers.set(id, timer);
     });
   };
 
@@ -1239,7 +1393,7 @@ export function getViewerJs() {
     }
     updateStatus(payload);
     if (payload.slotPatches) {
-      applySlotPatches(payload.slotPatches);
+      applySlotPatches(payload.slotPatches, payload.slotMeta);
     }
   };
 
@@ -1265,6 +1419,20 @@ export function getViewerJs() {
         ? irPayload.ir.meta.title
         : null;
     updateDocIdentity(config.docPath, metaTitle);
+    slotHashCache.clear();
+    slotHtmlCache.clear();
+    if (irPayload && irPayload.ir && irPayload.ir.slotMeta) {
+      Object.entries(irPayload.ir.slotMeta).forEach(([id, meta]) => {
+        if (meta && meta.valueHash) {
+          slotHashCache.set(id, meta.valueHash);
+        }
+      });
+    }
+    if (irPayload && irPayload.slots) {
+      Object.entries(irPayload.slots).forEach(([id, html]) => {
+        slotHtmlCache.set(id, html || "");
+      });
+    }
 
     docRoot.innerHTML = render.html;
     const root = getPreviewDocument();
@@ -2128,6 +2296,9 @@ function printDocumentNode(node, indent) {
     if (node.refresh) {
         lines.push(`${innerIndent}refresh = ${printRefreshPolicy(node.refresh)};`);
     }
+    if (node.transition) {
+        lines.push(`${innerIndent}transition = ${printTransitionSpec(node.transition)};`);
+    }
     const props = node.props ?? {};
     const keys = orderPropKeys(Object.keys(props));
     for (const key of keys) {
@@ -2230,15 +2401,85 @@ function printCallArgs(args) {
     })
         .join(", ");
 }
-function printRefreshPolicy(policy) {
-    if (policy.kind === "every") {
-        return `every(${policy.amount}${policy.unit})`;
+function formatDurationSeconds(seconds) {
+    if (!Number.isFinite(seconds))
+        return "0s";
+    if (seconds === 0)
+        return "0s";
+    if (seconds < 1) {
+        return `${Math.round(seconds * 1000)}ms`;
     }
-    if (policy.kind === "onDocstep")
-        return "onDocstep";
-    if (policy.kind === "never")
-        return "never";
-    return "onLoad";
+    if (Number.isInteger(seconds))
+        return `${seconds}s`;
+    return `${Number(seconds.toFixed(3))}s`;
+}
+function formatDurationMs(ms) {
+    if (!Number.isFinite(ms))
+        return "0ms";
+    if (ms >= 1000 && ms % 1000 === 0) {
+        return `${ms / 1000}s`;
+    }
+    return `${Math.round(ms)}ms`;
+}
+function printRefreshPolicy(policy) {
+    switch (policy.kind) {
+        case "never":
+            return "never";
+        case "docstep":
+            return "docstep";
+        case "every": {
+            const phase = policy.phaseSec ? `, phase=${formatDurationSeconds(policy.phaseSec)}` : "";
+            return `every(${formatDurationSeconds(policy.intervalSec)}${phase})`;
+        }
+        case "at":
+            return `at(${formatDurationSeconds(policy.timeSec)})`;
+        case "atEach":
+            return `atEach([${(policy.timesSec ?? []).map(formatDurationSeconds).join(", ")}])`;
+        case "poisson":
+            return `poisson(ratePerSec=${policy.ratePerSec})`;
+        case "chance": {
+            const every = policy.every.kind === "docstep"
+                ? '"docstep"'
+                : `"${formatDurationSeconds(policy.every.intervalSec)}"`;
+            return `chance(p=${policy.p}, every=${every})`;
+        }
+        default:
+            return "never";
+    }
+}
+function printTransitionSpec(spec) {
+    switch (spec.kind) {
+        case "none":
+            return "none";
+        case "appear":
+            return "appear()";
+        case "fade": {
+            const args = [];
+            if (spec.durationMs != null)
+                args.push(`duration=${formatDurationMs(spec.durationMs)}`);
+            if (spec.ease)
+                args.push(`ease="${spec.ease}"`);
+            return `fade(${args.join(", ")})`;
+        }
+        case "wipe": {
+            const args = [];
+            if (spec.direction)
+                args.push(`direction="${spec.direction}"`);
+            if (spec.durationMs != null)
+                args.push(`duration=${formatDurationMs(spec.durationMs)}`);
+            if (spec.ease)
+                args.push(`ease="${spec.ease}"`);
+            return `wipe(${args.join(", ")})`;
+        }
+        case "flash": {
+            const args = [];
+            if (spec.durationMs != null)
+                args.push(`duration=${formatDurationMs(spec.durationMs)}`);
+            return `flash(${args.join(", ")})`;
+        }
+        default:
+            return "none";
+    }
 }
 function getLineIndent(source, line) {
     const lines = source.split("\n");
