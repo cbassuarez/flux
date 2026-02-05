@@ -7,4 +7,5 @@ export interface CliUiOptions {
     version?: string;
 }
 export declare function runCliUi(options: CliUiOptions): Promise<void>;
+export * from "./state/dashboard-machine.js";
 //# sourceMappingURL=index.d.ts.map

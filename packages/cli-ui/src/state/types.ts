@@ -11,13 +11,15 @@ export interface ViewerStatus {
   seed: number;
 }
 
-export type TemplateName = "demo" | "article" | "spec" | "zine" | "paper";
+export type TemplateName = "demo" | "article" | "spec" | "zine" | "paper" | "blank";
 export type PageSizeOption = "Letter" | "A4";
 export type ThemeOption = "print" | "screen" | "both";
 export type FontsPreset = "tech" | "bookish";
 export type FontFallback = "system" | "none";
 
 export interface WizardValues {
+  title: string;
+  name: string;
   template: TemplateName;
   page: PageSizeOption;
   theme: ThemeOption;
@@ -29,14 +31,33 @@ export interface WizardValues {
   live: boolean;
 }
 
-export type WizardIndexMap = Record<keyof WizardValues, number>;
+export type WizardSelectKey =
+  | "template"
+  | "page"
+  | "theme"
+  | "fonts"
+  | "fontFallback"
+  | "assets"
+  | "chaptersEnabled"
+  | "chapters"
+  | "live";
+
+export type WizardInputKey = "title" | "name";
+
+export type WizardIndexMap = Record<WizardSelectKey, number>;
 
 export type WizardStep =
   | {
       kind: "select";
-      key: keyof WizardValues;
+      key: WizardSelectKey;
       label: string;
       options: { label: string; value: any; hint?: string }[];
+    }
+  | {
+      kind: "input";
+      key: WizardInputKey;
+      label: string;
+      placeholder?: string;
     }
   | {
       kind: "summary";

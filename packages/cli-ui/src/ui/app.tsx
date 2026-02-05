@@ -1,20 +1,24 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import path from "node:path";
 import fs from "node:fs/promises";
 import {
   getRecentsStore,
   updateRecents,
+  getPinnedDirsStore,
+  addPinnedDir,
+  removePinnedDir,
+  getLastUsedDirStore,
+  setLastUsedDir,
+  indexFiles,
+  walkFilesFromFs,
   resolveConfig,
-  configCommand,
   viewCommand,
   pdfCommand,
   checkCommand,
   formatCommand,
   addCommand,
   newCommand,
-  updateViewerTicker,
-  updateViewerRuntime,
   fetchViewerPatch,
   fetchViewerStatus,
   requestViewerPdf,
@@ -24,19 +28,23 @@ import { AppFrame } from "../components/AppFrame.js";
 import { NavList } from "../components/NavList.js";
 import { CommandPaletteModal } from "../components/CommandPaletteModal.js";
 import { ToastHost } from "../components/ToastHost.js";
-import { PromptModal } from "../components/PromptModal.js";
 import { Card } from "../components/Card.js";
 import { HelpOverlay } from "../components/HelpOverlay.js";
-import { DashboardScreen } from "../screens/DashboardScreen.js";
+import { Clickable } from "../components/Clickable.js";
 import { NewWizardScreen } from "../screens/NewWizardScreen.js";
-import { ViewerControlScreen } from "../screens/ViewerControlScreen.js";
+import { OpenScreen } from "../screens/OpenScreen.js";
+import { DocDetailsScreen } from "../screens/DocDetailsScreen.js";
+import { ExportScreen } from "../screens/ExportScreen.js";
+import { DoctorScreen } from "../screens/DoctorScreen.js";
+import { FormatScreen } from "../screens/FormatScreen.js";
+import { EditPlaceholderScreen } from "../screens/EditPlaceholderScreen.js";
 import { SettingsScreen } from "../screens/SettingsScreen.js";
-import { AddWizardScreen } from "../screens/AddWizardScreen.js";
 import { MouseProvider } from "../state/mouse.js";
 import { useToasts } from "../state/toasts.js";
 import { useProgress } from "../state/progress.js";
+import { resolveActionRoute, resolveRouteAfterOpen } from "../state/dashboard-machine.js";
 import { buildPaletteItems, filterPaletteItems, groupPaletteItems } from "../palette/index.js";
-import { accent, color } from "../theme/index.js";
+import { accent, color, truncateMiddle } from "../theme/index.js";
 import type {
   FontsPreset,
   FontFallback,
@@ -46,9 +54,11 @@ import type {
   ThemeOption,
   ViewerStatus,
   WizardIndexMap,
+  WizardSelectKey,
   WizardStep,
   WizardValues,
 } from "../state/types.js";
+import { PaneFrame } from "../components/PaneFrame.js";
 
 interface AppProps {
   cwd: string;
@@ -65,6 +75,7 @@ const TEMPLATE_OPTIONS: { label: string; value: TemplateName; hint: string }[] =
   { label: "Spec", value: "spec", hint: "Technical spec layout" },
   { label: "Zine", value: "zine", hint: "Visual zine layout" },
   { label: "Paper", value: "paper", hint: "Academic paper with abstract" },
+  { label: "Blank", value: "blank", hint: "Minimal empty layout" },
 ];
 
 const PAGE_OPTIONS: { label: string; value: PageSizeOption }[] = [
@@ -103,15 +114,41 @@ const CHAPTER_OPTIONS: { label: string; value: number }[] = [
 ];
 
 const BACKEND_LABEL = "typesetter";
+const FILE_INDEX_CAP = 20000;
+const FILE_INDEX_DEPTH = 7;
+const SEARCH_DEBOUNCE_MS = 200;
 
 export function App(props: AppProps) {
   const { exit } = useApp();
   const [recents, setRecents] = useState<NavItem[]>([]);
   const [recentsPath, setRecentsPath] = useState<string | undefined>(undefined);
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [activeDoc, setActiveDoc] = useState<string | null>(null);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [logsOpen, setLogsOpen] = useState(false);
+  const [currentDoc, setCurrentDoc] = useState<string | null>(null);
+  const [pinnedDirs, setPinnedDirs] = useState<string[]>([]);
+  const [lastUsedDir, setLastUsedDirState] = useState<string | null>(null);
+  const [navIndex, setNavIndex] = useState(1);
+  const [focus, setFocus] = useState<"nav" | "pane">("pane");
+  const [route, setRoute] = useState<"open" | "doc" | "new" | "export" | "doctor" | "format" | "edit" | "settings" | "add">(
+    props.mode === "new" ? "new" : "open",
+  );
+  const [pendingAction, setPendingAction] = useState<null | "edit" | "export" | "doctor" | "format">(null);
+  const [openQuery, setOpenQuery] = useState("");
+  const [openDebouncedQuery, setOpenDebouncedQuery] = useState("");
+  const [openShowAll, setOpenShowAll] = useState(false);
+  const [openRoot, setOpenRoot] = useState(props.cwd);
+  const [openRootInitialized, setOpenRootInitialized] = useState(false);
+  const [openFiles, setOpenFiles] = useState<string[]>([]);
+  const [openIndexing, setOpenIndexing] = useState(false);
+  const [openTruncated, setOpenTruncated] = useState(false);
+  const [openSelectedIndex, setOpenSelectedIndex] = useState(0);
+  const [openFolders, setOpenFolders] = useState<string[]>([]);
+  const [openFolderIndex, setOpenFolderIndex] = useState(0);
+  const [openPreview, setOpenPreview] = useState<null | {
+    title?: string | null;
+    filePath: string;
+    modified?: string;
+    size?: string;
+    status?: string | null;
+  }>(null);
   const { toasts, push: pushToast } = useToasts();
   const { progress, start: startProgress, stop: stopProgress } = useProgress();
   const [busy, setBusy] = useState<string | null>(null);
@@ -120,9 +157,12 @@ export function App(props: AppProps) {
   const [paletteIndex, setPaletteIndex] = useState(0);
   const [helpOpen, setHelpOpen] = useState(Boolean(props.helpCommand));
   const [versionOpen, setVersionOpen] = useState(Boolean(props.version));
-  const [wizardOpen, setWizardOpen] = useState(props.mode === "new");
   const [wizardStep, setWizardStep] = useState(0);
+  const initialTitle = titleFromTemplate("demo");
+  const initialName = slugify(initialTitle);
   const [wizardValues, setWizardValues] = useState<WizardValues>({
+    title: initialTitle,
+    name: initialName,
     template: "demo",
     page: "Letter",
     theme: "screen",
@@ -145,46 +185,56 @@ export function App(props: AppProps) {
     live: 0,
   });
   const [wizardCreated, setWizardCreated] = useState<null | { docPath: string; dir: string; files: string[] }>(null);
-  const [wizardOpenChoice, setWizardOpenChoice] = useState(0);
+  const [wizardPostCreate, setWizardPostCreate] = useState({ openViewer: true, setCurrent: true, selectedIndex: 0 });
   const [wizardLiveTouched, setWizardLiveTouched] = useState(false);
-  const [wizardOutDir, setWizardOutDir] = useState<string | undefined>(undefined);
+  const [wizardOutDir, setWizardOutDir] = useState<string | undefined>(props.cwd);
   const [wizardDefaultsApplied, setWizardDefaultsApplied] = useState(false);
   const [initialRouteHandled, setInitialRouteHandled] = useState(false);
   const [viewerSession, setViewerSession] = useState<ViewerSession | null>(null);
   const [viewerStatus, setViewerStatus] = useState<ViewerStatus | null>(null);
   const [streamOk, setStreamOk] = useState(false);
-  const [prompt, setPrompt] = useState<null | { label: string; onSubmit: (value: string) => Promise<void> }>(null);
-  const [promptValue, setPromptValue] = useState("");
   const [config, setConfig] = useState<any>(null);
   const [fluxFiles, setFluxFiles] = useState<string[]>([]);
   const [cols, setCols] = useState(() => process.stdout.columns ?? 80);
   const [rows, setRows] = useState(() => process.stdout.rows ?? 24);
   const [debugLayout, setDebugLayout] = useState(false);
+  const [doctorSummary, setDoctorSummary] = useState("Run Doctor to check this document.");
+  const [doctorLogs, setDoctorLogs] = useState<string[]>([]);
+  const [doctorLogsOpen, setDoctorLogsOpen] = useState(false);
+  const [formatSummary, setFormatSummary] = useState("Run Format to clean up this document.");
+  const [formatLogs, setFormatLogs] = useState<string[]>([]);
+  const [formatLogsOpen, setFormatLogsOpen] = useState(false);
+  const [exportResultPath, setExportResultPath] = useState<string | null>(null);
+  const [exportActionIndex, setExportActionIndex] = useState(0);
+  const [docActionIndex, setDocActionIndex] = useState(0);
+  const [wizardNameTouched, setWizardNameTouched] = useState(false);
+  const [docPreview, setDocPreview] = useState<null | {
+    title?: string | null;
+    filePath: string;
+    modified?: string;
+    size?: string;
+  }>(null);
+  const openScanController = useRef<AbortController | null>(null);
+  const openScanId = useRef(0);
+  const openPreviewRequestId = useRef(0);
+  const docPreviewRequestId = useRef(0);
 
-  const navItems = useMemo<NavItem[]>(() => {
-    const items: NavItem[] = [];
-    items.push({ type: "section", label: "Recents" });
-    items.push(...recents);
-    items.push({ type: "section", label: "Primary" });
-    items.push({ type: "action", id: "new", label: "New" });
-    items.push({ type: "action", id: "open", label: "Open" });
-    items.push({ type: "action", id: "view", label: "View" });
-    items.push({ type: "action", id: "export", label: "Export PDF" });
-    items.push({ type: "section", label: "Secondary" });
-    items.push({ type: "action", id: "check", label: "Check" });
-    items.push({ type: "action", id: "format", label: "Format" });
-    items.push({ type: "action", id: "add", label: "Add…" });
-    items.push({ type: "action", id: "settings", label: "Settings" });
-    return items;
-  }, [recents]);
-
-  const selectedItem = navItems[selectedIndex];
+  const navItems = useMemo<NavItem[]>(() => ([
+    { type: "section", label: "File" },
+    { type: "action", id: "open", label: "Open" },
+    { type: "action", id: "new", label: "New" },
+    { type: "section", label: "Actions" },
+    { type: "action", id: "edit", label: "Edit" },
+    { type: "action", id: "export", label: "Export PDF" },
+    { type: "action", id: "doctor", label: "Doctor" },
+    { type: "action", id: "format", label: "Format" },
+  ]), []);
 
   const paletteItems = useMemo(() => buildPaletteItems({
     recents: recents.filter((item) => item.type === "doc") as { path: string }[],
     fluxFiles,
-    activeDoc,
-  }), [recents, fluxFiles, activeDoc]);
+    activeDoc: currentDoc,
+  }), [recents, fluxFiles, currentDoc]);
 
   const filteredPalette = useMemo(() => filterPaletteItems(paletteItems, paletteQuery), [paletteItems, paletteQuery]);
   const limitedPalette = useMemo(() => filteredPalette.slice(0, 12), [filteredPalette]);
@@ -193,15 +243,12 @@ export function App(props: AppProps) {
   const innerWidth = Math.max(20, cols - 4);
   const overlayWidth = Math.max(28, Math.min(72, innerWidth - 4));
   const navWidth = Math.min(32, Math.max(20, Math.floor(innerWidth * 0.34)));
-  const detailWidth = Math.max(20, innerWidth - navWidth - 2);
-  const navListHeight = Math.max(8, rows - 12);
+  const paneWidth = Math.max(20, innerWidth - navWidth - 2);
+  const navContentWidth = Math.max(12, navWidth - 4);
+  const paneContentWidth = Math.max(20, paneWidth - 4);
+  const navListHeight = Math.max(8, rows - 14);
 
-  const mouseDisabled = paletteOpen || helpOpen || versionOpen || Boolean(prompt);
-
-  const openPrompt = useCallback((label: string, onSubmit: (value: string) => Promise<void>) => {
-    setPromptValue("");
-    setPrompt({ label, onSubmit });
-  }, []);
+  const mouseDisabled = paletteOpen || helpOpen || versionOpen;
 
   useEffect(() => {
     const stdout = process.stdout;
@@ -218,9 +265,12 @@ export function App(props: AppProps) {
 
   useEffect(() => {
     void refreshRecents();
+    void refreshPinnedDirs();
+    void refreshLastUsedDir();
     void refreshConfig();
     void loadFluxFiles();
     setWizardDefaultsApplied(false);
+    setOpenRootInitialized(false);
   }, [props.cwd]);
 
   useEffect(() => {
@@ -245,6 +295,120 @@ export function App(props: AppProps) {
     }
     void handleInitialRoute(initialArgs).finally(() => setInitialRouteHandled(true));
   }, [config, helpOpen, versionOpen, initialRouteHandled, props.initialArgs, props.mode]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setOpenDebouncedQuery(openQuery), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [openQuery]);
+
+  useEffect(() => {
+    if (!openRootInitialized) return;
+    void setLastUsedDir(props.cwd, openRoot).then((store) => setLastUsedDirState(store.dir ?? null)).catch(() => null);
+  }, [openRoot, openRootInitialized, props.cwd]);
+
+  useEffect(() => {
+    if (!openRootInitialized) return;
+    openScanController.current?.abort();
+    const controller = new AbortController();
+    openScanController.current = controller;
+    const scanId = ++openScanId.current;
+    setOpenIndexing(true);
+    setOpenTruncated(false);
+    setOpenFiles([]);
+
+    const walker = walkFilesFromFs({
+      root: openRoot,
+      maxDepth: FILE_INDEX_DEPTH,
+      signal: controller.signal,
+      shouldEnterDir: (dirPath, dirent) => {
+        if (dirent.name === "node_modules") return false;
+        if (dirent.name.startsWith(".")) return false;
+        return true;
+      },
+    });
+
+    void (async () => {
+      for await (const event of indexFiles({
+        walker,
+        maxFiles: FILE_INDEX_CAP,
+        signal: controller.signal,
+      })) {
+        if (openScanId.current !== scanId) return;
+        if (event.type === "file") {
+          setOpenFiles((prev) => (prev.length >= FILE_INDEX_CAP ? prev : [...prev, event.path]));
+        } else if (event.type === "done") {
+          setOpenIndexing(false);
+          setOpenTruncated(event.truncated);
+        }
+      }
+    })();
+
+    void loadOpenFolders(openRoot);
+    setOpenSelectedIndex(0);
+    setOpenFolderIndex(0);
+
+    return () => controller.abort();
+  }, [openRoot, openRootInitialized]);
+
+  const openResults = useMemo(() => {
+    const query = openDebouncedQuery.trim().toLowerCase();
+    return openFiles.filter((file) => {
+      if (!openShowAll && !file.toLowerCase().endsWith(".flux")) return false;
+      if (!query) return true;
+      const name = path.basename(file).toLowerCase();
+      const full = file.toLowerCase();
+      return name.includes(query) || full.includes(query);
+    });
+  }, [openFiles, openDebouncedQuery, openShowAll]);
+
+  useEffect(() => {
+    setOpenSelectedIndex((prev) => Math.max(0, Math.min(prev, Math.max(0, openResults.length - 1))));
+  }, [openResults.length]);
+
+  useEffect(() => {
+    setOpenFolderIndex((prev) => Math.max(0, Math.min(prev, Math.max(0, openFolders.length - 1))));
+  }, [openFolders.length]);
+
+  useEffect(() => {
+    const selected = openResults[openSelectedIndex];
+    if (!selected) {
+      setOpenPreview(null);
+      return;
+    }
+    const requestId = ++openPreviewRequestId.current;
+    void buildPreview(selected).then((preview) => {
+      if (openPreviewRequestId.current === requestId) {
+        setOpenPreview(preview);
+      }
+    });
+  }, [openResults, openSelectedIndex]);
+
+  useEffect(() => {
+    if (!currentDoc) {
+      setDocPreview(null);
+      return;
+    }
+    const requestId = ++docPreviewRequestId.current;
+    void buildPreview(currentDoc).then((preview) => {
+      if (docPreviewRequestId.current === requestId) {
+        setDocPreview(preview ? {
+          title: preview.title,
+          filePath: preview.filePath,
+          modified: preview.modified,
+          size: preview.size,
+        } : null);
+      }
+    });
+  }, [currentDoc]);
+
+  useEffect(() => {
+    if (route === "doc") {
+      setDocActionIndex(0);
+    }
+    if (route === "export") {
+      setExportActionIndex(exportResultPath ? 1 : 0);
+    }
+  }, [route, exportResultPath]);
 
   useEffect(() => {
     if (!viewerSession) return;
@@ -292,13 +456,13 @@ export function App(props: AppProps) {
   }, [limitedPalette.length]);
 
   useEffect(() => {
-    if (selectedIndex >= navItems.length) {
-      setSelectedIndex(Math.max(0, navItems.length - 1));
+    if (navIndex >= navItems.length) {
+      setNavIndex(Math.max(0, navItems.length - 1));
     }
-    if (navItems[selectedIndex]?.type === "section") {
+    if (navItems[navIndex]?.type === "section") {
       moveSelection(1);
     }
-  }, [navItems, selectedIndex]);
+  }, [navItems, navIndex]);
 
   useInput(async (input, key) => {
     if (key.ctrl && input === "c") {
@@ -310,45 +474,18 @@ export function App(props: AppProps) {
       return;
     }
 
-    if (input?.toLowerCase() === "q" && !paletteOpen && !helpOpen && !versionOpen && !prompt) {
+    if (input?.toLowerCase() === "q" && !paletteOpen && !helpOpen && !versionOpen) {
       exit();
       return;
     }
 
     if (versionOpen) {
-      if (key.escape || key.return) {
-        setVersionOpen(false);
-      }
+      if (key.escape || key.return) setVersionOpen(false);
       return;
     }
 
     if (helpOpen) {
-      if (key.escape || key.return) {
-        setHelpOpen(false);
-      }
-      return;
-    }
-
-    if (prompt) {
-      if (key.escape) {
-        setPrompt(null);
-        setPromptValue("");
-        return;
-      }
-      if (key.return) {
-        const value = promptValue;
-        setPrompt(null);
-        setPromptValue("");
-        await prompt.onSubmit(value);
-        return;
-      }
-      if (key.backspace || key.delete) {
-        setPromptValue((prev) => prev.slice(0, -1));
-        return;
-      }
-      if (input) {
-        setPromptValue((prev) => prev + input);
-      }
+      if (key.escape || key.return) setHelpOpen(false);
       return;
     }
 
@@ -405,167 +542,53 @@ export function App(props: AppProps) {
       return;
     }
 
-    if (wizardOpen) {
-      if (key.escape) {
-        setWizardOpen(false);
-        setWizardCreated(null);
-        return;
-      }
-      if (wizardCreated) {
-        if (key.downArrow || key.upArrow) {
-          setWizardOpenChoice((prev) => (prev === 0 ? 1 : 0));
-          return;
-        }
-        if (key.return) {
-          const openNow = wizardOpenChoice === 0;
-          const docPath = wizardCreated.docPath;
-          setWizardOpen(false);
-          setWizardCreated(null);
-          if (openNow) {
-            await handleView(docPath);
-          }
-          return;
-        }
-        return;
-      }
-      if (key.backspace || key.leftArrow) {
-        setWizardStep((prev) => Math.max(0, prev - 1));
-        return;
-      }
-      if (key.return) {
-        await advanceWizard();
-        return;
-      }
-      if (key.downArrow) {
-        updateWizardChoice(1);
-        return;
-      }
-      if (key.upArrow) {
-        updateWizardChoice(-1);
-        return;
-      }
+    if (key.tab) {
+      setFocus((prev) => (prev === "nav" ? "pane" : "nav"));
       return;
     }
 
-    if (viewerSession) {
-      if (input?.toLowerCase() === "p") {
-        await toggleViewer();
-        return;
-      }
-      if (input?.toLowerCase() === "i") {
-        openPrompt("Set interval (ms)", async (value) => {
-          const next = Number(value);
-          if (!Number.isFinite(next)) {
-            showToast("Invalid interval", "error");
-            return;
-          }
-          await updateViewerTicker(viewerSession.url, { docstepMs: next });
-          setViewerStatus((prev) => prev ? { ...prev, docstepMs: next } : prev);
-          showToast("Interval updated", "success");
-        });
-        return;
-      }
-      if (input?.toLowerCase() === "s") {
-        openPrompt("Set seed", async (value) => {
-          const next = Number(value);
-          if (!Number.isFinite(next)) {
-            showToast("Invalid seed", "error");
-            return;
-          }
-          await updateViewerRuntime(viewerSession.url, { seed: next });
-          setViewerStatus((prev) => prev ? { ...prev, seed: next } : prev);
-          showToast("Seed updated", "success");
-        });
-        return;
-      }
-      if (input?.toLowerCase() === "j") {
-        openPrompt("Jump docstep", async (value) => {
-          const next = Number(value);
-          if (!Number.isFinite(next)) {
-            showToast("Invalid docstep", "error");
-            return;
-          }
-          await updateViewerRuntime(viewerSession.url, { docstep: next });
-          setViewerStatus((prev) => prev ? { ...prev, docstep: next } : prev);
-          showToast("Docstep updated", "success");
-        });
-        return;
-      }
-      if (input?.toLowerCase() === "e") {
-        await handleExport();
-        return;
-      }
-    }
-
-    if (selectedItem?.type === "action" && selectedItem.id === "settings") {
-      if (input?.toLowerCase() === "i") {
-        await initConfig();
-        return;
-      }
-      if (input?.toLowerCase() === "t") {
-        setDebugLayout((prev) => !prev);
-        return;
-      }
-      if (input?.toLowerCase() === "d") {
-        openPrompt("Set docstepMs", async (value) => {
-          const next = Number(value);
-          if (!Number.isFinite(next)) {
-            showToast("Invalid number", "error");
-            return;
-          }
-          await configCommand({
-            cwd: props.cwd,
-            action: "set",
-            key: "docstepMs",
-            value: next,
-            init: true,
-            env: process.env,
-          });
-          await refreshConfig();
-          showToast("Config updated", "success");
-        });
-        return;
-      }
-    }
-
-    if (activeDoc) {
-      if (input?.toLowerCase() === "o") {
-        revealInFinder(activeDoc);
-        showToast("Opened in file explorer", "success");
-        return;
-      }
-      if (input?.toLowerCase() === "y") {
-        const ok = await copyToClipboard(activeDoc);
-        showToast(ok ? "Copied path" : "Copy failed", ok ? "success" : "error");
-        return;
-      }
-      if (input?.toLowerCase() === "l") {
-        setLogsOpen((prev) => !prev);
-        return;
-      }
-    }
-
-    if (key.downArrow) {
-      moveSelection(1);
+    if (key.escape) {
+      resetToDefault();
       return;
     }
-    if (key.upArrow) {
-      moveSelection(-1);
+
+    if (route === "new") {
+      await handleWizardInput(input, key);
       return;
     }
-    if (key.return) {
-      if (logs.length > 0 && selectedItem?.type === "doc") {
-        setLogsOpen((prev) => !prev);
-        return;
-      }
-      const item = navItems[selectedIndex];
-      if (item) await activateNavItem(item);
+
+    if (focus === "nav") {
+      await handleNavInput(input, key);
+      return;
+    }
+
+    if (route === "open") {
+      await handleOpenInput(input, key);
+      return;
+    }
+    if (route === "doc") {
+      await handleDocInput(input, key);
+      return;
+    }
+    if (route === "export") {
+      await handleExportInput(input, key);
+      return;
+    }
+    if (route === "doctor") {
+      await handleDoctorInput(input, key);
+      return;
+    }
+    if (route === "format") {
+      await handleFormatInput(input, key);
+      return;
     }
   });
 
   const wizardSteps = useMemo<WizardStep[]>(() => {
     const steps: WizardStep[] = [
       { kind: "select", key: "template", label: "Template", options: TEMPLATE_OPTIONS },
+      { kind: "input", key: "title", label: "Title", placeholder: "Flux Document" },
+      { kind: "input", key: "name", label: "Name", placeholder: "folder-name" },
       { kind: "select", key: "page", label: "Page size", options: PAGE_OPTIONS },
       { kind: "select", key: "theme", label: "Theme", options: THEME_OPTIONS },
       { kind: "select", key: "fonts", label: "Fonts preset", options: FONT_OPTIONS },
@@ -585,39 +608,206 @@ export function App(props: AppProps) {
     setWizardStep((prev) => Math.max(0, Math.min(prev, wizardSteps.length - 1)));
   }, [wizardSteps.length]);
 
-  const actionItems = useMemo(() => {
-    const selectedActionId = selectedItem?.type === "action" ? selectedItem.id : undefined;
-    return [
-      { id: "view", label: "View", icon: "◻︎", onClick: () => void handleView(), active: selectedActionId === "view" },
-      { id: "export", label: "Export PDF", icon: "⇩", onClick: () => void handleExport(), active: selectedActionId === "export" },
-      { id: "check", label: "Check", icon: "✓", onClick: () => void handleCheck(), active: selectedActionId === "check" },
-      { id: "format", label: "Format", icon: "≡", onClick: () => void handleFormat(), active: selectedActionId === "format" },
-    ];
-  }, [selectedItem, activeDoc, config, viewerSession]);
+  const openResultItems = useMemo(() => openResults.map((file) => ({
+    id: file,
+    label: path.basename(file),
+    meta: truncateMiddle(path.dirname(file), Math.max(10, Math.floor(paneContentWidth * 0.6))),
+    path: file,
+  })), [openResults, paneContentWidth]);
+
+  const openActiveList = openResults.length > 0 ? "results" : "folders";
+  const recentDirs = useMemo(() => {
+    const dirs = recents
+      .filter((item): item is Extract<NavItem, { type: "doc" }> => item.type === "doc")
+      .map((item) => path.dirname(item.path));
+    const unique: string[] = [];
+    for (const dir of dirs) {
+      if (!unique.includes(dir)) unique.push(dir);
+    }
+    return unique.slice(0, 5);
+  }, [recents]);
+  const isPinned = pinnedDirs.some((dir) => path.resolve(dir) === path.resolve(openRoot));
+
+  const docPrimaryActions = useMemo(() => ([
+    { id: "edit", label: "Edit", icon: "✎", onClick: () => void goToEdit(), active: docActionIndex === 0 },
+    { id: "view", label: "View", icon: "◻︎", onClick: () => void handleView(), active: docActionIndex === 1 },
+    { id: "export", label: "Export PDF", icon: "⇩", onClick: () => void goToExport(), active: docActionIndex === 2 },
+  ]), [docActionIndex]);
+
+  const docSecondaryActions = useMemo(() => ([
+    { id: "doctor", label: "Doctor", icon: "✓", onClick: () => void goToDoctor(), active: docActionIndex === 3 },
+    { id: "format", label: "Format", icon: "≡", onClick: () => void goToFormat(), active: docActionIndex === 4 },
+  ]), [docActionIndex]);
 
   const rightPane = (() => {
-    if (wizardOpen) {
+    if (route === "new") {
       const step = wizardSteps[wizardStep] ?? null;
       return (
         <NewWizardScreen
-          width={detailWidth}
+          width={paneContentWidth}
           step={step}
           stepIndex={wizardStep}
           stepsCount={wizardSteps.length}
           values={wizardValues}
-          selectedIndex={step?.kind === "select" ? wizardIndexes[step.key] ?? 0 : 0}
+          selectedIndex={step?.kind === "select" ? wizardIndexes[step.key as WizardSelectKey] ?? 0 : 0}
           created={wizardCreated}
-          openChoice={wizardOpenChoice}
+          postCreate={wizardPostCreate}
           outputDir={resolveWizardOutDir() ?? props.cwd}
           debug={debugLayout}
         />
       );
     }
 
-    if (selectedItem?.type === "action" && selectedItem.id === "settings") {
+    if (route === "open") {
+      return (
+        <OpenScreen
+          width={paneContentWidth}
+          query={openQuery}
+          showAll={openShowAll}
+          rootDir={openRoot}
+          results={openResultItems}
+          selectedIndex={openSelectedIndex}
+          folders={openFolders}
+          folderIndex={openFolderIndex}
+          activeList={openActiveList}
+          pinnedDirs={pinnedDirs}
+          recentDirs={recentDirs}
+          isPinned={isPinned}
+          indexing={openIndexing}
+          truncated={openTruncated}
+          preview={openPreview}
+          onToggleShowAll={() => setOpenShowAll((prev) => !prev)}
+          onOpenSelected={() => {
+            setFocus("pane");
+            void openSelectedFile();
+          }}
+          onSelectResult={(index) => {
+            setFocus("pane");
+            setOpenSelectedIndex(index);
+          }}
+          onSelectFolder={(index) => {
+            setFocus("pane");
+            setOpenFolderIndex(index);
+            const folder = openFolders[index];
+            if (folder) changeOpenRoot(folder);
+          }}
+          onSelectPinned={(dir) => {
+            setFocus("pane");
+            changeOpenRoot(dir);
+          }}
+          onSelectRecent={(dir) => {
+            setFocus("pane");
+            changeOpenRoot(dir);
+          }}
+          onTogglePin={() => {
+            setFocus("pane");
+            void togglePinForCurrent();
+          }}
+          debug={debugLayout}
+        />
+      );
+    }
+
+    if (route === "doc") {
+      return (
+        <DocDetailsScreen
+          width={paneContentWidth}
+          docPath={currentDoc}
+          preview={docPreview}
+          primaryActions={docPrimaryActions}
+          secondaryActions={docSecondaryActions}
+          debug={debugLayout}
+        />
+      );
+    }
+
+    if (route === "export") {
+      return (
+        <ExportScreen
+          width={paneContentWidth}
+          docPath={currentDoc}
+          outputPath={currentDoc ? currentDoc.replace(/\.flux$/i, ".pdf") : null}
+          progress={progress}
+          resultPath={exportResultPath}
+          actionIndex={exportActionIndex}
+          onExport={() => {
+            setFocus("pane");
+            void handleExport();
+          }}
+          onOpenFile={() => {
+            setFocus("pane");
+            void handleOpenFileResult();
+          }}
+          onReveal={() => {
+            setFocus("pane");
+            void handleRevealResult();
+          }}
+          onCopyPath={() => {
+            setFocus("pane");
+            void handleCopyResultPath();
+          }}
+          debug={debugLayout}
+        />
+      );
+    }
+
+    if (route === "doctor") {
+      return (
+        <DoctorScreen
+          width={paneContentWidth}
+          docPath={currentDoc}
+          summary={doctorSummary}
+          logs={doctorLogs}
+          logsOpen={doctorLogsOpen}
+          progress={progress}
+          onToggleLogs={() => {
+            setFocus("pane");
+            setDoctorLogsOpen((prev) => !prev);
+          }}
+          onRun={() => {
+            setFocus("pane");
+            void handleCheck();
+          }}
+          debug={debugLayout}
+        />
+      );
+    }
+
+    if (route === "format") {
+      return (
+        <FormatScreen
+          width={paneContentWidth}
+          docPath={currentDoc}
+          summary={formatSummary}
+          logs={formatLogs}
+          logsOpen={formatLogsOpen}
+          onToggleLogs={() => {
+            setFocus("pane");
+            setFormatLogsOpen((prev) => !prev);
+          }}
+          onRun={() => {
+            setFocus("pane");
+            void handleFormat();
+          }}
+          debug={debugLayout}
+        />
+      );
+    }
+
+    if (route === "edit") {
+      return (
+        <EditPlaceholderScreen
+          width={paneContentWidth}
+          docPath={currentDoc}
+          debug={debugLayout}
+        />
+      );
+    }
+
+    if (route === "settings") {
       return (
         <SettingsScreen
-          width={detailWidth}
+          width={paneContentWidth}
           config={config}
           debugLayout={debugLayout}
           onToggleDebug={() => setDebugLayout((prev) => !prev)}
@@ -626,47 +816,10 @@ export function App(props: AppProps) {
       );
     }
 
-    if (selectedItem?.type === "action" && selectedItem.id === "add") {
-      return <AddWizardScreen width={detailWidth} debug={debugLayout} />;
-    }
-
-    if (viewerSession) {
-      return (
-        <ViewerControlScreen
-          width={detailWidth}
-          activeDoc={activeDoc}
-          viewerUrl={viewerSession.url}
-          viewerStatus={viewerStatus}
-          streamOk={streamOk}
-          backend={BACKEND_LABEL}
-          debug={debugLayout}
-        />
-      );
-    }
-
     return (
-      <DashboardScreen
-        width={detailWidth}
-        activeDoc={activeDoc}
-        backend={BACKEND_LABEL}
-        viewerStatus={viewerStatus}
-        streamOk={streamOk}
-        logs={logs}
-        logsOpen={logsOpen}
-        onToggleLogs={() => setLogsOpen((prev) => !prev)}
-        actionItems={actionItems}
-        showEmptyState={recents.length === 0 && !activeDoc}
-        onEmptyAction={(action) => {
-          if (action === "new") openWizard();
-          if (action === "open") {
-            openPrompt("Open .flux path", async (value) => {
-              if (!value) return;
-              setActiveDoc(value);
-              await updateRecents(props.cwd, value);
-              showToast("Document selected", "success");
-            });
-          }
-        }}
+      <EditPlaceholderScreen
+        width={paneContentWidth}
+        docPath={currentDoc}
         debug={debugLayout}
       />
     );
@@ -676,38 +829,50 @@ export function App(props: AppProps) {
     <MouseProvider disabled={mouseDisabled}>
       <AppFrame debug={debugLayout}>
         <Box flexDirection="row" gap={2} height="100%">
-          <Box width={navWidth} flexDirection="column" gap={1}>
-            <Box flexDirection="column">
-              <Text>{accent("FLUX")}</Text>
-              <Box flexDirection="row" gap={1}>
-                <Text color={streamOk ? "green" : color.muted}>{streamOk ? "●" : "○"}</Text>
-                <Text color={color.muted}>{`Flux ${props.version ?? "0.x"} · ${streamOk ? "online" : "offline"} · backend: ${BACKEND_LABEL}`}</Text>
-              </Box>
-            </Box>
-
+          <PaneFrame focused={focus === "nav"} width={navWidth} height="100%">
             <Box flexDirection="column" gap={1}>
-              <Card title="Navigation" meta="" accent ruleWidth={navWidth - 6} debug={debugLayout} footer={(
-                <Text color={color.muted}>/ palette · q quit · ? help</Text>
-              )}>
+              <Box flexDirection="column">
+                <Text>{accent("FLUX")}</Text>
+                <Box flexDirection="row" gap={1}>
+                  <Text color={streamOk ? "green" : color.muted}>{streamOk ? "●" : "○"}</Text>
+                  <Text color={color.muted}>{`Flux ${props.version ?? "0.x"} · ${streamOk ? "online" : "offline"} · backend: ${BACKEND_LABEL}`}</Text>
+                </Box>
+              </Box>
+
+              <Card
+                title="Navigation"
+                meta=""
+                accent={focus === "nav"}
+                ruleWidth={navContentWidth - 2}
+                debug={debugLayout}
+                footer={(
+                  <Text color={color.muted}>/ palette · Tab focus · q quit · ? help</Text>
+                )}
+              >
                 <NavList
                   items={navItems}
-                  selectedIndex={selectedIndex}
+                  selectedIndex={navIndex}
                   onSelect={(index) => {
-                    setSelectedIndex(index);
+                    setNavIndex(index);
+                    setFocus("nav");
                     const item = navItems[index];
                     if (item) void activateNavItem(item);
                   }}
-                  width={navWidth - 4}
+                  width={navContentWidth}
                   maxHeight={navListHeight}
                   debug={debugLayout}
                 />
               </Card>
             </Box>
-          </Box>
+          </PaneFrame>
 
-          <Box flexDirection="column" flexGrow={1} gap={1}>
-            {rightPane}
-          </Box>
+          <PaneFrame focused={focus === "pane"} flexGrow={1} height="100%">
+            <Clickable id="pane-focus" onClick={() => setFocus("pane")} priority={0}>
+              <Box flexDirection="column" gap={1}>
+                {rightPane}
+              </Box>
+            </Clickable>
+          </PaneFrame>
         </Box>
 
         <Box marginTop={1}>
@@ -720,17 +885,6 @@ export function App(props: AppProps) {
               query={paletteQuery}
               groups={paletteGroups}
               selectedId={limitedPalette[paletteIndex]?.id}
-              width={overlayWidth}
-              debug={debugLayout}
-            />
-          </Box>
-        ) : null}
-
-        {prompt ? (
-          <Box position="absolute" marginTop={2} marginLeft={Math.max(2, Math.floor((innerWidth - overlayWidth) / 2))}>
-            <PromptModal
-              label={prompt.label}
-              value={promptValue}
               width={overlayWidth}
               debug={debugLayout}
             />
@@ -771,9 +925,19 @@ export function App(props: AppProps) {
     }));
     setRecents(list);
     setRecentsPath(store.storePath);
-    if (!activeDoc && list.length && list[0].type === "doc") {
-      setActiveDoc(list[0].path);
-    }
+  }
+
+  async function refreshPinnedDirs() {
+    const store = await getPinnedDirsStore(props.cwd);
+    setPinnedDirs(store.entries);
+  }
+
+  async function refreshLastUsedDir() {
+    const store = await getLastUsedDirStore(props.cwd);
+    const nextDir = store.dir ?? props.cwd;
+    setLastUsedDirState(store.dir);
+    setOpenRoot(nextDir);
+    setOpenRootInitialized(true);
   }
 
   async function refreshConfig() {
@@ -782,17 +946,23 @@ export function App(props: AppProps) {
   }
 
   async function loadFluxFiles() {
-    const files: string[] = [];
-    await walk(props.cwd, files, 3);
-    setFluxFiles(files.slice(0, 20));
+    try {
+      const entries = await fs.readdir(props.cwd, { withFileTypes: true, encoding: "utf8" });
+      const files = entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".flux"))
+        .map((entry) => path.join(props.cwd, entry.name));
+      setFluxFiles(files.slice(0, 20));
+    } catch {
+      setFluxFiles([]);
+    }
   }
 
   function moveSelection(delta: number) {
-    let next = selectedIndex + delta;
+    let next = navIndex + delta;
     while (next >= 0 && next < navItems.length) {
       const item = navItems[next];
       if (item && item.type !== "section") {
-        setSelectedIndex(next);
+        setNavIndex(next);
         return;
       }
       next += delta;
@@ -800,44 +970,328 @@ export function App(props: AppProps) {
   }
 
   async function activateNavItem(item: NavItem) {
-    if (item.type === "doc") {
-      setActiveDoc(item.path);
+    if (item.type !== "action") return;
+    switch (item.id) {
+      case "open":
+        setPendingAction(null);
+        setRoute("open");
+        setFocus("pane");
+        return;
+      case "new":
+        openWizard();
+        return;
+      case "edit":
+        await requireDocAndRoute("edit");
+        return;
+      case "export":
+        await requireDocAndRoute("export");
+        return;
+      case "doctor":
+        await requireDocAndRoute("doctor");
+        return;
+      case "format":
+        await requireDocAndRoute("format");
+        return;
+      default:
+        return;
+    }
+  }
+
+  function resetToDefault() {
+    setPendingAction(null);
+    setRoute("open");
+    selectNavAction("open");
+    setFocus("pane");
+  }
+
+  async function requireDocAndRoute(action: "edit" | "export" | "doctor" | "format") {
+    const resolved = resolveActionRoute(currentDoc, action);
+    setPendingAction(resolved.pendingAction);
+    if (resolved.route === "open") {
+      setRoute("open");
+      selectNavAction("open");
+      setFocus("pane");
+      showToast("Select a document to continue.", "info");
       return;
     }
-    if (item.type === "action") {
-      switch (item.id) {
-        case "open":
-          openPrompt("Open .flux path", async (value) => {
-            if (!value) return;
-            setActiveDoc(value);
-            await updateRecents(props.cwd, value);
-            showToast("Document selected", "success");
-          });
-          return;
-        case "new":
-          openWizard();
-          return;
-        case "view":
-          await handleView();
-          return;
-        case "export":
-          await handleExport();
-          return;
-        case "check":
-          await handleCheck();
-          return;
-        case "format":
-          await handleFormat();
-          return;
-        case "add":
-          setPaletteOpen(true);
-          setPaletteQuery("");
-          setPaletteIndex(0);
-          return;
-        case "settings":
-          return;
-        default:
-          return;
+    selectNavAction(action);
+    setRoute(resolved.route);
+    setFocus("pane");
+  }
+
+  function goToEdit() {
+    void requireDocAndRoute("edit");
+  }
+
+  function goToExport() {
+    void requireDocAndRoute("export");
+  }
+
+  function goToDoctor() {
+    void requireDocAndRoute("doctor");
+  }
+
+  function goToFormat() {
+    void requireDocAndRoute("format");
+  }
+
+  async function selectCurrentDoc(docPath: string) {
+    const resolved = path.resolve(docPath);
+    setCurrentDoc(resolved);
+    await updateRecents(props.cwd, resolved);
+    void refreshRecents();
+    const dir = path.dirname(resolved);
+    setOpenRoot(dir);
+    setLastUsedDirState(dir);
+    void setLastUsedDir(props.cwd, dir);
+  }
+
+  function changeOpenRoot(nextDir: string) {
+    setOpenRoot(path.resolve(nextDir));
+  }
+
+  async function togglePinForCurrent() {
+    const resolved = path.resolve(openRoot);
+    try {
+      if (pinnedDirs.some((dir) => path.resolve(dir) === resolved)) {
+        const store = await removePinnedDir(props.cwd, resolved);
+        setPinnedDirs(store.entries);
+        showToast("Unpinned directory", "success");
+      } else {
+        const store = await addPinnedDir(props.cwd, resolved);
+        setPinnedDirs(store.entries);
+        showToast("Pinned directory", "success");
+      }
+    } catch (error) {
+      showToast((error as Error).message ?? "Pin update failed", "error");
+    }
+  }
+
+  async function openSelectedFile() {
+    const target = openResults[openSelectedIndex];
+    if (!target) {
+      showToast("Select a file first.", "error");
+      return;
+    }
+    await selectCurrentDoc(target);
+    const resolved = resolveRouteAfterOpen(pendingAction);
+    setPendingAction(resolved.pendingAction);
+    if (resolved.route !== "doc") {
+      selectNavAction(resolved.route);
+      setRoute(resolved.route);
+      setFocus("pane");
+      return;
+    }
+    setRoute("doc");
+    setFocus("pane");
+  }
+
+  async function handleNavInput(_input: string, key: any) {
+    if (key.downArrow) {
+      moveSelection(1);
+      return;
+    }
+    if (key.upArrow) {
+      moveSelection(-1);
+      return;
+    }
+    if (key.return) {
+      const item = navItems[navIndex];
+      if (item) await activateNavItem(item);
+    }
+  }
+
+  async function handleOpenInput(input: string, key: any) {
+    if (key.ctrl && input === "f") {
+      setOpenShowAll((prev) => !prev);
+      return;
+    }
+    if (key.downArrow) {
+      if (openActiveList === "results") {
+        setOpenSelectedIndex((prev) => Math.min(prev + 1, Math.max(0, openResults.length - 1)));
+      } else {
+        setOpenFolderIndex((prev) => Math.min(prev + 1, Math.max(0, openFolders.length - 1)));
+      }
+      return;
+    }
+    if (key.upArrow) {
+      if (openActiveList === "results") {
+        setOpenSelectedIndex((prev) => Math.max(0, prev - 1));
+      } else {
+        setOpenFolderIndex((prev) => Math.max(0, prev - 1));
+      }
+      return;
+    }
+    if (key.return) {
+      if (openActiveList === "results") {
+        await openSelectedFile();
+      } else {
+        const folder = openFolders[openFolderIndex];
+        if (folder) changeOpenRoot(folder);
+      }
+      return;
+    }
+    if (key.backspace || key.delete) {
+      if (openQuery.length > 0) {
+        setOpenQuery((prev) => prev.slice(0, -1));
+      } else {
+        const parent = path.dirname(openRoot);
+        if (parent && parent !== openRoot) changeOpenRoot(parent);
+      }
+      return;
+    }
+    if (input) {
+      setOpenQuery((prev) => prev + input);
+    }
+  }
+
+  async function handleDocInput(_input: string, key: any) {
+    const actionIds = ["edit", "view", "export", "doctor", "format"] as const;
+    if (key.downArrow || key.rightArrow) {
+      setDocActionIndex((prev) => Math.min(prev + 1, actionIds.length - 1));
+      return;
+    }
+    if (key.upArrow || key.leftArrow) {
+      setDocActionIndex((prev) => Math.max(prev - 1, 0));
+      return;
+    }
+    if (key.return) {
+      const action = actionIds[docActionIndex];
+      if (action === "edit") goToEdit();
+      if (action === "view") await handleView();
+      if (action === "export") goToExport();
+      if (action === "doctor") goToDoctor();
+      if (action === "format") goToFormat();
+    }
+  }
+
+  async function handleExportInput(_input: string, key: any) {
+    const maxIndex = exportResultPath ? 3 : 0;
+    if (key.downArrow || key.rightArrow) {
+      setExportActionIndex((prev) => Math.min(prev + 1, maxIndex));
+      return;
+    }
+    if (key.upArrow || key.leftArrow) {
+      setExportActionIndex((prev) => Math.max(prev - 1, 0));
+      return;
+    }
+    if (key.return) {
+      if (exportActionIndex === 0) {
+        await handleExport();
+      } else if (exportActionIndex === 1) {
+        await handleOpenFileResult();
+      } else if (exportActionIndex === 2) {
+        await handleRevealResult();
+      } else if (exportActionIndex === 3) {
+        await handleCopyResultPath();
+      }
+    }
+  }
+
+  async function handleDoctorInput(input: string, key: any) {
+    if (input?.toLowerCase() === "l") {
+      setDoctorLogsOpen((prev) => !prev);
+      return;
+    }
+    if (key.return) {
+      await handleCheck();
+    }
+  }
+
+  async function handleFormatInput(input: string, key: any) {
+    if (input?.toLowerCase() === "l") {
+      setFormatLogsOpen((prev) => !prev);
+      return;
+    }
+    if (key.return) {
+      await handleFormat();
+    }
+  }
+
+  async function handleWizardInput(input: string, key: any) {
+    if (wizardCreated) {
+      if (key.upArrow || key.downArrow) {
+        setWizardPostCreate((prev) => ({ ...prev, selectedIndex: prev.selectedIndex === 0 ? 1 : 0 }));
+        return;
+      }
+      if (input === " ") {
+        setWizardPostCreate((prev) => {
+          if (prev.selectedIndex === 0) {
+            return { ...prev, openViewer: !prev.openViewer };
+          }
+          return { ...prev, setCurrent: !prev.setCurrent };
+        });
+        return;
+      }
+      if (key.return) {
+        const created = wizardCreated;
+        setWizardCreated(null);
+        const shouldSetCurrent = wizardPostCreate.setCurrent || wizardPostCreate.openViewer;
+        if (shouldSetCurrent) {
+          await selectCurrentDoc(created.docPath);
+        }
+        if (wizardPostCreate.openViewer) {
+          await handleView(created.docPath);
+        }
+        setRoute(shouldSetCurrent ? "doc" : "open");
+        return;
+      }
+      if (key.escape) {
+        resetToDefault();
+      }
+      return;
+    }
+
+    const step = wizardSteps[wizardStep];
+    if (!step) return;
+
+    if (step.kind === "summary") {
+      if (key.return) {
+        await submitWizard();
+        return;
+      }
+      if (key.backspace || key.leftArrow) {
+        setWizardStep((prev) => Math.max(0, prev - 1));
+      }
+      return;
+    }
+
+    if (step.kind === "select") {
+      if (key.backspace || key.leftArrow) {
+        setWizardStep((prev) => Math.max(0, prev - 1));
+        return;
+      }
+      if (key.return) {
+        await advanceWizard();
+        return;
+      }
+      if (key.downArrow) {
+        updateWizardChoice(1);
+        return;
+      }
+      if (key.upArrow) {
+        updateWizardChoice(-1);
+        return;
+      }
+      return;
+    }
+
+    if (step.kind === "input") {
+      const currentValue = String(wizardValues[step.key] ?? "");
+      if (key.backspace || key.delete) {
+        if (currentValue.length > 0) {
+          updateWizardInput(step.key, currentValue.slice(0, -1));
+        } else {
+          setWizardStep((prev) => Math.max(0, prev - 1));
+        }
+        return;
+      }
+      if (key.return) {
+        await advanceWizard();
+        return;
+      }
+      if (input) {
+        updateWizardInput(step.key, currentValue + input);
       }
     }
   }
@@ -849,12 +1303,12 @@ export function App(props: AppProps) {
     port?: number;
     advanceTime?: boolean;
   }) {
-    const target = docPath ?? activeDoc;
+    const target = docPath ?? currentDoc;
     if (!target) {
       showToast("Select a document first.", "error");
       return;
     }
-    setActiveDoc(target);
+    await selectCurrentDoc(target);
     setBusy("Starting viewer...");
     const result = await viewCommand({
       cwd: props.cwd,
@@ -889,17 +1343,16 @@ export function App(props: AppProps) {
         seed: 0,
       });
     }
-    await updateRecents(props.cwd, target);
     openBrowser(result.data.session.url);
     showToast(result.data.session.attached ? "Attached to viewer" : "Viewer running", "success");
   }
 
   async function handleExport() {
-    if (!activeDoc) {
+    if (!currentDoc) {
       showToast("Select a document first.", "error");
       return;
     }
-    const defaultOut = activeDoc.replace(/\.flux$/i, ".pdf");
+    const defaultOut = currentDoc.replace(/\.flux$/i, ".pdf");
     setBusy("Exporting PDF...");
     startProgress("Export PDF");
     try {
@@ -909,8 +1362,10 @@ export function App(props: AppProps) {
       if (result) {
         await fs.writeFile(defaultOut, result);
       } else {
-        await pdfCommand({ file: activeDoc, outPath: defaultOut });
+        await pdfCommand({ file: currentDoc, outPath: defaultOut });
       }
+      setExportResultPath(defaultOut);
+      setExportActionIndex(1);
       showToast(`Exported ${path.basename(defaultOut)}`, "success");
     } catch (error) {
       showToast(`Export failed: ${(error as Error).message}`, "error");
@@ -921,43 +1376,172 @@ export function App(props: AppProps) {
   }
 
   async function handleCheck(docPath?: string) {
-    const target = docPath ?? activeDoc;
+    const target = docPath ?? currentDoc;
     if (!target) {
       showToast("Select a document first.", "error");
       return;
     }
     setBusy("Checking...");
+    startProgress("Doctor check");
     const result = await checkCommand({ files: [target] });
     setBusy(null);
+    stopProgress();
     if (!result.ok || !result.data) {
       showToast("Check failed", "error");
+      setDoctorSummary("Doctor failed to run.");
       return;
     }
     const failures = result.data.results.filter((r) => !r.ok);
     if (failures.length) {
-      showToast(`Check failed (${failures.length})`, "error");
-      setLogs(failures.flatMap((r) => r.errors ?? []));
-      setLogsOpen(false);
+      showToast(`Doctor found ${failures.length} issue${failures.length === 1 ? "" : "s"}`, "error");
+      setDoctorSummary(`Found ${failures.length} issue${failures.length === 1 ? "" : "s"}.`);
+      setDoctorLogs(failures.flatMap((r) => r.errors ?? []));
+      setDoctorLogsOpen(false);
     } else {
       showToast("All checks passed", "success");
-      setLogs([]);
+      setDoctorSummary("All checks passed.");
+      setDoctorLogs([]);
     }
   }
 
   async function handleFormat(docPath?: string) {
-    const target = docPath ?? activeDoc;
+    const target = docPath ?? currentDoc;
     if (!target) {
       showToast("Select a document first.", "error");
       return;
     }
     setBusy("Formatting...");
+    setFormatSummary("Formatting document...");
     const result = await formatCommand({ file: target });
     setBusy(null);
     if (!result.ok) {
       showToast(result.error?.message ?? "Format failed", "error");
+      setFormatSummary("Format failed.");
+      setFormatLogs([result.error?.message ?? "Format failed."]);
       return;
     }
     showToast("Formatted document", "success");
+    setFormatSummary("Format complete.");
+    setFormatLogs([]);
+  }
+
+  async function handleOpenFileResult() {
+    if (!exportResultPath) return;
+    openFile(exportResultPath);
+    showToast("Opened file", "success");
+  }
+
+  async function handleRevealResult() {
+    if (!exportResultPath) return;
+    revealInFinder(exportResultPath);
+    showToast("Revealed in folder", "success");
+  }
+
+  async function handleCopyResultPath() {
+    if (!exportResultPath) return;
+    const ok = await copyToClipboard(exportResultPath);
+    showToast(ok ? "Copied path" : "Copy failed", ok ? "success" : "error");
+  }
+
+  async function loadOpenFolders(dir: string) {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true, encoding: "utf8" });
+      const folders = entries
+        .filter((entry) => entry.isDirectory())
+        .filter((entry) => entry.name !== "node_modules" && !entry.name.startsWith("."))
+        .map((entry) => path.join(dir, entry.name))
+        .sort((a, b) => a.localeCompare(b));
+      setOpenFolders(folders);
+    } catch {
+      setOpenFolders([]);
+    }
+  }
+
+  async function buildPreview(filePath: string) {
+    try {
+      const stats = await fs.stat(filePath);
+      const size = formatBytes(stats.size);
+      const modified = new Date(stats.mtimeMs).toLocaleString();
+      let title: string | null = null;
+      let status: string | null = null;
+
+      if (stats.size <= 256 * 1024) {
+        const text = await fs.readFile(filePath, "utf8");
+        const sample = text.slice(0, 8000);
+        const titleMatch = /title\\s*=\\s*\"([^\"]+)\"/.exec(sample);
+        title = titleMatch ? titleMatch[1] : null;
+        if (/document\\s*\\{/.test(sample)) {
+          status = titleMatch ? "valid" : "warnings";
+        } else {
+          status = "errors";
+        }
+      }
+
+      return {
+        title,
+        filePath,
+        modified,
+        size,
+        status,
+      };
+    } catch {
+      return {
+        title: null,
+        filePath,
+        modified: undefined,
+        size: undefined,
+        status: "errors",
+      };
+    }
+  }
+
+  function updateWizardInput(key: "title" | "name", nextValue: string) {
+    if (key === "name") {
+      setWizardNameTouched(true);
+    }
+    setWizardValues((prev) => {
+      if (key === "title") {
+        const nextTitle = nextValue;
+        const nextName = wizardNameTouched ? prev.name : slugify(nextTitle);
+        return { ...prev, title: nextTitle, name: nextName };
+      }
+      const nextName = slugify(nextValue);
+      return { ...prev, name: nextName };
+    });
+  }
+
+  function titleFromTemplate(template: TemplateName): string {
+    const map: Record<TemplateName, string> = {
+      demo: "Flux Demo",
+      article: "Flux Article",
+      spec: "Flux Spec",
+      zine: "Flux Zine",
+      paper: "Flux Paper",
+      blank: "Flux Document",
+    };
+    return map[template] ?? "Flux Document";
+  }
+
+  function slugify(value: string): string {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "flux-document";
+  }
+
+  function formatBytes(size: number): string {
+    if (!Number.isFinite(size)) return "";
+    if (size < 1024) return `${size} B`;
+    const units = ["KB", "MB", "GB"];
+    let value = size / 1024;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+      value /= 1024;
+      idx += 1;
+    }
+    return `${value.toFixed(value < 10 ? 1 : 0)} ${units[idx]}`;
   }
 
   async function handlePaletteSelect(item: { id: string; kind: string; payload?: any }) {
@@ -966,34 +1550,25 @@ export function App(props: AppProps) {
       return;
     }
     if (item.kind === "doc" || item.kind === "file") {
-      setActiveDoc(item.payload.path);
+      await selectCurrentDoc(item.payload.path);
+      setRoute("doc");
       return;
     }
     if (item.kind === "action") {
       if (item.payload.action === "open") {
-        openPrompt("Open .flux path", async (value) => {
-          if (!value) return;
-          setActiveDoc(value);
-          await updateRecents(props.cwd, value);
-          showToast("Document selected", "success");
-        });
+        setPendingAction(null);
+        setRoute("open");
+        setFocus("pane");
         return;
       }
       if (item.payload.action === "new") {
         openWizard();
         return;
       }
-      if (item.payload.action === "view") await handleView();
-      if (item.payload.action === "export") await handleExport();
-      if (item.payload.action === "check") await handleCheck();
-      if (item.payload.action === "format") await handleFormat();
-      if (item.payload.action === "add") {
-        await runAdd(item.payload.kind);
-      }
-      if (item.payload.action === "settings") {
-        const idx = navItems.findIndex((entry) => entry.type === "action" && entry.id === "settings");
-        if (idx >= 0) setSelectedIndex(idx);
-      }
+      if (item.payload.action === "edit") await requireDocAndRoute("edit");
+      if (item.payload.action === "export") await requireDocAndRoute("export");
+      if (item.payload.action === "doctor") await requireDocAndRoute("doctor");
+      if (item.payload.action === "format") await requireDocAndRoute("format");
     }
   }
 
@@ -1002,7 +1577,7 @@ export function App(props: AppProps) {
     docPath?: string,
     options?: { text?: string; heading?: string; label?: string; noHeading?: boolean; noCheck?: boolean },
   ) {
-    const target = docPath ?? activeDoc;
+    const target = docPath ?? currentDoc;
     if (!target) {
       showToast("Select a document first.", "error");
       return;
@@ -1027,14 +1602,20 @@ export function App(props: AppProps) {
   }
 
   async function runTemplate(template: string) {
+    const title = titleFromTemplate(template as TemplateName);
+    const name = slugify(title);
+    const outRoot = resolveWizardOutDir() ?? props.cwd;
+    const outDir = path.join(outRoot, name);
     setBusy(`Creating ${template}...`);
     const result = await newCommand({
       cwd: props.cwd,
       template: template as any,
-      out: resolveWizardOutDir(),
-      page: config?.defaultPageSize ?? "Letter",
-      theme: config?.defaultTheme ?? "screen",
-      fonts: config?.defaultFonts ?? "tech",
+      out: outDir,
+      title,
+      slug: name,
+      page: (config?.defaultPageSize ?? "Letter") as PageSizeOption,
+      theme: (config?.defaultTheme ?? "screen") as ThemeOption,
+      fonts: (config?.defaultFonts ?? "tech") as FontsPreset,
       fontFallback: "system",
       assets: true,
       chapters: 0,
@@ -1045,14 +1626,22 @@ export function App(props: AppProps) {
       showToast(result.error?.message ?? "New failed", "error");
       return;
     }
-    setActiveDoc(result.data.docPath);
-    await updateRecents(props.cwd, result.data.docPath);
+    await selectCurrentDoc(result.data.docPath);
     showToast("Document created", "success");
+    if (template === "blank") {
+      setRoute("edit");
+    } else {
+      setRoute("doc");
+    }
   }
 
   function buildWizardDefaults(cfg: any): WizardValues {
     const template: TemplateName = "demo";
+    const title = titleFromTemplate(template);
+    const name = slugify(title);
     return {
+      title,
+      name,
       template,
       page: (cfg?.defaultPageSize ?? "Letter") as PageSizeOption,
       theme: (cfg?.defaultTheme ?? "screen") as ThemeOption,
@@ -1068,10 +1657,7 @@ export function App(props: AppProps) {
   function resolveWizardOutDir(outDir?: string) {
     if (outDir) return outDir;
     if (wizardOutDir) return wizardOutDir;
-    if (config?.defaultOutputDir && config.defaultOutputDir !== ".") {
-      return config.defaultOutputDir;
-    }
-    return undefined;
+    return props.cwd;
   }
 
   function indexForValue<T>(options: { value: T }[], value: T): number {
@@ -1092,8 +1678,7 @@ export function App(props: AppProps) {
       chapters: indexForValue(CHAPTER_OPTIONS, nextValues.chapters),
       live: indexForValue(YES_NO_OPTIONS, nextValues.live),
     });
-    const nextOut = outDir
-      ?? (cfg?.defaultOutputDir && cfg.defaultOutputDir !== "." ? cfg.defaultOutputDir : undefined);
+    const nextOut = outDir ?? props.cwd;
     setWizardOutDir(nextOut);
   }
 
@@ -1114,6 +1699,17 @@ export function App(props: AppProps) {
           ...indexes,
           live: indexForValue(YES_NO_OPTIONS, nextLive),
         }));
+      }
+      if (step.key === "template") {
+        const prevTitle = prev.title;
+        const defaultTitle = titleFromTemplate(prev.template);
+        if (prevTitle === defaultTitle) {
+          const nextTitle = titleFromTemplate(nextValue as TemplateName);
+          next.title = nextTitle;
+          if (!wizardNameTouched) {
+            next.name = slugify(nextTitle);
+          }
+        }
       }
       if (step.key === "chaptersEnabled" && nextValue === false) {
         next.chaptersEnabled = false;
@@ -1139,11 +1735,13 @@ export function App(props: AppProps) {
 
   async function submitWizard(valuesOverride?: WizardValues, outDirOverride?: string) {
     const values = valuesOverride ?? wizardValues;
+    const outputRoot = resolveWizardOutDir(outDirOverride) ?? props.cwd;
+    const outputDir = path.join(outputRoot, values.name);
     setBusy("Creating document...");
     const result = await newCommand({
       cwd: props.cwd,
       template: values.template,
-      out: resolveWizardOutDir(outDirOverride),
+      out: outputDir,
       page: values.page,
       theme: values.theme,
       fonts: values.fonts,
@@ -1151,32 +1749,43 @@ export function App(props: AppProps) {
       assets: values.assets,
       chapters: values.chaptersEnabled ? values.chapters : 0,
       live: values.live,
+      title: values.title,
+      slug: values.name,
     });
     setBusy(null);
     if (!result.ok || !result.data) {
       showToast(result.error?.message ?? "New failed", "error");
       return;
     }
-    setActiveDoc(result.data.docPath);
-    await updateRecents(props.cwd, result.data.docPath);
+    if (values.template === "blank") {
+      await selectCurrentDoc(result.data.docPath);
+      setWizardCreated(null);
+      setRoute("edit");
+      showToast("Document created", "success");
+      return;
+    }
     setWizardCreated(result.data);
-    setWizardOpenChoice(0);
+    setWizardPostCreate({ openViewer: true, setCurrent: true, selectedIndex: 0 });
     showToast("Document created", "success");
   }
 
   function openWizard(reset = true) {
-    setWizardOpen(true);
+    setRoute("new");
+    setFocus("pane");
     if (reset) {
+      const defaults = buildWizardDefaults(config);
+      applyWizardValues(defaults, config);
       setWizardStep(0);
       setWizardCreated(null);
-      setWizardOpenChoice(0);
+      setWizardPostCreate({ openViewer: true, setCurrent: true, selectedIndex: 0 });
       setWizardLiveTouched(false);
+      setWizardNameTouched(false);
     }
   }
 
   function selectNavAction(id: string) {
     const idx = navItems.findIndex((entry) => entry.type === "action" && entry.id === id);
-    if (idx >= 0) setSelectedIndex(idx);
+    if (idx >= 0) setNavIndex(idx);
   }
 
   async function handleInitialRoute(initialArgs: string[]) {
@@ -1206,7 +1815,16 @@ export function App(props: AppProps) {
         if (parsed.live !== undefined) {
           next.live = parsed.live;
         }
-        applyWizardValues(next, config, parsed.out);
+        let outOverride = parsed.out;
+        if (parsed.out && parsed.out.endsWith(".flux")) {
+          const resolved = path.resolve(props.cwd, parsed.out);
+          next.name = slugify(path.basename(resolved, ".flux"));
+          outOverride = path.dirname(resolved);
+        }
+        if (!wizardNameTouched) {
+          next.name = slugify(next.title);
+        }
+        applyWizardValues(next, config, outOverride);
         openWizard(true);
         if (parsed.provided.live) {
           setWizardLiveTouched(true);
@@ -1219,14 +1837,13 @@ export function App(props: AppProps) {
           && parsed.chapters !== undefined
           && parsed.live !== undefined);
         if (autoRun) {
-          await submitWizard(next, parsed.out);
+          await submitWizard(next, outOverride);
         }
         return;
       }
       case "view": {
         const parsed = parseViewArgsForUi(rest);
-        selectNavAction("view");
-        const target = parsed.file ?? activeDoc ?? null;
+        const target = parsed.file ?? currentDoc ?? null;
         if (!target) {
           showToast("flux view: missing <file>", "error");
           return;
@@ -1238,43 +1855,43 @@ export function App(props: AppProps) {
           port: parsed.port,
           advanceTime: parsed.advanceTime,
         });
+        setRoute("doc");
         return;
       }
       case "check": {
-        selectNavAction("check");
-        const target = firstFileArg(rest) ?? activeDoc ?? null;
+        const target = firstFileArg(rest) ?? currentDoc ?? null;
         if (!target) {
           showToast("flux check: missing <file>", "error");
           return;
         }
-        setActiveDoc(target);
+        await selectCurrentDoc(target);
+        setRoute("doctor");
         await handleCheck(target);
         return;
       }
       case "fmt": {
-        selectNavAction("format");
-        const target = firstFileArg(rest) ?? activeDoc ?? null;
+        const target = firstFileArg(rest) ?? currentDoc ?? null;
         if (!target) {
           showToast("flux fmt: missing <file>", "error");
           return;
         }
-        setActiveDoc(target);
+        await selectCurrentDoc(target);
+        setRoute("format");
         await handleFormat(target);
         return;
       }
       case "add": {
-        selectNavAction("add");
         const parsed = parseAddArgsForUi(rest);
-        if (parsed.file) setActiveDoc(parsed.file);
         if (parsed.kind) {
           await runAdd(parsed.kind, parsed.file, parsed);
+          if (parsed.file) await selectCurrentDoc(parsed.file);
+          setRoute("edit");
         } else {
-          setPaletteOpen(true);
+          showToast("flux add: missing <kind> (use --no-ui for prompts)", "error");
         }
         return;
       }
       case "pdf": {
-        selectNavAction("export");
         const parsed = parsePdfArgsForUi(rest);
         if (!parsed.file || !parsed.outPath) {
           showToast("flux pdf: missing <file> or --out", "error");
@@ -1288,11 +1905,14 @@ export function App(props: AppProps) {
           return;
         }
         showToast(`Wrote ${parsed.outPath}`, "success");
-        await updateRecents(props.cwd, parsed.file);
+        setExportResultPath(parsed.outPath);
+        setExportActionIndex(1);
+        await selectCurrentDoc(parsed.file);
+        setRoute("export");
         return;
       }
       case "config": {
-        selectNavAction("settings");
+        setRoute("settings");
         return;
       }
       case "parse":
@@ -1310,28 +1930,6 @@ export function App(props: AppProps) {
   function showToast(message: string, kind: "info" | "success" | "error" = "info") {
     pushToast(message, kind);
   }
-
-  async function toggleViewer() {
-    if (!viewerSession) return;
-    const running = !(viewerStatus?.running ?? true);
-    await updateViewerTicker(viewerSession.url, { running });
-    setViewerStatus((prev) => prev ? { ...prev, running } : prev);
-    showToast(running ? "Viewer running" : "Viewer paused", "success");
-  }
-
-  async function initConfig() {
-    const current = config ?? { docstepMs: 1000 };
-    await configCommand({
-      cwd: props.cwd,
-      action: "set",
-      key: "docstepMs",
-      value: current.docstepMs ?? 1000,
-      init: true,
-      env: process.env,
-    });
-    await refreshConfig();
-    showToast("Config initialized", "success");
-  }
 }
 
 function openBrowser(url: string): void {
@@ -1344,6 +1942,26 @@ function openBrowser(url: string): void {
 
   const args =
     process.platform === "win32" ? ["/c", "start", url.replace(/&/g, "^&")] : [url];
+
+  // eslint-disable-next-line @typescript-eslint/no-floating-promises
+  import("node:child_process").then(({ spawn }) => {
+    spawn(command, args, { stdio: "ignore", detached: true });
+  });
+}
+
+function openFile(target: string): void {
+  const resolved = path.resolve(target);
+  const command =
+    process.platform === "darwin"
+      ? "open"
+      : process.platform === "win32"
+        ? "cmd"
+        : "xdg-open";
+
+  const args =
+    process.platform === "win32"
+      ? ["/c", "start", "", resolved.replace(/&/g, "^&")]
+      : [resolved];
 
   // eslint-disable-next-line @typescript-eslint/no-floating-promises
   import("node:child_process").then(({ spawn }) => {
@@ -1375,6 +1993,11 @@ function revealInFinder(target: string): void {
 async function copyToClipboard(value: string): Promise<boolean> {
   const text = value ?? "";
   try {
+    const clipboardy = await import("clipboardy").catch(() => null);
+    if (clipboardy?.default?.write) {
+      await clipboardy.default.write(text);
+      return true;
+    }
     if (process.platform === "darwin") {
       const { spawn } = await import("node:child_process");
       const proc = spawn("pbcopy");
@@ -1396,30 +2019,6 @@ async function copyToClipboard(value: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-async function walk(dir: string, out: string[], depth: number): Promise<void> {
-  if (depth < 0) return;
-  type WalkEntry = {
-    name: string;
-    isDirectory: () => boolean;
-    isFile: () => boolean;
-  };
-  let entries: WalkEntry[];
-  try {
-    entries = (await fs.readdir(dir, { withFileTypes: true, encoding: "utf8" })) as WalkEntry[];
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
-      await walk(full, out, depth - 1);
-    } else if (entry.isFile() && full.endsWith(".flux")) {
-      out.push(full);
-    }
   }
 }
 
@@ -1758,7 +2357,7 @@ function parseNumberArg(raw?: string): number | undefined {
 }
 
 function isTemplateName(raw: string): raw is TemplateName {
-  return raw === "demo" || raw === "article" || raw === "spec" || raw === "zine" || raw === "paper";
+  return raw === "demo" || raw === "article" || raw === "spec" || raw === "zine" || raw === "paper" || raw === "blank";
 }
 
 function getHelpLines(command?: string): string[] {
@@ -1909,7 +2508,7 @@ function getHelpLines(command?: string): string[] {
       "    --fallback system|none --assets yes|no --chapters N --live yes|no",
       "",
       "Templates:",
-      "  demo, article, spec, zine, paper",
+      "  demo, article, spec, zine, paper, blank",
       "",
     ];
   }

@@ -15,3 +15,5 @@ export async function runCliUi(options: CliUiOptions): Promise<void> {
   const { waitUntilExit } = render(<App {...options} />, { exitOnCtrlC: true });
   await waitUntilExit();
 }
+
+export * from "./state/dashboard-machine.js";

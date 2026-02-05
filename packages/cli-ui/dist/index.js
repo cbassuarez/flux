@@ -5,4 +5,5 @@ export async function runCliUi(options) {
     const { waitUntilExit } = render(_jsx(App, { ...options }), { exitOnCtrlC: true });
     await waitUntilExit();
 }
+export * from "./state/dashboard-machine.js";
 //# sourceMappingURL=index.js.map

@@ -1,0 +1,11 @@
+import { jsxs as _jsxs, jsx as _jsx } from "react/jsx-runtime";
+import { Box, Text } from "ink";
+import path from "node:path";
+import { Card } from "../components/Card.js";
+import { Button } from "../components/Button.js";
+import { TaskProgressView } from "../components/TaskProgressView.js";
+import { color, truncateMiddle } from "../theme/index.js";
+export function ExportScreen({ width, docPath, outputPath, progress, resultPath, actionIndex, onExport, onOpenFile, onReveal, onCopyPath, debug, }) {
+    return (_jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsxs(Card, { title: "Export PDF", meta: "", accent: true, ruleWidth: width - 6, debug: debug, children: [docPath ? (_jsxs(Box, { flexDirection: "column", gap: 0, children: [_jsxs(Text, { color: color.muted, children: ["Document: ", path.basename(docPath)] }), _jsxs(Text, { color: color.muted, children: ["Path: ", truncateMiddle(docPath, Math.max(16, width - 10))] })] })) : (_jsx(Text, { color: color.muted, children: "No document selected." })), outputPath ? (_jsxs(Text, { color: color.muted, children: ["Output: ", truncateMiddle(outputPath, Math.max(16, width - 10))] })) : null, _jsx(Box, { marginTop: 1, children: _jsx(Button, { id: "export-run", label: "Export PDF", icon: "\u21E9", onClick: onExport, active: actionIndex === 0 }) })] }), progress ? (_jsx(Card, { title: "Task", meta: "", ruleWidth: width - 6, debug: debug, children: _jsx(TaskProgressView, { progress: progress }) })) : null, resultPath ? (_jsxs(Card, { title: "Export complete", meta: "", ruleWidth: width - 6, debug: debug, children: [_jsx(Text, { color: color.muted, children: truncateMiddle(resultPath, Math.max(16, width - 8)) }), _jsxs(Box, { flexDirection: "row", gap: 2, children: [_jsx(Button, { id: "export-open", label: "Open file", onClick: onOpenFile, active: actionIndex === 1 }), _jsx(Button, { id: "export-reveal", label: "Reveal in folder", onClick: onReveal, active: actionIndex === 2 }), _jsx(Button, { id: "export-copy", label: "Copy path", onClick: onCopyPath, active: actionIndex === 3 })] })] })) : null] }));
+}
+//# sourceMappingURL=ExportScreen.js.map

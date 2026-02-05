@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import path from "node:path";
 import fs from "node:fs/promises";
 import os from "node:os";
-import { getRecentsStore } from "../src/recents.js";
+import { getRecentsStore, updateRecents } from "../src/recents.js";
 
 async function makeRepo(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "flux-recents-"));
@@ -23,5 +23,15 @@ describe("recents storage", () => {
     const store = await getRecentsStore(dir);
     expect(store.storePath).toBe(path.join(dir, ".flux", "recents.json"));
     expect(store.fallback).toBe(true);
+  });
+
+  it("caps recents at 2 entries", async () => {
+    const repo = await makeRepo();
+    await updateRecents(repo, path.join(repo, "one.flux"));
+    await updateRecents(repo, path.join(repo, "two.flux"));
+    const store = await updateRecents(repo, path.join(repo, "three.flux"));
+    expect(store.entries.length).toBe(2);
+    expect(store.entries[0]?.path).toBe(path.join(repo, "three.flux"));
+    expect(store.entries[1]?.path).toBe(path.join(repo, "two.flux"));
   });
 });

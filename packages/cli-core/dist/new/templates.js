@@ -41,6 +41,11 @@ export function getTemplate(name) {
             description: "Academic paper with abstract",
             build: buildPaperTemplate,
         },
+        {
+            name: "blank",
+            description: "Minimal blank document",
+            build: buildBlankTemplate,
+        },
     ];
     return templates.find((t) => t.name === name) ?? null;
 }
@@ -215,6 +220,33 @@ function buildBaseDoc(options, bodyContent, extraBlocks = []) {
     ]
         .filter((line) => line !== undefined)
         .join("\n");
+}
+function buildBlankTemplate(options) {
+    const body = [
+        "  body {",
+        "    // Start building your document.",
+        "    text \"Title\" {",
+        "      style = Title;",
+        "      value = @meta.title;",
+        "    }",
+        "  }",
+    ].join("\n");
+    return {
+        mainFlux: buildBaseDoc(options, body, []),
+        readme: [
+            "# Flux Blank Document",
+            "",
+            "This is a minimal Flux document starter.",
+            "",
+            "Next steps:",
+            "- Update meta.title and tokens in the .flux file.",
+            "- Add sections, figures, and callouts as needed.",
+            "- Run `flux view` to open the live viewer.",
+            "",
+        ].join("\n"),
+        chapters: [],
+        assetsDir: options.assets ? "assets" : undefined,
+    };
 }
 function buildDemoTemplate(options) {
     const liveContent = options.live

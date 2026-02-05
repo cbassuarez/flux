@@ -358,7 +358,7 @@ function printNewHelp() {
         "    --fallback system|none --assets yes|no --chapters N --live yes|no",
         "",
         "Templates:",
-        "  demo, article, spec, zine, paper",
+        "  demo, article, spec, zine, paper, blank",
         "",
     ].join("\n"));
 }

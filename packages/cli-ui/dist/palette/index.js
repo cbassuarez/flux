@@ -2,20 +2,18 @@ import path from "node:path";
 export function buildPaletteItems(options) {
     const { recents, fluxFiles, activeDoc } = options;
     const items = [];
-    items.push({ id: "open", label: "Open document…", group: "Commands", kind: "action", payload: { action: "open" }, hint: "Paste a path" });
+    items.push({ id: "open", label: "Open document", group: "Commands", kind: "action", payload: { action: "open" } });
     items.push({ id: "new", label: "New document wizard", group: "Commands", kind: "action", payload: { action: "new" } });
-    items.push({ id: "view", label: "View current document", group: "Commands", kind: "action", payload: { action: "view" } });
+    items.push({ id: "edit", label: "Edit current document", group: "Commands", kind: "action", payload: { action: "edit" } });
     items.push({ id: "export", label: "Export PDF", group: "Commands", kind: "action", payload: { action: "export" } });
-    items.push({ id: "check", label: "Run check", group: "Commands", kind: "action", payload: { action: "check" } });
+    items.push({ id: "doctor", label: "Doctor (check)", group: "Commands", kind: "action", payload: { action: "doctor" } });
     items.push({ id: "format", label: "Format document", group: "Commands", kind: "action", payload: { action: "format" } });
-    items.push({ id: "add-section", label: "Add section", group: "Commands", kind: "action", payload: { action: "add", kind: "section" } });
-    items.push({ id: "add-figure", label: "Add figure", group: "Commands", kind: "action", payload: { action: "add", kind: "figure" } });
-    items.push({ id: "settings", label: "Open settings", group: "Commands", kind: "action", payload: { action: "settings" } });
     items.push({ id: "new-demo", label: "Template: demo", group: "Templates", kind: "template", payload: { template: "demo" } });
     items.push({ id: "new-article", label: "Template: article", group: "Templates", kind: "template", payload: { template: "article" } });
     items.push({ id: "new-spec", label: "Template: spec", group: "Templates", kind: "template", payload: { template: "spec" } });
     items.push({ id: "new-zine", label: "Template: zine", group: "Templates", kind: "template", payload: { template: "zine" } });
     items.push({ id: "new-paper", label: "Template: paper", group: "Templates", kind: "template", payload: { template: "paper" } });
+    items.push({ id: "new-blank", label: "Template: blank", group: "Templates", kind: "template", payload: { template: "blank" } });
     if (activeDoc) {
         items.push({ id: `doc-${activeDoc}`, label: `Current: ${path.basename(activeDoc)}`, group: "Docs", kind: "doc", payload: { path: activeDoc } });
     }

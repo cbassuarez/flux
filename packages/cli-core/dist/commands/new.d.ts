@@ -13,6 +13,7 @@ export interface NewOptions {
     chapters?: number;
     live?: boolean;
     title?: string;
+    slug?: string;
 }
 export interface NewData {
     dir: string;

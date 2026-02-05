@@ -1,5 +1,5 @@
 import type { FontFallbackOption, FontsPreset, PageSizeOption, ThemeOption } from "../config.js";
-export type TemplateName = "demo" | "article" | "spec" | "zine" | "paper";
+export type TemplateName = "demo" | "article" | "spec" | "zine" | "paper" | "blank";
 export interface TemplateOptions {
     title: string;
     page: PageSizeOption;

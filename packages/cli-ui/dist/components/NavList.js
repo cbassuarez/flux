@@ -6,12 +6,10 @@ import { Clickable } from "./Clickable.js";
 const ACTION_ICONS = {
     new: "+",
     open: "⌁",
-    view: "◻︎",
     export: "⇩",
-    check: "✓",
+    doctor: "✓",
     format: "≡",
-    add: "+",
-    settings: "⚙︎",
+    edit: "✎",
 };
 function formatRelativeTime(value) {
     if (!value)

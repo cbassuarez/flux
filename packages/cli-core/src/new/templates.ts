@@ -1,6 +1,6 @@
 import type { FontFallbackOption, FontsPreset, PageSizeOption, ThemeOption } from "../config.js";
 
-export type TemplateName = "demo" | "article" | "spec" | "zine" | "paper";
+export type TemplateName = "demo" | "article" | "spec" | "zine" | "paper" | "blank";
 
 export interface TemplateOptions {
   title: string;
@@ -72,6 +72,11 @@ export function getTemplate(name: string): TemplateDefinition | null {
       name: "paper",
       description: "Academic paper with abstract",
       build: buildPaperTemplate,
+    },
+    {
+      name: "blank",
+      description: "Minimal blank document",
+      build: buildBlankTemplate,
     },
   ];
   return templates.find((t) => t.name === name) ?? null;
@@ -250,6 +255,35 @@ function buildBaseDoc(options: TemplateOptions, bodyContent: string, extraBlocks
   ]
     .filter((line) => line !== undefined)
     .join("\n");
+}
+
+function buildBlankTemplate(options: TemplateOptions): TemplateOutput {
+  const body = [
+    "  body {",
+    "    // Start building your document.",
+    "    text \"Title\" {",
+    "      style = Title;",
+    "      value = @meta.title;",
+    "    }",
+    "  }",
+  ].join("\n");
+
+  return {
+    mainFlux: buildBaseDoc(options, body, []),
+    readme: [
+      "# Flux Blank Document",
+      "",
+      "This is a minimal Flux document starter.",
+      "",
+      "Next steps:",
+      "- Update meta.title and tokens in the .flux file.",
+      "- Add sections, figures, and callouts as needed.",
+      "- Run `flux view` to open the live viewer.",
+      "",
+    ].join("\n"),
+    chapters: [],
+    assetsDir: options.assets ? "assets" : undefined,
+  };
 }
 
 function buildDemoTemplate(options: TemplateOptions): TemplateOutput {

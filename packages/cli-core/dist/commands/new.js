@@ -47,6 +47,7 @@ export async function newCommand(options) {
     return okResult({ dir: output.dir, docPath: output.docPath, files });
 }
 function normalizeNewOptions(options) {
+    const title = options.title ?? titleFromTemplate(options.template);
     const defaults = {
         page: options.page ?? "Letter",
         theme: options.theme ?? "screen",
@@ -55,7 +56,8 @@ function normalizeNewOptions(options) {
         assets: options.assets ?? true,
         chapters: options.chapters ?? 0,
         live: options.live ?? (options.template === "demo"),
-        title: options.title ?? titleFromTemplate(options.template),
+        title,
+        slug: options.slug ? slugify(options.slug) : slugify(title),
     };
     return { ...options, ...defaults };
 }
@@ -66,6 +68,7 @@ function titleFromTemplate(template) {
         spec: "Flux Spec",
         zine: "Flux Zine",
         paper: "Flux Paper",
+        blank: "Flux Document",
     };
     return map[template] ?? "Flux Document";
 }
@@ -74,7 +77,7 @@ function resolveOutputPath(options) {
     if (out.endsWith(".flux")) {
         return { dir: path.dirname(out), docPath: out };
     }
-    const slug = slugify(options.title);
+    const slug = options.slug ?? slugify(options.title);
     const dir = out;
     const docPath = path.join(dir, `${slug}.flux`);
     return { dir, docPath };

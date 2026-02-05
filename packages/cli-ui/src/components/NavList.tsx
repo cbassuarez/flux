@@ -8,12 +8,10 @@ import { Clickable } from "./Clickable.js";
 const ACTION_ICONS: Record<string, string> = {
   new: "+",
   open: "⌁",
-  view: "◻︎",
   export: "⇩",
-  check: "✓",
+  doctor: "✓",
   format: "≡",
-  add: "+",
-  settings: "⚙︎",
+  edit: "✎",
 };
 
 function formatRelativeTime(value?: string) {
