@@ -7,7 +7,7 @@ Use it as a starting point for a Flux document or layout experiment.
 - `<doc>.flux` is the main document source.
 - `README.md` (this file) explains the scaffold.
 - `assets/` is ready for local images.
-- `chapters/` contains chapter stubs.
+- `chapters/` was not created.
 
 ## Editing basics
 - Update `meta.title` for the document name.
@@ -16,17 +16,18 @@ Use it as a starting point for a Flux document or layout experiment.
 - Update `styles` to restyle headings, captions, and body text.
 - Add or reorder content inside the `body` block.
 
+
 ## Preview and export
 - Run `flux view <doc>.flux` to launch the viewer.
 - Run `flux check <doc>.flux` for static checks.
 - Run `flux pdf <doc>.flux --out output.pdf` for a snapshot.
 
 ## Options used
-Title: Flux Demo
+Title: Flux Paper
 Page size: Letter
-Theme: screen
+Theme: both
 Fonts: bookish
 Font fallback: system stack
 Assets: enabled
-Chapters: 2
+Chapters: none
 Live slots: enabled

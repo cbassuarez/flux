@@ -515,12 +515,15 @@ function buildInlineStyle(inlineProps) {
     const body = entries.map(([key, value]) => `${key}:${value};`).join("");
     return ` style="${escapeAttr(body)}"`;
 }
-function renderNode(node, options, inlineContext = false, footnotes) {
+function renderNode(node, options, inlineContext = false, footnotes, inlineSlotContext = false) {
     const isInlineKind = isInlineNode(node.kind);
     const childrenInline = inlineContext || isInlineKind || node.kind === "text";
     const attrs = buildAttrs(node, inlineContext);
     const styleAttr = buildInlineStyle(mergeInlineStyles(node, inlineContext));
-    const renderChildren = (inline = childrenInline, context = footnotes) => node.children.map((child) => renderNode(child, options, inline, context)).join("");
+    const renderChildren = (inline = childrenInline, context = footnotes, slotContext = inlineSlotContext) => node.children.map((child) => renderNode(child, options, inline, context, slotContext)).join("");
+    if (inlineSlotContext && inlineContext && isBlockLike(node.kind)) {
+        return renderChildren(true, footnotes, inlineSlotContext);
+    }
     switch (node.kind) {
         case "page": {
             const pageFootnotes = { items: [] };
@@ -604,7 +607,7 @@ function renderNode(node, options, inlineContext = false, footnotes) {
         case "slot":
             return renderSlot(node, attrs, false, renderChildren(false), options.slots, styleAttr);
         case "inline_slot":
-            return renderSlot(node, attrs, true, renderChildren(true), options.slots, styleAttr);
+            return renderSlot(node, attrs, true, renderChildren(true, footnotes, true), options.slots, styleAttr);
         default:
             return `<div class="${buildClassName("flux-node", node)}" ${attrs}${styleAttr}>${renderChildren()}</div>`;
     }
@@ -620,6 +623,22 @@ function isInlineNode(kind) {
         kind === "link" ||
         kind === "quote" ||
         kind === "footnote");
+}
+function isBlockLike(kind) {
+    return (kind === "page" ||
+        kind === "section" ||
+        kind === "row" ||
+        kind === "column" ||
+        kind === "blockquote" ||
+        kind === "codeblock" ||
+        kind === "callout" ||
+        kind === "table" ||
+        kind === "ul" ||
+        kind === "ol" ||
+        kind === "li" ||
+        kind === "figure" ||
+        kind === "grid" ||
+        kind === "slot");
 }
 function buildClassName(base, node) {
     const styleClass = node.style?.className ? ` ${escapeAttr(node.style.className)}` : "";

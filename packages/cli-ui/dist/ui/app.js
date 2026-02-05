@@ -1,11 +1,26 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useInput, useApp, measureElement, } from "ink";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Box, Text, useApp, useInput } from "ink";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { getRecentsStore, updateRecents, resolveConfig, configCommand, viewCommand, pdfCommand, checkCommand, formatCommand, addCommand, newCommand, updateViewerTicker, updateViewerRuntime, fetchViewerPatch, fetchViewerStatus, requestViewerPdf, } from "@flux-lang/cli-core";
-const ACCENT = "cyan";
-const ACCENT_ALT = "green";
+import { AppFrame } from "../components/AppFrame.js";
+import { NavList } from "../components/NavList.js";
+import { CommandPaletteModal } from "../components/CommandPaletteModal.js";
+import { ToastHost } from "../components/ToastHost.js";
+import { PromptModal } from "../components/PromptModal.js";
+import { Card } from "../components/Card.js";
+import { HelpOverlay } from "../components/HelpOverlay.js";
+import { DashboardScreen } from "../screens/DashboardScreen.js";
+import { NewWizardScreen } from "../screens/NewWizardScreen.js";
+import { ViewerControlScreen } from "../screens/ViewerControlScreen.js";
+import { SettingsScreen } from "../screens/SettingsScreen.js";
+import { AddWizardScreen } from "../screens/AddWizardScreen.js";
+import { MouseProvider } from "../state/mouse.js";
+import { useToasts } from "../state/toasts.js";
+import { useProgress } from "../state/progress.js";
+import { buildPaletteItems, filterPaletteItems, groupPaletteItems } from "../palette/index.js";
+import { accent, color } from "../theme/index.js";
 const TEMPLATE_OPTIONS = [
     { label: "Demo", value: "demo", hint: "Live slots + assets + annotations" },
     { label: "Article", value: "article", hint: "Narrative article starter" },
@@ -42,13 +57,17 @@ const CHAPTER_OPTIONS = [
     { label: "5", value: 5 },
     { label: "6", value: 6 },
 ];
+const BACKEND_LABEL = "typesetter";
 export function App(props) {
     const { exit } = useApp();
     const [recents, setRecents] = useState([]);
+    const [recentsPath, setRecentsPath] = useState(undefined);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [activeDoc, setActiveDoc] = useState(null);
     const [logs, setLogs] = useState([]);
-    const [toast, setToast] = useState(null);
+    const [logsOpen, setLogsOpen] = useState(false);
+    const { toasts, push: pushToast } = useToasts();
+    const { progress, start: startProgress, stop: stopProgress } = useProgress();
     const [busy, setBusy] = useState(null);
     const [paletteOpen, setPaletteOpen] = useState(false);
     const [paletteQuery, setPaletteQuery] = useState("");
@@ -88,54 +107,61 @@ export function App(props) {
     const [viewerSession, setViewerSession] = useState(null);
     const [viewerStatus, setViewerStatus] = useState(null);
     const [streamOk, setStreamOk] = useState(false);
-    const [showLogs, setShowLogs] = useState(true);
     const [prompt, setPrompt] = useState(null);
     const [promptValue, setPromptValue] = useState("");
     const [config, setConfig] = useState(null);
     const [fluxFiles, setFluxFiles] = useState([]);
-    const listRef = useRef(null);
-    const [listBounds, setListBounds] = useState(null);
     const [cols, setCols] = useState(() => process.stdout.columns ?? 80);
+    const [rows, setRows] = useState(() => process.stdout.rows ?? 24);
+    const [debugLayout, setDebugLayout] = useState(false);
     const navItems = useMemo(() => {
         const items = [];
-        items.push({ type: "section", label: "Recent" });
+        items.push({ type: "section", label: "Recents" });
         items.push(...recents);
-        items.push({ type: "section", label: "Open" });
-        items.push({ type: "action", id: "open", label: "Open..." });
-        items.push({ type: "section", label: "New" });
-        items.push({ type: "action", id: "new", label: "New..." });
-        items.push({ type: "section", label: "Actions" });
+        items.push({ type: "section", label: "Primary" });
+        items.push({ type: "action", id: "new", label: "New" });
+        items.push({ type: "action", id: "open", label: "Open" });
         items.push({ type: "action", id: "view", label: "View" });
         items.push({ type: "action", id: "export", label: "Export PDF" });
+        items.push({ type: "section", label: "Secondary" });
         items.push({ type: "action", id: "check", label: "Check" });
         items.push({ type: "action", id: "format", label: "Format" });
-        items.push({ type: "action", id: "add", label: "Add..." });
-        items.push({ type: "section", label: "Settings" });
+        items.push({ type: "action", id: "add", label: "Add…" });
         items.push({ type: "action", id: "settings", label: "Settings" });
         return items;
     }, [recents]);
-    const handleMouseInput = useCallback((input) => {
-        if (!listBounds)
+    const selectedItem = navItems[selectedIndex];
+    const paletteItems = useMemo(() => buildPaletteItems({
+        recents: recents.filter((item) => item.type === "doc"),
+        fluxFiles,
+        activeDoc,
+    }), [recents, fluxFiles, activeDoc]);
+    const filteredPalette = useMemo(() => filterPaletteItems(paletteItems, paletteQuery), [paletteItems, paletteQuery]);
+    const limitedPalette = useMemo(() => filteredPalette.slice(0, 12), [filteredPalette]);
+    const paletteGroups = useMemo(() => groupPaletteItems(limitedPalette), [limitedPalette]);
+    const innerWidth = Math.max(20, cols - 4);
+    const overlayWidth = Math.max(28, Math.min(72, innerWidth - 4));
+    const navWidth = Math.min(32, Math.max(20, Math.floor(innerWidth * 0.34)));
+    const detailWidth = Math.max(20, innerWidth - navWidth - 2);
+    const navListHeight = Math.max(8, rows - 12);
+    const mouseDisabled = paletteOpen || helpOpen || versionOpen || Boolean(prompt);
+    const openPrompt = useCallback((label, onSubmit) => {
+        setPromptValue("");
+        setPrompt({ label, onSubmit });
+    }, []);
+    useEffect(() => {
+        const stdout = process.stdout;
+        if (!stdout?.on || !stdout?.off)
             return;
-        if (wizardOpen || paletteOpen || prompt || helpOpen || versionOpen)
-            return;
-        const events = parseMouseSequences(input);
-        for (const event of events) {
-            if (!event.pressed || event.button !== 0)
-                continue;
-            const row = event.y - 1;
-            if (row < listBounds.y || row >= listBounds.y + navItems.length)
-                continue;
-            const idx = row - listBounds.y;
-            if (idx >= 0 && idx < navItems.length) {
-                setSelectedIndex(idx);
-                const item = navItems[idx];
-                if (item) {
-                    void activateNavItem(item);
-                }
-            }
-        }
-    }, [listBounds, wizardOpen, paletteOpen, prompt, helpOpen, versionOpen, navItems, activateNavItem]);
+        const handleResize = () => {
+            setCols(stdout.columns ?? 80);
+            setRows(stdout.rows ?? 24);
+        };
+        stdout.on("resize", handleResize);
+        return () => {
+            stdout.off("resize", handleResize);
+        };
+    }, []);
     useEffect(() => {
         void refreshRecents();
         void refreshConfig();
@@ -149,48 +175,6 @@ export function App(props) {
         applyWizardValues(defaults, config);
         setWizardDefaultsApplied(true);
     }, [config, wizardDefaultsApplied]);
-    useEffect(() => {
-        const stdout = process.stdout;
-        if (!stdout?.on || !stdout?.off)
-            return;
-        const handleResize = () => setCols(stdout.columns ?? 80);
-        stdout.on("resize", handleResize);
-        return () => {
-            stdout.off("resize", handleResize);
-        };
-    }, []);
-    useEffect(() => {
-        const stdout = process.stdout;
-        if (!stdout?.isTTY)
-            return;
-        stdout.write("\u001b[?1000h\u001b[?1006h");
-        return () => {
-            stdout.write("\u001b[?1000l\u001b[?1006l");
-        };
-    }, []);
-    useEffect(() => {
-        if (!listRef.current)
-            return;
-        try {
-            const bounds = measureElement(listRef.current);
-            setListBounds({ y: bounds.y ?? 0, height: bounds.height ?? 0 });
-        }
-        catch {
-            // ignore
-        }
-    }, [recents, selectedIndex]);
-    useEffect(() => {
-        const stdin = process.stdin;
-        if (!stdin?.on || !stdin.isTTY)
-            return;
-        const handleData = (data) => {
-            handleMouseInput(data.toString("utf8"));
-        };
-        stdin.on("data", handleData);
-        return () => {
-            stdin.off("data", handleData);
-        };
-    }, [handleMouseInput]);
     useEffect(() => {
         if (initialRouteHandled)
             return;
@@ -236,7 +220,6 @@ export function App(props) {
             }
             catch {
                 setStreamOk(false);
-                // ignore
             }
         };
         const timer = setInterval(tick, 1000);
@@ -252,12 +235,27 @@ export function App(props) {
             }
         };
     }, [viewerSession, props.detach]);
+    useEffect(() => {
+        setPaletteIndex((prev) => Math.max(0, Math.min(prev, limitedPalette.length - 1)));
+    }, [limitedPalette.length]);
+    useEffect(() => {
+        if (selectedIndex >= navItems.length) {
+            setSelectedIndex(Math.max(0, navItems.length - 1));
+        }
+        if (navItems[selectedIndex]?.type === "section") {
+            moveSelection(1);
+        }
+    }, [navItems, selectedIndex]);
     useInput(async (input, key) => {
         if (key.ctrl && input === "c") {
             exit();
             return;
         }
-        if (input && isMouseSequence(input)) {
+        if (input && input.includes("\u001b[<")) {
+            return;
+        }
+        if (input?.toLowerCase() === "q" && !paletteOpen && !helpOpen && !versionOpen && !prompt) {
+            exit();
             return;
         }
         if (versionOpen) {
@@ -302,8 +300,7 @@ export function App(props) {
                 return;
             }
             if (key.return) {
-                const items = filteredPalette;
-                const item = items[paletteIndex];
+                const item = limitedPalette[paletteIndex];
                 if (item) {
                     await handlePaletteSelect(item);
                 }
@@ -313,7 +310,7 @@ export function App(props) {
                 return;
             }
             if (key.downArrow) {
-                setPaletteIndex((prev) => Math.min(prev + 1, filteredPalette.length - 1));
+                setPaletteIndex((prev) => Math.min(prev + 1, limitedPalette.length - 1));
                 return;
             }
             if (key.upArrow) {
@@ -326,15 +323,24 @@ export function App(props) {
             }
             if (input) {
                 setPaletteQuery((prev) => prev + input);
+                return;
             }
             return;
         }
         if (key.ctrl && input === "k") {
             setPaletteOpen(true);
+            setPaletteQuery("");
+            setPaletteIndex(0);
             return;
         }
         if (input === "/") {
             setPaletteOpen(true);
+            setPaletteQuery("");
+            setPaletteIndex(0);
+            return;
+        }
+        if (input === "?") {
+            setHelpOpen(true);
             return;
         }
         if (wizardOpen) {
@@ -384,50 +390,41 @@ export function App(props) {
                 return;
             }
             if (input?.toLowerCase() === "i") {
-                setPrompt({
-                    label: "Set interval (ms)",
-                    onSubmit: async (value) => {
-                        const next = Number(value);
-                        if (!Number.isFinite(next)) {
-                            showToast("Invalid interval");
-                            return;
-                        }
-                        await updateViewerTicker(viewerSession.url, { docstepMs: next });
-                        setViewerStatus((prev) => prev ? { ...prev, docstepMs: next } : prev);
-                        showToast("Interval updated");
-                    },
+                openPrompt("Set interval (ms)", async (value) => {
+                    const next = Number(value);
+                    if (!Number.isFinite(next)) {
+                        showToast("Invalid interval", "error");
+                        return;
+                    }
+                    await updateViewerTicker(viewerSession.url, { docstepMs: next });
+                    setViewerStatus((prev) => prev ? { ...prev, docstepMs: next } : prev);
+                    showToast("Interval updated", "success");
                 });
                 return;
             }
             if (input?.toLowerCase() === "s") {
-                setPrompt({
-                    label: "Set seed",
-                    onSubmit: async (value) => {
-                        const next = Number(value);
-                        if (!Number.isFinite(next)) {
-                            showToast("Invalid seed");
-                            return;
-                        }
-                        await updateViewerRuntime(viewerSession.url, { seed: next });
-                        setViewerStatus((prev) => prev ? { ...prev, seed: next } : prev);
-                        showToast("Seed updated");
-                    },
+                openPrompt("Set seed", async (value) => {
+                    const next = Number(value);
+                    if (!Number.isFinite(next)) {
+                        showToast("Invalid seed", "error");
+                        return;
+                    }
+                    await updateViewerRuntime(viewerSession.url, { seed: next });
+                    setViewerStatus((prev) => prev ? { ...prev, seed: next } : prev);
+                    showToast("Seed updated", "success");
                 });
                 return;
             }
             if (input?.toLowerCase() === "j") {
-                setPrompt({
-                    label: "Jump docstep",
-                    onSubmit: async (value) => {
-                        const next = Number(value);
-                        if (!Number.isFinite(next)) {
-                            showToast("Invalid docstep");
-                            return;
-                        }
-                        await updateViewerRuntime(viewerSession.url, { docstep: next });
-                        setViewerStatus((prev) => prev ? { ...prev, docstep: next } : prev);
-                        showToast("Docstep updated");
-                    },
+                openPrompt("Jump docstep", async (value) => {
+                    const next = Number(value);
+                    if (!Number.isFinite(next)) {
+                        showToast("Invalid docstep", "error");
+                        return;
+                    }
+                    await updateViewerRuntime(viewerSession.url, { docstep: next });
+                    setViewerStatus((prev) => prev ? { ...prev, docstep: next } : prev);
+                    showToast("Docstep updated", "success");
                 });
                 return;
             }
@@ -436,33 +433,32 @@ export function App(props) {
                 return;
             }
         }
-        const selectedItem = navItems[selectedIndex];
-        const inSettings = selectedItem?.type === "action" && selectedItem.id === "settings";
-        if (inSettings) {
+        if (selectedItem?.type === "action" && selectedItem.id === "settings") {
             if (input?.toLowerCase() === "i") {
                 await initConfig();
                 return;
             }
+            if (input?.toLowerCase() === "t") {
+                setDebugLayout((prev) => !prev);
+                return;
+            }
             if (input?.toLowerCase() === "d") {
-                setPrompt({
-                    label: "Set docstepMs",
-                    onSubmit: async (value) => {
-                        const next = Number(value);
-                        if (!Number.isFinite(next)) {
-                            showToast("Invalid number");
-                            return;
-                        }
-                        await configCommand({
-                            cwd: props.cwd,
-                            action: "set",
-                            key: "docstepMs",
-                            value: next,
-                            init: true,
-                            env: process.env,
-                        });
-                        await refreshConfig();
-                        showToast("Config updated");
-                    },
+                openPrompt("Set docstepMs", async (value) => {
+                    const next = Number(value);
+                    if (!Number.isFinite(next)) {
+                        showToast("Invalid number", "error");
+                        return;
+                    }
+                    await configCommand({
+                        cwd: props.cwd,
+                        action: "set",
+                        key: "docstepMs",
+                        value: next,
+                        init: true,
+                        env: process.env,
+                    });
+                    await refreshConfig();
+                    showToast("Config updated", "success");
                 });
                 return;
             }
@@ -470,76 +466,100 @@ export function App(props) {
         if (activeDoc) {
             if (input?.toLowerCase() === "o") {
                 revealInFinder(activeDoc);
-                showToast("Opened in file explorer");
+                showToast("Opened in file explorer", "success");
                 return;
             }
             if (input?.toLowerCase() === "y") {
                 const ok = await copyToClipboard(activeDoc);
-                showToast(ok ? "Copied path" : "Copy failed");
+                showToast(ok ? "Copied path" : "Copy failed", ok ? "success" : "error");
                 return;
             }
             if (input?.toLowerCase() === "l") {
-                setShowLogs((prev) => !prev);
+                setLogsOpen((prev) => !prev);
                 return;
             }
         }
         if (key.downArrow) {
-            setSelectedIndex((prev) => Math.min(prev + 1, navItems.length - 1));
+            moveSelection(1);
             return;
         }
         if (key.upArrow) {
-            setSelectedIndex((prev) => Math.max(prev - 1, 0));
+            moveSelection(-1);
             return;
         }
         if (key.return) {
+            if (logs.length > 0 && selectedItem?.type === "doc") {
+                setLogsOpen((prev) => !prev);
+                return;
+            }
             const item = navItems[selectedIndex];
             if (item)
                 await activateNavItem(item);
-            return;
         }
     });
-    const paletteItems = useMemo(() => {
-        const items = [];
-        items.push({ id: "open", label: "Open document...", kind: "action", payload: { action: "open" } });
-        items.push({ id: "new", label: "New document wizard", kind: "action", payload: { action: "new" } });
-        items.push({ id: "view", label: "View current document", kind: "action", payload: { action: "view" } });
-        items.push({ id: "export", label: "Export PDF", kind: "action", payload: { action: "export" } });
-        items.push({ id: "check", label: "Run check", kind: "action", payload: { action: "check" } });
-        items.push({ id: "format", label: "Format document", kind: "action", payload: { action: "format" } });
-        items.push({ id: "add-section", label: "Add section", kind: "action", payload: { action: "add", kind: "section" } });
-        items.push({ id: "add-figure", label: "Add figure", kind: "action", payload: { action: "add", kind: "figure" } });
-        items.push({ id: "settings", label: "Open settings", kind: "action", payload: { action: "settings" } });
-        items.push({ id: "new-demo", label: "New: demo", kind: "template", payload: { template: "demo" } });
-        items.push({ id: "new-article", label: "New: article", kind: "template", payload: { template: "article" } });
-        items.push({ id: "new-spec", label: "New: spec", kind: "template", payload: { template: "spec" } });
-        items.push({ id: "new-zine", label: "New: zine", kind: "template", payload: { template: "zine" } });
-        items.push({ id: "new-paper", label: "New: paper", kind: "template", payload: { template: "paper" } });
-        for (const item of recents) {
-            if (item.type === "doc") {
-                items.push({ id: item.path, label: `Open ${path.basename(item.path)}`, kind: "doc", payload: { path: item.path } });
-            }
+    const wizardSteps = useMemo(() => {
+        const steps = [
+            { kind: "select", key: "template", label: "Template", options: TEMPLATE_OPTIONS },
+            { kind: "select", key: "page", label: "Page size", options: PAGE_OPTIONS },
+            { kind: "select", key: "theme", label: "Theme", options: THEME_OPTIONS },
+            { kind: "select", key: "fonts", label: "Fonts preset", options: FONT_OPTIONS },
+            { kind: "select", key: "fontFallback", label: "Font fallback", options: FALLBACK_OPTIONS },
+            { kind: "select", key: "assets", label: "Assets folder", options: YES_NO_OPTIONS },
+            { kind: "select", key: "chaptersEnabled", label: "Chapters scaffold", options: YES_NO_OPTIONS },
+        ];
+        if (wizardValues.chaptersEnabled) {
+            steps.push({ kind: "select", key: "chapters", label: "Chapters count", options: CHAPTER_OPTIONS });
         }
-        for (const file of fluxFiles) {
-            items.push({ id: file, label: `File: ${path.basename(file)}`, kind: "doc", payload: { path: file } });
-        }
-        return items;
-    }, [recents, fluxFiles]);
-    const filteredPalette = useMemo(() => {
-        const query = paletteQuery.trim().toLowerCase();
-        if (!query)
-            return paletteItems;
-        return paletteItems
-            .map((item) => {
-            const score = fuzzyScore(query, item.label.toLowerCase());
-            return score === null ? null : { item, score };
-        })
-            .filter((item) => item !== null)
-            .sort((a, b) => a.score - b.score)
-            .map((entry) => entry.item);
-    }, [paletteItems, paletteQuery]);
+        steps.push({ kind: "select", key: "live", label: "Live slots", options: YES_NO_OPTIONS });
+        steps.push({ kind: "summary", label: "Summary" });
+        return steps;
+    }, [wizardValues.chaptersEnabled]);
     useEffect(() => {
-        setPaletteIndex((prev) => Math.max(0, Math.min(prev, filteredPalette.length - 1)));
-    }, [filteredPalette.length]);
+        setWizardStep((prev) => Math.max(0, Math.min(prev, wizardSteps.length - 1)));
+    }, [wizardSteps.length]);
+    const actionItems = useMemo(() => {
+        const selectedActionId = selectedItem?.type === "action" ? selectedItem.id : undefined;
+        return [
+            { id: "view", label: "View", icon: "◻︎", onClick: () => void handleView(), active: selectedActionId === "view" },
+            { id: "export", label: "Export PDF", icon: "⇩", onClick: () => void handleExport(), active: selectedActionId === "export" },
+            { id: "check", label: "Check", icon: "✓", onClick: () => void handleCheck(), active: selectedActionId === "check" },
+            { id: "format", label: "Format", icon: "≡", onClick: () => void handleFormat(), active: selectedActionId === "format" },
+        ];
+    }, [selectedItem, activeDoc, config, viewerSession]);
+    const rightPane = (() => {
+        if (wizardOpen) {
+            const step = wizardSteps[wizardStep] ?? null;
+            return (_jsx(NewWizardScreen, { width: detailWidth, step: step, stepIndex: wizardStep, stepsCount: wizardSteps.length, values: wizardValues, selectedIndex: step?.kind === "select" ? wizardIndexes[step.key] ?? 0 : 0, created: wizardCreated, openChoice: wizardOpenChoice, outputDir: resolveWizardOutDir() ?? props.cwd, debug: debugLayout }));
+        }
+        if (selectedItem?.type === "action" && selectedItem.id === "settings") {
+            return (_jsx(SettingsScreen, { width: detailWidth, config: config, debugLayout: debugLayout, onToggleDebug: () => setDebugLayout((prev) => !prev), debug: debugLayout }));
+        }
+        if (selectedItem?.type === "action" && selectedItem.id === "add") {
+            return _jsx(AddWizardScreen, { width: detailWidth, debug: debugLayout });
+        }
+        if (viewerSession) {
+            return (_jsx(ViewerControlScreen, { width: detailWidth, activeDoc: activeDoc, viewerUrl: viewerSession.url, viewerStatus: viewerStatus, streamOk: streamOk, backend: BACKEND_LABEL, debug: debugLayout }));
+        }
+        return (_jsx(DashboardScreen, { width: detailWidth, activeDoc: activeDoc, backend: BACKEND_LABEL, viewerStatus: viewerStatus, streamOk: streamOk, logs: logs, logsOpen: logsOpen, onToggleLogs: () => setLogsOpen((prev) => !prev), actionItems: actionItems, showEmptyState: recents.length === 0 && !activeDoc, onEmptyAction: (action) => {
+                if (action === "new")
+                    openWizard();
+                if (action === "open") {
+                    openPrompt("Open .flux path", async (value) => {
+                        if (!value)
+                            return;
+                        setActiveDoc(value);
+                        await updateRecents(props.cwd, value);
+                        showToast("Document selected", "success");
+                    });
+                }
+            }, debug: debugLayout }));
+    })();
+    return (_jsx(MouseProvider, { disabled: mouseDisabled, children: _jsxs(AppFrame, { debug: debugLayout, children: [_jsxs(Box, { flexDirection: "row", gap: 2, height: "100%", children: [_jsxs(Box, { width: navWidth, flexDirection: "column", gap: 1, children: [_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: accent("FLUX") }), _jsxs(Box, { flexDirection: "row", gap: 1, children: [_jsx(Text, { color: streamOk ? "green" : color.muted, children: streamOk ? "●" : "○" }), _jsx(Text, { color: color.muted, children: `Flux ${props.version ?? "0.x"} · ${streamOk ? "online" : "offline"} · backend: ${BACKEND_LABEL}` })] })] }), _jsx(Box, { flexDirection: "column", gap: 1, children: _jsx(Card, { title: "Navigation", meta: "", accent: true, ruleWidth: navWidth - 6, debug: debugLayout, footer: (_jsx(Text, { color: color.muted, children: "/ palette \u00B7 q quit \u00B7 ? help" })), children: _jsx(NavList, { items: navItems, selectedIndex: selectedIndex, onSelect: (index) => {
+                                                setSelectedIndex(index);
+                                                const item = navItems[index];
+                                                if (item)
+                                                    void activateNavItem(item);
+                                            }, width: navWidth - 4, maxHeight: navListHeight, debug: debugLayout }) }) })] }), _jsx(Box, { flexDirection: "column", flexGrow: 1, gap: 1, children: rightPane })] }), _jsx(Box, { marginTop: 1, children: _jsx(ToastHost, { toasts: toasts, busy: busy, progress: progress }) }), paletteOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsx(CommandPaletteModal, { query: paletteQuery, groups: paletteGroups, selectedId: limitedPalette[paletteIndex]?.id, width: overlayWidth, debug: debugLayout }) })) : null, prompt ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsx(PromptModal, { label: prompt.label, value: promptValue, width: overlayWidth, debug: debugLayout }) })) : null, helpOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsx(HelpOverlay, { width: overlayWidth, version: props.version, recentsPath: recentsPath, backend: BACKEND_LABEL, extraLines: props.helpCommand ? getHelpLines(props.helpCommand) : undefined }) })) : null, versionOpen ? (_jsx(Box, { position: "absolute", marginTop: 2, marginLeft: Math.max(2, Math.floor((innerWidth - overlayWidth) / 2)), children: _jsxs(Card, { title: "Flux CLI", meta: "", accent: true, ruleWidth: overlayWidth - 6, debug: debugLayout, children: [_jsx(Text, { color: color.muted, children: props.version ?? "version unknown" }), _jsx(Text, { color: color.muted, children: "Press Esc to close" })] }) })) : null] }) }));
     async function refreshRecents() {
         const store = await getRecentsStore(props.cwd);
         const list = store.entries.map((entry) => ({
@@ -549,6 +569,7 @@ export function App(props) {
             lastOpened: entry.lastOpened,
         }));
         setRecents(list);
+        setRecentsPath(store.storePath);
         if (!activeDoc && list.length && list[0].type === "doc") {
             setActiveDoc(list[0].path);
         }
@@ -562,6 +583,17 @@ export function App(props) {
         await walk(props.cwd, files, 3);
         setFluxFiles(files.slice(0, 20));
     }
+    function moveSelection(delta) {
+        let next = selectedIndex + delta;
+        while (next >= 0 && next < navItems.length) {
+            const item = navItems[next];
+            if (item && item.type !== "section") {
+                setSelectedIndex(next);
+                return;
+            }
+            next += delta;
+        }
+    }
     async function activateNavItem(item) {
         if (item.type === "doc") {
             setActiveDoc(item.path);
@@ -570,15 +602,12 @@ export function App(props) {
         if (item.type === "action") {
             switch (item.id) {
                 case "open":
-                    setPrompt({
-                        label: "Open .flux path",
-                        onSubmit: async (value) => {
-                            if (!value)
-                                return;
-                            setActiveDoc(value);
-                            await updateRecents(props.cwd, value);
-                            showToast("Document selected");
-                        },
+                    openPrompt("Open .flux path", async (value) => {
+                        if (!value)
+                            return;
+                        setActiveDoc(value);
+                        await updateRecents(props.cwd, value);
+                        showToast("Document selected", "success");
                     });
                     return;
                 case "new":
@@ -598,6 +627,8 @@ export function App(props) {
                     return;
                 case "add":
                     setPaletteOpen(true);
+                    setPaletteQuery("");
+                    setPaletteIndex(0);
                     return;
                 case "settings":
                     return;
@@ -609,7 +640,7 @@ export function App(props) {
     async function handleView(docPath, overrides) {
         const target = docPath ?? activeDoc;
         if (!target) {
-            showToast("Select a document first.");
+            showToast("Select a document first.", "error");
             return;
         }
         setActiveDoc(target);
@@ -625,7 +656,7 @@ export function App(props) {
         });
         setBusy(null);
         if (!result.ok || !result.data) {
-            showToast(result.error?.message ?? "Viewer failed");
+            showToast(result.error?.message ?? "Viewer failed", "error");
             return;
         }
         setViewerSession(result.data.session);
@@ -650,15 +681,16 @@ export function App(props) {
         }
         await updateRecents(props.cwd, target);
         openBrowser(result.data.session.url);
-        showToast(result.data.session.attached ? "Attached to viewer" : "Viewer running");
+        showToast(result.data.session.attached ? "Attached to viewer" : "Viewer running", "success");
     }
     async function handleExport() {
         if (!activeDoc) {
-            showToast("Select a document first.");
+            showToast("Select a document first.", "error");
             return;
         }
         const defaultOut = activeDoc.replace(/\.flux$/i, ".pdf");
         setBusy("Exporting PDF...");
+        startProgress("Export PDF");
         try {
             const result = viewerSession
                 ? await requestViewerPdf(viewerSession.url)
@@ -669,72 +701,72 @@ export function App(props) {
             else {
                 await pdfCommand({ file: activeDoc, outPath: defaultOut });
             }
-            showToast(`Exported ${path.basename(defaultOut)}`);
+            showToast(`Exported ${path.basename(defaultOut)}`, "success");
         }
         catch (error) {
-            showToast(`Export failed: ${error.message}`);
+            showToast(`Export failed: ${error.message}`, "error");
         }
         finally {
+            stopProgress();
             setBusy(null);
         }
     }
     async function handleCheck(docPath) {
         const target = docPath ?? activeDoc;
         if (!target) {
-            showToast("Select a document first.");
+            showToast("Select a document first.", "error");
             return;
         }
         setBusy("Checking...");
         const result = await checkCommand({ files: [target] });
         setBusy(null);
         if (!result.ok || !result.data) {
-            showToast("Check failed");
+            showToast("Check failed", "error");
             return;
         }
         const failures = result.data.results.filter((r) => !r.ok);
         if (failures.length) {
-            showToast(`Check failed (${failures.length})`);
+            showToast(`Check failed (${failures.length})`, "error");
             setLogs(failures.flatMap((r) => r.errors ?? []));
+            setLogsOpen(false);
         }
         else {
-            showToast("All checks passed");
+            showToast("All checks passed", "success");
+            setLogs([]);
         }
     }
     async function handleFormat(docPath) {
         const target = docPath ?? activeDoc;
         if (!target) {
-            showToast("Select a document first.");
+            showToast("Select a document first.", "error");
             return;
         }
         setBusy("Formatting...");
         const result = await formatCommand({ file: target });
         setBusy(null);
         if (!result.ok) {
-            showToast(result.error?.message ?? "Format failed");
+            showToast(result.error?.message ?? "Format failed", "error");
             return;
         }
-        showToast("Formatted document");
+        showToast("Formatted document", "success");
     }
     async function handlePaletteSelect(item) {
         if (item.kind === "template") {
             await runTemplate(item.payload.template);
             return;
         }
-        if (item.kind === "doc") {
+        if (item.kind === "doc" || item.kind === "file") {
             setActiveDoc(item.payload.path);
             return;
         }
         if (item.kind === "action") {
             if (item.payload.action === "open") {
-                setPrompt({
-                    label: "Open .flux path",
-                    onSubmit: async (value) => {
-                        if (!value)
-                            return;
-                        setActiveDoc(value);
-                        await updateRecents(props.cwd, value);
-                        showToast("Document selected");
-                    },
+                openPrompt("Open .flux path", async (value) => {
+                    if (!value)
+                        return;
+                    setActiveDoc(value);
+                    await updateRecents(props.cwd, value);
+                    showToast("Document selected", "success");
                 });
                 return;
             }
@@ -763,7 +795,7 @@ export function App(props) {
     async function runAdd(kind, docPath, options) {
         const target = docPath ?? activeDoc;
         if (!target) {
-            showToast("Select a document first.");
+            showToast("Select a document first.", "error");
             return;
         }
         setBusy(`Adding ${kind}...`);
@@ -779,10 +811,10 @@ export function App(props) {
         });
         setBusy(null);
         if (!result.ok) {
-            showToast(result.error?.message ?? "Add failed");
+            showToast(result.error?.message ?? "Add failed", "error");
             return;
         }
-        showToast(`Added ${kind}`);
+        showToast(`Added ${kind}`, "success");
     }
     async function runTemplate(template) {
         setBusy(`Creating ${template}...`);
@@ -800,12 +832,12 @@ export function App(props) {
         });
         setBusy(null);
         if (!result.ok || !result.data) {
-            showToast(result.error?.message ?? "New failed");
+            showToast(result.error?.message ?? "New failed", "error");
             return;
         }
         setActiveDoc(result.data.docPath);
         await updateRecents(props.cwd, result.data.docPath);
-        showToast("Document created");
+        showToast("Document created", "success");
     }
     function buildWizardDefaults(cfg) {
         const template = "demo";
@@ -852,71 +884,6 @@ export function App(props) {
             ?? (cfg?.defaultOutputDir && cfg.defaultOutputDir !== "." ? cfg.defaultOutputDir : undefined);
         setWizardOutDir(nextOut);
     }
-    const wizardSteps = useMemo(() => {
-        const steps = [
-            {
-                kind: "select",
-                key: "template",
-                label: "Template",
-                options: TEMPLATE_OPTIONS,
-            },
-            {
-                kind: "select",
-                key: "page",
-                label: "Page size",
-                options: PAGE_OPTIONS,
-            },
-            {
-                kind: "select",
-                key: "theme",
-                label: "Theme",
-                options: THEME_OPTIONS,
-            },
-            {
-                kind: "select",
-                key: "fonts",
-                label: "Fonts preset",
-                options: FONT_OPTIONS,
-            },
-            {
-                kind: "select",
-                key: "fontFallback",
-                label: "Font fallback",
-                options: FALLBACK_OPTIONS,
-            },
-            {
-                kind: "select",
-                key: "assets",
-                label: "Assets folder",
-                options: YES_NO_OPTIONS,
-            },
-            {
-                kind: "select",
-                key: "chaptersEnabled",
-                label: "Chapters scaffold",
-                options: YES_NO_OPTIONS,
-            },
-        ];
-        if (wizardValues.chaptersEnabled) {
-            steps.push({
-                kind: "select",
-                key: "chapters",
-                label: "Chapters count",
-                options: CHAPTER_OPTIONS,
-            });
-        }
-        steps.push({
-            kind: "select",
-            key: "live",
-            label: "Live slots",
-            options: YES_NO_OPTIONS,
-        });
-        steps.push({ kind: "summary", label: "Summary" });
-        return steps;
-    }, [wizardValues.chaptersEnabled]);
-    useEffect(() => {
-        setWizardStep((prev) => Math.max(0, Math.min(prev, wizardSteps.length - 1)));
-    }, [wizardSteps.length]);
     function updateWizardChoice(direction) {
         const step = wizardSteps[wizardStep];
         if (!step || step.kind !== "select")
@@ -974,14 +941,14 @@ export function App(props) {
         });
         setBusy(null);
         if (!result.ok || !result.data) {
-            showToast(result.error?.message ?? "New failed");
+            showToast(result.error?.message ?? "New failed", "error");
             return;
         }
         setActiveDoc(result.data.docPath);
         await updateRecents(props.cwd, result.data.docPath);
         setWizardCreated(result.data);
         setWizardOpenChoice(0);
-        showToast("Document created");
+        showToast("Document created", "success");
     }
     function openWizard(reset = true) {
         setWizardOpen(true);
@@ -1005,7 +972,7 @@ export function App(props) {
             case "new": {
                 const parsed = parseNewArgsForUi(rest);
                 if (parsed.unknownTemplate) {
-                    showToast(`Unknown template '${parsed.unknownTemplate}'.`);
+                    showToast(`Unknown template '${parsed.unknownTemplate}'.`, "error");
                 }
                 const defaults = buildWizardDefaults(config);
                 const next = { ...defaults };
@@ -1052,7 +1019,7 @@ export function App(props) {
                 selectNavAction("view");
                 const target = parsed.file ?? activeDoc ?? null;
                 if (!target) {
-                    showToast("flux view: missing <file>");
+                    showToast("flux view: missing <file>", "error");
                     return;
                 }
                 await handleView(target, {
@@ -1068,7 +1035,7 @@ export function App(props) {
                 selectNavAction("check");
                 const target = firstFileArg(rest) ?? activeDoc ?? null;
                 if (!target) {
-                    showToast("flux check: missing <file>");
+                    showToast("flux check: missing <file>", "error");
                     return;
                 }
                 setActiveDoc(target);
@@ -1079,7 +1046,7 @@ export function App(props) {
                 selectNavAction("format");
                 const target = firstFileArg(rest) ?? activeDoc ?? null;
                 if (!target) {
-                    showToast("flux fmt: missing <file>");
+                    showToast("flux fmt: missing <file>", "error");
                     return;
                 }
                 setActiveDoc(target);
@@ -1103,17 +1070,17 @@ export function App(props) {
                 selectNavAction("export");
                 const parsed = parsePdfArgsForUi(rest);
                 if (!parsed.file || !parsed.outPath) {
-                    showToast("flux pdf: missing <file> or --out");
+                    showToast("flux pdf: missing <file> or --out", "error");
                     return;
                 }
                 setBusy("Exporting PDF...");
                 const result = await pdfCommand({ file: parsed.file, outPath: parsed.outPath, seed: parsed.seed, docstep: parsed.docstep });
                 setBusy(null);
                 if (!result.ok) {
-                    showToast(result.error?.message ?? "Export failed");
+                    showToast(result.error?.message ?? "Export failed", "error");
                     return;
                 }
-                showToast(`Wrote ${parsed.outPath}`);
+                showToast(`Wrote ${parsed.outPath}`, "success");
                 await updateRecents(props.cwd, parsed.file);
                 return;
             }
@@ -1125,16 +1092,15 @@ export function App(props) {
             case "render":
             case "tick":
             case "step": {
-                showToast("Use --no-ui for JSON output.");
+                showToast("Use --no-ui for JSON output.", "error");
                 return;
             }
             default:
                 return;
         }
     }
-    function showToast(message) {
-        setToast(message);
-        setTimeout(() => setToast(null), 2500);
+    function showToast(message, kind = "info") {
+        pushToast(message, kind);
     }
     async function toggleViewer() {
         if (!viewerSession)
@@ -1142,7 +1108,7 @@ export function App(props) {
         const running = !(viewerStatus?.running ?? true);
         await updateViewerTicker(viewerSession.url, { running });
         setViewerStatus((prev) => prev ? { ...prev, running } : prev);
-        showToast(running ? "Viewer running" : "Viewer paused");
+        showToast(running ? "Viewer running" : "Viewer paused", "success");
     }
     async function initConfig() {
         const current = config ?? { docstepMs: 1000 };
@@ -1155,84 +1121,8 @@ export function App(props) {
             env: process.env,
         });
         await refreshConfig();
-        showToast("Config initialized");
+        showToast("Config initialized", "success");
     }
-    const rightPane = renderRightPane();
-    function renderRightPane() {
-        if (versionOpen) {
-            return renderVersionPane();
-        }
-        if (helpOpen) {
-            return renderHelpPane();
-        }
-        if (wizardOpen) {
-            return renderWizardPane();
-        }
-        const item = navItems[selectedIndex];
-        if (item?.type === "action" && item.id === "open") {
-            return (_jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { color: ACCENT, children: "Open document" }), _jsx(Text, { children: "Use Enter to paste a path, or open the palette (/)." })] }));
-        }
-        if (item?.type === "action" && item.id === "settings") {
-            return renderSettings();
-        }
-        if (viewerSession) {
-            return renderViewerPanel();
-        }
-        if (activeDoc) {
-            return renderDocPanel();
-        }
-        return (_jsx(Box, { flexDirection: "column", children: _jsx(Text, { color: ACCENT, children: "Select a document" }) }));
-    }
-    function renderWizardPane() {
-        if (wizardCreated) {
-            return (_jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { color: ACCENT, children: "Document created" }), _jsx(Text, { children: wizardCreated.docPath }), _jsx(Text, { dimColor: true, children: "Next steps" }), _jsxs(Text, { dimColor: true, children: ["flux view ", wizardCreated.docPath] }), _jsxs(Text, { dimColor: true, children: ["flux check ", wizardCreated.docPath] }), _jsxs(Text, { dimColor: true, children: ["flux pdf ", wizardCreated.docPath, " --out ", wizardCreated.docPath.replace(/\.flux$/i, ".pdf")] }), _jsxs(Box, { flexDirection: "column", marginTop: 1, children: [_jsx(Text, { children: "Open viewer now?" }), _jsxs(Text, { color: wizardOpenChoice === 0 ? ACCENT_ALT : undefined, children: [wizardOpenChoice === 0 ? ">" : " ", " Yes"] }), _jsxs(Text, { color: wizardOpenChoice === 1 ? ACCENT_ALT : undefined, children: [wizardOpenChoice === 1 ? ">" : " ", " No"] })] }), _jsx(Text, { dimColor: true, children: "Enter to confirm - Esc to close" })] }));
-        }
-        const step = wizardSteps[wizardStep];
-        if (!step) {
-            return (_jsx(Box, { flexDirection: "column", children: _jsx(Text, { color: ACCENT, children: "Wizard loading..." }) }));
-        }
-        if (step.kind === "summary") {
-            return renderWizardSummary();
-        }
-        const index = wizardIndexes[step.key] ?? 0;
-        return (_jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { color: ACCENT, children: "New document wizard" }), _jsxs(Text, { children: [step.label, " (", wizardStep + 1, "/", wizardSteps.length, ")"] }), step.options.map((opt, idx) => (_jsxs(Text, { color: idx === index ? ACCENT_ALT : undefined, children: [idx === index ? ">" : " ", " ", opt.label, opt.hint ? ` - ${opt.hint}` : ""] }, `${step.key}-${opt.label}`))), _jsx(Text, { dimColor: true, children: "Enter to continue - Backspace to go back - Esc to cancel" })] }));
-    }
-    function renderWizardSummary() {
-        const outDir = resolveWizardOutDir();
-        const title = templateTitle(wizardValues.template);
-        const slug = slugify(title);
-        const outIsFile = Boolean(outDir && outDir.endsWith(".flux"));
-        const outputDir = outIsFile && outDir ? path.dirname(outDir) : (outDir ?? props.cwd);
-        const fileName = outIsFile && outDir ? path.basename(outDir) : `${slug}.flux`;
-        return (_jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { color: ACCENT, children: "Summary" }), _jsxs(Text, { children: ["Template: ", wizardValues.template] }), _jsxs(Text, { children: ["Page size: ", wizardValues.page] }), _jsxs(Text, { children: ["Theme: ", wizardValues.theme] }), _jsxs(Text, { children: ["Fonts: ", wizardValues.fonts] }), _jsxs(Text, { children: ["Font fallback: ", wizardValues.fontFallback === "system" ? "system stack" : "primary only"] }), _jsxs(Text, { children: ["Assets folder: ", wizardValues.assets ? "yes" : "no"] }), _jsxs(Text, { children: ["Chapters: ", wizardValues.chaptersEnabled ? wizardValues.chapters : "no"] }), _jsxs(Text, { children: ["Live slots: ", wizardValues.live ? "yes" : "no"] }), _jsxs(Text, { children: ["Output dir: ", outputDir] }), _jsxs(Text, { children: ["File: ", fileName] }), _jsx(Text, { dimColor: true, children: "Enter to create - Backspace to go back - Esc to cancel" })] }));
-    }
-    function renderHelpPane() {
-        const lines = getHelpLines(props.helpCommand);
-        return (_jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { color: ACCENT, children: "Flux help" }), lines.map((line, idx) => (_jsx(Text, { dimColor: !line.trim(), children: line }, `help-${idx}`))), _jsx(Text, { dimColor: true, children: "Press Esc to close" })] }));
-    }
-    function renderVersionPane() {
-        return (_jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { color: ACCENT, children: "Flux CLI" }), _jsx(Text, { children: props.version ?? "version unknown" }), _jsx(Text, { dimColor: true, children: "Press Esc to close" })] }));
-    }
-    function renderDocPanel() {
-        return (_jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { color: ACCENT, children: "Document" }), _jsx(Text, { children: activeDoc }), _jsx(Text, { dimColor: true, children: "Actions: View, Export PDF, Check, Add..." }), _jsx(Text, { dimColor: true, children: "Press O to reveal - Y to copy path" })] }));
-    }
-    function renderViewerPanel() {
-        return (_jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { color: ACCENT, children: "Viewer" }), _jsxs(Text, { children: ["Path: ", activeDoc ?? viewerSession?.docPath ?? "unknown"] }), _jsxs(Text, { children: ["URL: ", viewerSession?.url] }), _jsxs(Text, { children: ["Docstep: ", viewerStatus?.docstep ?? 0, " - Time: ", viewerStatus?.time?.toFixed?.(2) ?? "0.00"] }), _jsxs(Text, { children: ["Interval: ", viewerStatus?.docstepMs ?? config?.docstepMs ?? 1000, "ms"] }), _jsxs(Text, { children: ["Seed: ", viewerStatus?.seed ?? 0] }), _jsxs(Text, { children: ["Running: ", viewerStatus?.running ? "yes" : "no"] }), _jsx(Text, { children: "Backend: typesetter" }), _jsxs(Text, { children: ["Stream: ", streamOk ? "connected" : "waiting"] }), _jsx(Text, { dimColor: true, children: "Controls: P pause/resume - I interval - S seed - J docstep - E export" })] }));
-    }
-    function renderSettings() {
-        if (!config) {
-            return (_jsx(Box, { flexDirection: "column", children: _jsx(Text, { children: "Loading config..." }) }));
-        }
-        return (_jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { color: ACCENT, children: "Settings" }), _jsxs(Text, { children: ["docstepMs: ", config.docstepMs] }), _jsxs(Text, { children: ["advanceTime: ", config.advanceTime ? "yes" : "no"] }), _jsxs(Text, { children: ["defaultPage: ", config.defaultPageSize] }), _jsxs(Text, { children: ["defaultTheme: ", config.defaultTheme] }), _jsxs(Text, { children: ["defaultFonts: ", config.defaultFonts] }), _jsx(Text, { dimColor: true, children: "Press I to initialize config - D to set docstepMs" })] }));
-    }
-    return (_jsxs(Box, { flexDirection: "column", height: "100%", children: [_jsxs(Box, { flexDirection: "row", gap: 1, children: [_jsxs(Box, { ref: listRef, flexDirection: "column", borderStyle: "round", borderColor: ACCENT, width: Math.min(30, Math.floor(cols * 0.3)), padding: 1, children: [_jsx(Text, { color: ACCENT_ALT, children: "Flux 2026" }), navItems.map((item, idx) => {
-                                if (item.type === "section") {
-                                    return (_jsx(Text, { dimColor: true, children: item.label }, `${item.label}-${idx}`));
-                                }
-                                const selected = idx === selectedIndex;
-                                const label = item.label;
-                                return (_jsxs(Text, { color: selected ? ACCENT_ALT : undefined, children: [selected ? ">" : " ", " ", label] }, `${item.label}-${idx}`));
-                            }), _jsx(Text, { dimColor: true, children: "/: palette - Ctrl+C: exit" })] }), _jsxs(Box, { flexDirection: "column", borderStyle: "round", borderColor: ACCENT_ALT, flexGrow: 1, padding: 1, children: [busy && (_jsxs(Text, { color: ACCENT_ALT, children: ["[busy] ", busy] })), rightPane, showLogs && logs.length > 0 && (_jsxs(Box, { flexDirection: "column", marginTop: 1, children: [_jsx(Text, { color: "red", children: "Diagnostics" }), logs.slice(0, 6).map((line, idx) => (_jsx(Text, { dimColor: true, children: line }, `${line}-${idx}`)))] }))] })] }), toast && (_jsx(Box, { marginTop: 1, children: _jsx(Text, { color: ACCENT_ALT, children: toast }) })), paletteOpen && (_jsxs(Box, { flexDirection: "column", borderStyle: "round", borderColor: ACCENT_ALT, padding: 1, marginTop: 1, children: [_jsx(Text, { color: ACCENT, children: "Command palette" }), _jsxs(Text, { children: ["Search: ", paletteQuery || ""] }), filteredPalette.slice(0, 8).map((item, idx) => (_jsxs(Text, { color: idx === paletteIndex ? ACCENT_ALT : undefined, children: [idx === paletteIndex ? ">" : " ", " ", item.label] }, item.id)))] })), prompt && (_jsx(Box, { marginTop: 1, children: _jsxs(Text, { color: ACCENT, children: [prompt.label, ": ", promptValue] }) }))] }));
 }
 function openBrowser(url) {
     const command = process.platform === "darwin"
@@ -1311,41 +1201,6 @@ async function walk(dir, out, depth) {
             out.push(full);
         }
     }
-}
-function isMouseSequence(input) {
-    return input.includes("\u001b[<");
-}
-function parseMouseSequences(input) {
-    const events = [];
-    const regex = /\u001b\[<(\d+);(\d+);(\d+)([mM])/g;
-    let match;
-    while ((match = regex.exec(input)) !== null) {
-        const buttonCode = Number(match[1]);
-        const x = Number(match[2]);
-        const y = Number(match[3]);
-        const pressed = match[4] === "M";
-        const isScroll = buttonCode >= 64;
-        const isMove = (buttonCode & 32) === 32;
-        if (isScroll || isMove)
-            continue;
-        const button = buttonCode & 3;
-        events.push({ button, x, y, pressed });
-    }
-    return events;
-}
-function fuzzyScore(query, target) {
-    if (!query)
-        return 0;
-    let score = 0;
-    let lastIndex = -1;
-    for (const ch of query) {
-        const idx = target.indexOf(ch, lastIndex + 1);
-        if (idx === -1)
-            return null;
-        score += idx - lastIndex - 1;
-        lastIndex = idx;
-    }
-    return score + (target.length - query.length);
 }
 function parseNewArgsForUi(args) {
     const provided = {
@@ -1678,24 +1533,6 @@ function parseNumberArg(raw) {
 function isTemplateName(raw) {
     return raw === "demo" || raw === "article" || raw === "spec" || raw === "zine" || raw === "paper";
 }
-function templateTitle(template) {
-    const map = {
-        demo: "Flux Demo",
-        article: "Flux Article",
-        spec: "Flux Spec",
-        zine: "Flux Zine",
-        paper: "Flux Paper",
-    };
-    return map[template] ?? "Flux Document";
-}
-function slugify(value) {
-    return value
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 60) || "flux-document";
-}
 function getHelpLines(command) {
     const topic = command ?? "";
     if (topic === "parse") {
@@ -1865,46 +1702,6 @@ function getHelpLines(command) {
             "",
         ];
     }
-    return [
-        "Flux CLI",
-        "",
-        "Usage:",
-        "  flux                (launch UI in TTY)",
-        "  flux parse [options] <files...>",
-        "  flux check [options] <files...>",
-        "  flux render [options] <file>",
-        "  flux fmt <file>",
-        "  flux tick [options] <file>",
-        "  flux step [options] <file>",
-        "  flux view <file>",
-        "  flux pdf <file> --out <file.pdf>",
-        "  flux config [set <key> <value>]",
-        "  flux new <template> [options]",
-        "  flux add <kind> [options]",
-        "",
-        "Commands:",
-        "  parse   Parse Flux source files and print their IR as JSON.",
-        "  check   Parse and run basic static checks.",
-        "  render  Render a Flux document to canonical Render IR JSON.",
-        "  fmt     Format a Flux document in-place.",
-        "  tick    Advance time and render the updated document.",
-        "  step    Advance docsteps and render the updated document.",
-        "  view    View a Flux document in a local web preview.",
-        "  pdf     Export a Flux document snapshot to PDF.",
-        "  config  View or edit configuration.",
-        "  new     Create a new Flux document.",
-        "  add     Apply structured edits to a Flux document.",
-        "",
-        "Global options:",
-        "  -h, --help      Show this help message.",
-        "  -v, --version   Show CLI version.",
-        "  --no-ui         Disable Ink UI launch.",
-        "  --ui            Force Ink UI launch (TTY only).",
-        "  --detach        Keep viewer running on UI exit.",
-        "  --json          Emit machine-readable JSON where applicable.",
-        "  -q, --quiet     Reduce non-essential output.",
-        "  -V, --verbose   Show verbose logs.",
-        "",
-    ];
+    return [];
 }
 //# sourceMappingURL=app.js.map

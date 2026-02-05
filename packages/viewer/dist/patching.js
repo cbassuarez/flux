@@ -50,7 +50,11 @@ export function applySlotPatches(root, slotPatches) {
             missing.push(id);
             continue;
         }
-        const inner = slot.querySelector("[data-flux-slot-inner]") || slot.querySelector(".flux-slot-inner") || slot;
+        const inner = slot.querySelector("[data-flux-slot-inner]");
+        if (!inner) {
+            missing.push(id);
+            continue;
+        }
         inner.innerHTML = html ?? "";
     }
     return missing;
