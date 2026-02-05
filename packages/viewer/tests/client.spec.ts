@@ -18,6 +18,14 @@ describe("viewer client updates", () => {
     expect(js).toContain('cache: "no-store"');
     expect(js).toContain("/api/patches");
   });
+
+  it("wires transport shortcuts and runtime controls", () => {
+    const js = getViewerJs();
+    expect(js).toContain("viewer-reset");
+    expect(js).toContain("ArrowLeft");
+    expect(js).toContain("ArrowRight");
+    expect(js).toContain("/api/runtime");
+  });
 });
 
 describe("viewer cache headers", () => {
