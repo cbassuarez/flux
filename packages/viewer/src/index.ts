@@ -538,7 +538,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
         return;
       }
 
-      if (url.pathname === "/api/stream") {
+      if (url.pathname === "/api/stream" || url.pathname === "/api/events") {
         res.writeHead(200, {
           "Content-Type": "text/event-stream; charset=utf-8",
           Connection: "keep-alive",
@@ -1079,7 +1079,7 @@ function applyCsp(res: http.ServerResponse): void {
       "connect-src 'self'",
       "object-src 'none'",
       "base-uri 'none'",
-      "frame-ancestors 'none'",
+      "frame-ancestors 'self'",
     ].join("; "),
   );
 }
