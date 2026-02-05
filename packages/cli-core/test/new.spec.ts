@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { mkdtemp, readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { parseDocument } from "@flux-lang/core";
 import { newCommand } from "../src/commands/new.js";
 
 async function exists(path: string): Promise<boolean> {
@@ -49,5 +50,13 @@ describe("cli-core newCommand", () => {
     expect(fluxText).toContain("assets {");
     expect(readmeText).toContain("## Preview and export");
     expect(readmeText).toContain("Font fallback:");
+
+    expect(() =>
+      parseDocument(fluxText, {
+        sourcePath: docPath,
+        docRoot: dirname(docPath),
+        resolveIncludes: true,
+      }),
+    ).not.toThrow();
   });
 });
