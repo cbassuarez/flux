@@ -256,6 +256,7 @@ export async function startViewerServer(options) {
             strategy: bank.strategy ?? null,
             bankTag: `bank:${bank.name}`,
         }));
+        const assets = current.ir.assets ?? [];
         return {
             title,
             path: docPath,
@@ -270,7 +271,9 @@ export async function startViewerServer(options) {
             lastValidRevision,
             diagnostics: current.diagnostics,
             previewPath: "/preview",
+            assets,
             outline: buildOutline(),
+            doc: baseDoc,
             assetsBanks: banks ?? [],
             capabilities: {
                 setText: true,
@@ -279,6 +282,7 @@ export async function startViewerServer(options) {
                 addFigure: true,
                 addCallout: true,
                 addTable: true,
+                addSlot: true,
                 transforms: {
                     setText: true,
                     addSection: true,
@@ -286,6 +290,7 @@ export async function startViewerServer(options) {
                     addFigure: true,
                     addCallout: true,
                     addTable: true,
+                    addSlot: true,
                 },
             },
         };
@@ -432,6 +437,17 @@ export async function startViewerServer(options) {
                 sendJson(res, state);
                 return;
             }
+            if (url.pathname === "/api/edit/source") {
+                sendJson(res, {
+                    ok: current.errors.length === 0,
+                    source: currentSource,
+                    diagnostics: current.diagnostics,
+                    revision,
+                    lastValidRevision,
+                    docPath,
+                });
+                return;
+            }
             if (url.pathname === "/api/edit/outline") {
                 sendJson(res, { outline: buildOutline() });
                 return;
@@ -477,9 +493,56 @@ export async function startViewerServer(options) {
                     });
                     return;
                 }
+                if (op === "setSource") {
+                    const nextRaw = typeof args.source === "string" ? args.source : "";
+                    if (!nextRaw.trim()) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing source" });
+                        return;
+                    }
+                    const formatted = formatFluxSource(nextRaw);
+                    const validated = parseSource(formatted);
+                    if (!validated.doc || validated.errors.length) {
+                        sendJson(res, {
+                            ok: false,
+                            diagnostics: validated.diagnostics,
+                            error: validated.errors.join("; "),
+                        });
+                        return;
+                    }
+                    await writeFileAtomic(docPath, formatted);
+                    currentSource = formatted;
+                    revision += 1;
+                    lastValidRevision = revision;
+                    rebuildFromSource(formatted);
+                    broadcastDocChanged();
+                    sendJson(res, {
+                        ok: current.errors.length === 0,
+                        newRevision: revision,
+                        diagnostics: current.diagnostics,
+                        outline: buildOutline(),
+                        state: await buildEditState(),
+                        source: currentSource,
+                    });
+                    return;
+                }
                 let nextSource = null;
                 let selectedId;
-                if (op === "setText") {
+                if (op === "replaceNode") {
+                    const id = typeof args.id === "string" ? args.id : "";
+                    const node = typeof args.node === "object" && args.node ? args.node : null;
+                    if (!node) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing node payload" });
+                        return;
+                    }
+                    const result = applyReplaceNodeTransform(source, parsed.doc, id, node, docPath);
+                    if (!result.ok) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) });
+                        return;
+                    }
+                    nextSource = formatFluxSource(result.source);
+                    selectedId = id;
+                }
+                else if (op === "setText") {
                     const id = typeof args.id === "string" ? args.id : "";
                     const text = typeof args.text === "string" ? args.text : "";
                     const result = applySetTextTransform(source, parsed.doc, id, text, docPath);
@@ -526,6 +589,9 @@ export async function startViewerServer(options) {
                         if (op === "addTable") {
                             return { kind: "table" };
                         }
+                        if (op === "addSlot") {
+                            return { kind: "slot" };
+                        }
                         throw new Error("Unsupported edit operation");
                     };
                     try {
@@ -567,6 +633,7 @@ export async function startViewerServer(options) {
                     outline: buildOutline(),
                     selectedId,
                     state: await buildEditState(),
+                    source: currentSource,
                 });
                 return;
             }
@@ -1691,6 +1758,64 @@ function getPreviewJs() {
     document.querySelectorAll("[data-flux-fit]").forEach((slot) => applyFit(slot));
   };
 
+  let selectedEl = null;
+
+  const clearSelection = () => {
+    if (!selectedEl) return;
+    selectedEl.style.outline = "";
+    selectedEl.style.outlineOffset = "";
+    selectedEl = null;
+  };
+
+  const highlightElement = (el) => {
+    clearSelection();
+    if (!el) return;
+    selectedEl = el;
+    selectedEl.style.outline = "2px solid rgba(11, 116, 144, 0.45)";
+    selectedEl.style.outlineOffset = "2px";
+  };
+
+  const findFluxElement = (target) => {
+    if (!target) return null;
+    if (typeof target.closest === "function") {
+      return target.closest("[data-flux-id]");
+    }
+    return null;
+  };
+
+  const postSelection = (el) => {
+    if (!el || !window.parent || window.parent === window) return;
+    const nodeId = el.getAttribute("data-flux-node");
+    const nodePath = el.getAttribute("data-flux-id");
+    window.parent.postMessage({ type: "flux-select", nodeId, nodePath }, "*");
+  };
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      const el = findFluxElement(event.target);
+      if (!el) return;
+      event.preventDefault();
+      event.stopPropagation();
+      postSelection(el);
+      highlightElement(el);
+    },
+    true,
+  );
+
+  window.addEventListener("message", (event) => {
+    const data = event.data || {};
+    if (data.type === "flux-highlight") {
+      const target =
+        (data.nodeId && document.querySelector('[data-flux-node="' + data.nodeId + '"]')) ||
+        (data.nodePath && document.querySelector('[data-flux-id="' + data.nodePath + '"]'));
+      highlightElement(target);
+    }
+    if (data.type === "flux-debug") {
+      document.body.setAttribute("data-debug-slots", data.enabled ? "1" : "0");
+    }
+  });
+
   window.addEventListener("load", () => {
     requestAnimationFrame(applyFits);
   });
@@ -1933,6 +2058,58 @@ function applySetTextTransform(source, doc, id, text, docPath) {
     const nextSource = source.slice(0, startIndex) + updatedBlock + source.slice(endIndex);
     return { ok: true, source: nextSource };
 }
+function applyReplaceNodeTransform(source, doc, id, replacement, docPath) {
+    if (!id) {
+        return {
+            ok: false,
+            diagnostic: buildDiagnosticFromMessage("Missing node id", source, docPath, "fail"),
+        };
+    }
+    if (!replacement || replacement.id !== id) {
+        return {
+            ok: false,
+            diagnostic: buildDiagnosticFromMessage(`Replacement node id does not match '${id}'.`, source, docPath, "fail"),
+        };
+    }
+    const node = findNodeById(doc.body?.nodes ?? [], id);
+    if (!node) {
+        const found = findIdInSource(source, id);
+        if (found) {
+            return {
+                ok: false,
+                diagnostic: buildDiagnosticFromSpan({
+                    level: "fail",
+                    message: `Node '${id}' was not found in the document.`,
+                    file: docPath,
+                    suggestion: "Check the outline for a valid node id.",
+                }, source, { line: found.line, column: found.column }),
+            };
+        }
+        return {
+            ok: false,
+            diagnostic: {
+                level: "fail",
+                message: `Node '${id}' was not found in the document.`,
+                file: docPath,
+                suggestion: "Check the outline for a valid node id.",
+                location: docPath,
+            },
+        };
+    }
+    const loc = node.loc;
+    if (!loc?.line || !loc?.column || !loc.endLine || !loc.endColumn) {
+        return {
+            ok: false,
+            diagnostic: buildDiagnosticFromMessage(`Missing source span for node '${id}'.`, source, docPath, "fail"),
+        };
+    }
+    const startIndex = lineColumnToOffset(source, loc.line, loc.column);
+    const endIndex = lineColumnToOffset(source, loc.endLine, loc.endColumn);
+    const indent = getLineIndent(source, loc.line);
+    const printed = printDocumentNode(replacement, indent);
+    const nextSource = source.slice(0, startIndex) + printed + source.slice(endIndex);
+    return { ok: true, source: nextSource };
+}
 function replaceContentLiteral(block, text) {
     const contentRegex = /(content\s*=\s*)(\"(?:\\.|[^"])*\"|'(?:\\.|[^'])*')/s;
     if (!contentRegex.test(block))
@@ -1942,6 +2119,133 @@ function replaceContentLiteral(block, text) {
 }
 function escapeStringLiteral(value) {
     return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+const PRINT_INDENT = "  ";
+function printDocumentNode(node, indent) {
+    const lines = [];
+    lines.push(`${indent}${node.kind} ${node.id} {`);
+    const innerIndent = indent + PRINT_INDENT;
+    if (node.refresh) {
+        lines.push(`${innerIndent}refresh = ${printRefreshPolicy(node.refresh)};`);
+    }
+    const props = node.props ?? {};
+    const keys = orderPropKeys(Object.keys(props));
+    for (const key of keys) {
+        const value = props[key];
+        if (!value)
+            continue;
+        lines.push(`${innerIndent}${key} = ${printNodePropValue(value)};`);
+    }
+    for (const child of node.children ?? []) {
+        lines.push(printDocumentNode(child, innerIndent));
+    }
+    lines.push(`${indent}}`);
+    return lines.join("\n");
+}
+function orderPropKeys(keys) {
+    const preferred = [
+        "content",
+        "style",
+        "role",
+        "variant",
+        "tone",
+        "label",
+        "href",
+        "url",
+        "to",
+        "src",
+        "asset",
+        "reserve",
+        "fit",
+        "align",
+        "start",
+        "header",
+        "rows",
+        "data",
+        "tags",
+    ];
+    const seen = new Set();
+    const ordered = [];
+    for (const key of preferred) {
+        if (keys.includes(key)) {
+            ordered.push(key);
+            seen.add(key);
+        }
+    }
+    const rest = keys.filter((key) => !seen.has(key)).sort();
+    ordered.push(...rest);
+    return ordered;
+}
+function printNodePropValue(value) {
+    if (value.kind === "DynamicValue") {
+        return `@${printExpr(value.expr)}`;
+    }
+    return printLiteralValue(value.value);
+}
+function printLiteralValue(value) {
+    if (Array.isArray(value)) {
+        const items = value.map((item) => printLiteralValue(item)).join(", ");
+        return `[ ${items} ]`;
+    }
+    if (typeof value === "string") {
+        return `"${escapeStringLiteral(value)}"`;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return String(value);
+    }
+    if (value == null) {
+        return "null";
+    }
+    return `"${escapeStringLiteral(String(value))}"`;
+}
+function printExpr(expr) {
+    switch (expr.kind) {
+        case "Literal":
+            return printLiteralValue(expr.value);
+        case "ListExpression":
+            return `[ ${expr.items.map((item) => printExpr(item)).join(", ")} ]`;
+        case "Identifier":
+            return expr.name;
+        case "MemberExpression":
+            return `${printExpr(expr.object)}.${expr.property}`;
+        case "CallExpression":
+            return `${printExpr(expr.callee)}(${printCallArgs(expr.args)})`;
+        case "NeighborsCallExpression":
+            return `neighbors.${expr.method}(${printCallArgs(expr.args)})`;
+        case "UnaryExpression":
+            return expr.op === "not" ? `not ${printExpr(expr.argument)}` : `${expr.op}${printExpr(expr.argument)}`;
+        case "BinaryExpression":
+            return `(${printExpr(expr.left)} ${expr.op} ${printExpr(expr.right)})`;
+        default:
+            return "";
+    }
+}
+function printCallArgs(args) {
+    return (args ?? [])
+        .map((arg) => {
+        if (arg && arg.kind === "NamedArg") {
+            return `${arg.name} = ${printExpr(arg.value)}`;
+        }
+        return printExpr(arg);
+    })
+        .join(", ");
+}
+function printRefreshPolicy(policy) {
+    if (policy.kind === "every") {
+        return `every(${policy.amount}${policy.unit})`;
+    }
+    if (policy.kind === "onDocstep")
+        return "onDocstep";
+    if (policy.kind === "never")
+        return "never";
+    return "onLoad";
+}
+function getLineIndent(source, line) {
+    const lines = source.split("\n");
+    const idx = Math.max(1, Math.min(line, lines.length)) - 1;
+    const text = lines[idx] ?? "";
+    const match = text.match(/^\s*/);
+    return match ? match[0] : "";
 }
 function buildDiagnosticFromNode(node, source, docPath, message, suggestion) {
     const loc = node.loc;
