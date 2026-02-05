@@ -9,6 +9,7 @@ export interface ViewerServerOptions {
     allowNet?: string[];
     docstepStart?: number;
     advanceTime?: boolean;
+    editorDist?: string;
 }
 export interface ViewerServer {
     port: number;

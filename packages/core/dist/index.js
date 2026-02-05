@@ -11,4 +11,5 @@ export { createRuntime, getDocstepIntervalHint } from "./runtime.js";
 export { computeGridLayout } from "./layout.js";
 // Static checks
 export { checkDocument } from "./checks.js";
+export { applyAddTransform, formatFluxSource } from "./transform.js";
 //# sourceMappingURL=index.js.map

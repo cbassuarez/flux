@@ -8,6 +8,7 @@ export interface ViewOptions {
     seed?: number;
     allowNet?: string[];
     advanceTime?: boolean;
+    editorDist?: string;
 }
 export interface ViewData {
     session: ViewerSession;

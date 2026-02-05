@@ -10,6 +10,7 @@
   "types": "index.d.ts",
   "files": [
     "dist",
+    "editor-dist",
     "static",
     "README.md",
     "index.d.ts"

@@ -9,6 +9,7 @@ export interface ViewOptions {
   seed?: number;
   allowNet?: string[];
   advanceTime?: boolean;
+  editorDist?: string;
 }
 
 export interface ViewData {
@@ -32,6 +33,7 @@ export async function viewCommand(options: ViewOptions): Promise<CommandResult<V
       seed: options.seed,
       allowNet: options.allowNet,
       advanceTime: options.advanceTime,
+      editorDist: options.editorDist,
     });
     return okResult({ session });
   } catch (error) {

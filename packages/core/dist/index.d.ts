@@ -10,4 +10,6 @@ export type { DocstepIntervalHint } from "./runtime.js";
 export type { GridLayoutModel, GridView, GridCellView } from "./layout.js";
 export { computeGridLayout } from "./layout.js";
 export { checkDocument } from "./checks.js";
+export type { AddTransformKind, AddTransformOptions } from "./transform.js";
+export { applyAddTransform, formatFluxSource } from "./transform.js";
 //# sourceMappingURL=index.d.ts.map

@@ -16,6 +16,7 @@ export async function viewCommand(options) {
             seed: options.seed,
             allowNet: options.allowNet,
             advanceTime: options.advanceTime,
+            editorDist: options.editorDist,
         });
         return okResult({ session });
     }

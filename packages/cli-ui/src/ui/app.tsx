@@ -37,7 +37,7 @@ import { DocDetailsScreen } from "../screens/DocDetailsScreen.js";
 import { ExportScreen } from "../screens/ExportScreen.js";
 import { DoctorScreen } from "../screens/DoctorScreen.js";
 import { FormatScreen } from "../screens/FormatScreen.js";
-import { EditPlaceholderScreen } from "../screens/EditPlaceholderScreen.js";
+import { EditScreen } from "../screens/EditScreen.js";
 import { SettingsScreen } from "../screens/SettingsScreen.js";
 import { MouseProvider } from "../state/mouse.js";
 import { useToasts } from "../state/toasts.js";
@@ -122,7 +122,7 @@ export function App(props: AppProps) {
   const { exit } = useApp();
   const [recents, setRecents] = useState<NavItem[]>([]);
   const [recentsPath, setRecentsPath] = useState<string | undefined>(undefined);
-  const [currentDoc, setCurrentDoc] = useState<string | null>(null);
+  const [currentDocument, setCurrentDocument] = useState<string | null>(null);
   const [pinnedDirs, setPinnedDirs] = useState<string[]>([]);
   const [lastUsedDir, setLastUsedDirState] = useState<string | null>(null);
   const [navIndex, setNavIndex] = useState(1);
@@ -204,6 +204,8 @@ export function App(props: AppProps) {
   const [formatSummary, setFormatSummary] = useState("Run Format to clean up this document.");
   const [formatLogs, setFormatLogs] = useState<string[]>([]);
   const [formatLogsOpen, setFormatLogsOpen] = useState(false);
+  const [editLogs, setEditLogs] = useState<string[]>([]);
+  const [editLogsOpen, setEditLogsOpen] = useState(false);
   const [exportResultPath, setExportResultPath] = useState<string | null>(null);
   const [exportActionIndex, setExportActionIndex] = useState(0);
   const [docActionIndex, setDocActionIndex] = useState(0);
@@ -218,6 +220,8 @@ export function App(props: AppProps) {
   const openScanId = useRef(0);
   const openPreviewRequestId = useRef(0);
   const docPreviewRequestId = useRef(0);
+  const editLaunchRef = useRef<{ docPath: string; url: string } | null>(null);
+  const editLaunching = useRef(false);
 
   const navItems = useMemo<NavItem[]>(() => ([
     { type: "section", label: "File" },
@@ -233,8 +237,8 @@ export function App(props: AppProps) {
   const paletteItems = useMemo(() => buildPaletteItems({
     recents: recents.filter((item) => item.type === "doc") as { path: string }[],
     fluxFiles,
-    activeDoc: currentDoc,
-  }), [recents, fluxFiles, currentDoc]);
+    activeDoc: currentDocument,
+  }), [recents, fluxFiles, currentDocument]);
 
   const filteredPalette = useMemo(() => filterPaletteItems(paletteItems, paletteQuery), [paletteItems, paletteQuery]);
   const limitedPalette = useMemo(() => filteredPalette.slice(0, 12), [filteredPalette]);
@@ -384,12 +388,12 @@ export function App(props: AppProps) {
   }, [openResults, openSelectedIndex]);
 
   useEffect(() => {
-    if (!currentDoc) {
+    if (!currentDocument) {
       setDocPreview(null);
       return;
     }
     const requestId = ++docPreviewRequestId.current;
-    void buildPreview(currentDoc).then((preview) => {
+    void buildPreview(currentDocument).then((preview) => {
       if (docPreviewRequestId.current === requestId) {
         setDocPreview(preview ? {
           title: preview.title,
@@ -399,7 +403,7 @@ export function App(props: AppProps) {
         } : null);
       }
     });
-  }, [currentDoc]);
+  }, [currentDocument]);
 
   useEffect(() => {
     if (route === "doc") {
@@ -442,6 +446,26 @@ export function App(props: AppProps) {
       clearInterval(timer);
     };
   }, [viewerSession, config]);
+
+  useEffect(() => {
+    if (route !== "edit") {
+      editLaunchRef.current = null;
+      return;
+    }
+    if (!currentDocument) return;
+    const activeSession = viewerSession && path.resolve(viewerSession.docPath) === currentDocument
+      ? viewerSession
+      : null;
+    const lastLaunch = editLaunchRef.current;
+    if (lastLaunch && lastLaunch.docPath === currentDocument && lastLaunch.url === activeSession?.url) {
+      return;
+    }
+    if (editLaunching.current) return;
+    editLaunching.current = true;
+    void handleEdit(currentDocument).finally(() => {
+      editLaunching.current = false;
+    });
+  }, [route, currentDocument, viewerSession]);
 
   useEffect(() => {
     return () => {
@@ -582,6 +606,10 @@ export function App(props: AppProps) {
       await handleFormatInput(input, key);
       return;
     }
+    if (route === "edit") {
+      await handleEditInput(input, key);
+      return;
+    }
   });
 
   const wizardSteps = useMemo<WizardStep[]>(() => {
@@ -712,7 +740,7 @@ export function App(props: AppProps) {
       return (
         <DocDetailsScreen
           width={paneContentWidth}
-          docPath={currentDoc}
+          docPath={currentDocument}
           preview={docPreview}
           primaryActions={docPrimaryActions}
           secondaryActions={docSecondaryActions}
@@ -725,8 +753,8 @@ export function App(props: AppProps) {
       return (
         <ExportScreen
           width={paneContentWidth}
-          docPath={currentDoc}
-          outputPath={currentDoc ? currentDoc.replace(/\.flux$/i, ".pdf") : null}
+          docPath={currentDocument}
+          outputPath={currentDocument ? currentDocument.replace(/\.flux$/i, ".pdf") : null}
           progress={progress}
           resultPath={exportResultPath}
           actionIndex={exportActionIndex}
@@ -755,7 +783,7 @@ export function App(props: AppProps) {
       return (
         <DoctorScreen
           width={paneContentWidth}
-          docPath={currentDoc}
+          docPath={currentDocument}
           summary={doctorSummary}
           logs={doctorLogs}
           logsOpen={doctorLogsOpen}
@@ -777,7 +805,7 @@ export function App(props: AppProps) {
       return (
         <FormatScreen
           width={paneContentWidth}
-          docPath={currentDoc}
+          docPath={currentDocument}
           summary={formatSummary}
           logs={formatLogs}
           logsOpen={formatLogsOpen}
@@ -795,10 +823,32 @@ export function App(props: AppProps) {
     }
 
     if (route === "edit") {
+      const viewerUrl = getViewerUrl();
       return (
-        <EditPlaceholderScreen
+        <EditScreen
           width={paneContentWidth}
-          docPath={currentDoc}
+          docPath={currentDocument}
+          title={docPreview?.title ?? null}
+          viewerUrl={viewerUrl}
+          onCopyUrl={() => void handleCopyEditorUrl()}
+          onExport={() => {
+            setFocus("pane");
+            void handleExport();
+          }}
+          onDoctor={() => {
+            setFocus("pane");
+            void handleCheck();
+          }}
+          onFormat={() => {
+            setFocus("pane");
+            void handleFormat();
+          }}
+          logs={editLogs}
+          logsOpen={editLogsOpen}
+          onToggleLogs={() => {
+            setFocus("pane");
+            setEditLogsOpen((prev) => !prev);
+          }}
           debug={debugLayout}
         />
       );
@@ -816,10 +866,32 @@ export function App(props: AppProps) {
       );
     }
 
+    const viewerUrl = getViewerUrl();
     return (
-      <EditPlaceholderScreen
+      <EditScreen
         width={paneContentWidth}
-        docPath={currentDoc}
+        docPath={currentDocument}
+        title={docPreview?.title ?? null}
+        viewerUrl={viewerUrl}
+        onCopyUrl={() => void handleCopyEditorUrl()}
+        onExport={() => {
+          setFocus("pane");
+          void handleExport();
+        }}
+        onDoctor={() => {
+          setFocus("pane");
+          void handleCheck();
+        }}
+        onFormat={() => {
+          setFocus("pane");
+          void handleFormat();
+        }}
+        logs={editLogs}
+        logsOpen={editLogsOpen}
+        onToggleLogs={() => {
+          setFocus("pane");
+          setEditLogsOpen((prev) => !prev);
+        }}
         debug={debugLayout}
       />
     );
@@ -1005,7 +1077,7 @@ export function App(props: AppProps) {
   }
 
   async function requireDocAndRoute(action: "edit" | "export" | "doctor" | "format") {
-    const resolved = resolveActionRoute(currentDoc, action);
+    const resolved = resolveActionRoute(currentDocument, action);
     setPendingAction(resolved.pendingAction);
     if (resolved.route === "open") {
       setRoute("open");
@@ -1037,7 +1109,7 @@ export function App(props: AppProps) {
 
   async function selectCurrentDoc(docPath: string) {
     const resolved = path.resolve(docPath);
-    setCurrentDoc(resolved);
+    setCurrentDocument(resolved);
     await updateRecents(props.cwd, resolved);
     void refreshRecents();
     const dir = path.dirname(resolved);
@@ -1208,6 +1280,12 @@ export function App(props: AppProps) {
     }
   }
 
+  async function handleEditInput(input: string, key: any) {
+    if (input?.toLowerCase() === "l" || key.return) {
+      setEditLogsOpen((prev) => !prev);
+    }
+  }
+
   async function handleWizardInput(input: string, key: any) {
     if (wizardCreated) {
       if (key.upArrow || key.downArrow) {
@@ -1296,33 +1374,35 @@ export function App(props: AppProps) {
     }
   }
 
-  async function handleView(docPath?: string, overrides?: {
-    docstepMs?: number;
-    seed?: number;
-    allowNet?: string[];
-    port?: number;
-    advanceTime?: boolean;
-  }) {
-    const target = docPath ?? currentDoc;
-    if (!target) {
-      showToast("Select a document first.", "error");
-      return;
-    }
-    await selectCurrentDoc(target);
-    setBusy("Starting viewer...");
+  async function startViewerSession(
+    docPath: string,
+    overrides?: {
+      docstepMs?: number;
+      seed?: number;
+      allowNet?: string[];
+      port?: number;
+      advanceTime?: boolean;
+      editorDist?: string;
+    },
+    context: "viewer" | "editor" = "viewer",
+  ): Promise<ViewerSession | null> {
+    await selectCurrentDoc(docPath);
+    setBusy(context === "editor" ? "Starting editor..." : "Starting viewer...");
     const result = await viewCommand({
       cwd: props.cwd,
-      docPath: target,
+      docPath,
       docstepMs: overrides?.docstepMs ?? config?.docstepMs ?? 1000,
       seed: overrides?.seed ?? 0,
       allowNet: overrides?.allowNet ?? [],
       port: overrides?.port,
       advanceTime: overrides?.advanceTime ?? (config?.advanceTime ?? true),
+      editorDist: overrides?.editorDist,
     });
     setBusy(null);
     if (!result.ok || !result.data) {
-      showToast(result.error?.message ?? "Viewer failed", "error");
-      return;
+      const fallback = context === "editor" ? "Editor failed" : "Viewer failed";
+      showToast(result.error?.message ?? fallback, "error");
+      return null;
     }
     setViewerSession(result.data.session);
     try {
@@ -1343,16 +1423,67 @@ export function App(props: AppProps) {
         seed: 0,
       });
     }
-    openBrowser(result.data.session.url);
-    showToast(result.data.session.attached ? "Attached to viewer" : "Viewer running", "success");
+    return result.data.session;
   }
 
-  async function handleExport() {
-    if (!currentDoc) {
+  async function handleView(docPath?: string, overrides?: {
+    docstepMs?: number;
+    seed?: number;
+    allowNet?: string[];
+    port?: number;
+    advanceTime?: boolean;
+    editorDist?: string;
+  }) {
+    const target = docPath ?? currentDocument;
+    if (!target) {
       showToast("Select a document first.", "error");
       return;
     }
-    const defaultOut = currentDoc.replace(/\.flux$/i, ".pdf");
+    const session = await startViewerSession(target, overrides);
+    if (!session) return;
+    openBrowser(session.url);
+    showToast(session.attached ? "Attached to viewer" : "Viewer running", "success");
+  }
+
+  function appendEditLog(message: string) {
+    setEditLogs((prev) => [...prev, message]);
+  }
+
+  async function handleEdit(docPath?: string) {
+    const target = docPath ?? currentDocument;
+    if (!target) {
+      showToast("Select a document first.", "error");
+      return;
+    }
+    if (editLaunchRef.current?.docPath !== target) {
+      setEditLogs([]);
+    }
+    appendEditLog("Starting editor...");
+    const session = await startViewerSession(target, undefined, "editor");
+    if (!session) {
+      appendEditLog("Editor failed to start.");
+      return;
+    }
+    const editorUrl = `${session.url}/edit`;
+    openBrowser(editorUrl);
+    editLaunchRef.current = { docPath: target, url: session.url };
+    appendEditLog(session.attached ? `Attached to editor at ${editorUrl}` : `Editor running at ${editorUrl}`);
+    showToast(session.attached ? "Attached to editor" : "Editor running", "success");
+  }
+
+  function getViewerUrl(): string | null {
+    if (!viewerSession || !currentDocument) return null;
+    const matches = path.resolve(viewerSession.docPath) === currentDocument;
+    if (!matches) return null;
+    return viewerSession.url;
+  }
+
+  async function handleExport() {
+    if (!currentDocument) {
+      showToast("Select a document first.", "error");
+      return;
+    }
+    const defaultOut = currentDocument.replace(/\.flux$/i, ".pdf");
     setBusy("Exporting PDF...");
     startProgress("Export PDF");
     try {
@@ -1362,7 +1493,7 @@ export function App(props: AppProps) {
       if (result) {
         await fs.writeFile(defaultOut, result);
       } else {
-        await pdfCommand({ file: currentDoc, outPath: defaultOut });
+        await pdfCommand({ file: currentDocument, outPath: defaultOut });
       }
       setExportResultPath(defaultOut);
       setExportActionIndex(1);
@@ -1376,7 +1507,7 @@ export function App(props: AppProps) {
   }
 
   async function handleCheck(docPath?: string) {
-    const target = docPath ?? currentDoc;
+    const target = docPath ?? currentDocument;
     if (!target) {
       showToast("Select a document first.", "error");
       return;
@@ -1405,7 +1536,7 @@ export function App(props: AppProps) {
   }
 
   async function handleFormat(docPath?: string) {
-    const target = docPath ?? currentDoc;
+    const target = docPath ?? currentDocument;
     if (!target) {
       showToast("Select a document first.", "error");
       return;
@@ -1441,6 +1572,16 @@ export function App(props: AppProps) {
     if (!exportResultPath) return;
     const ok = await copyToClipboard(exportResultPath);
     showToast(ok ? "Copied path" : "Copy failed", ok ? "success" : "error");
+  }
+
+  async function handleCopyEditorUrl() {
+    const viewerUrl = getViewerUrl();
+    if (!viewerUrl) {
+      showToast("Editor URL not available yet.", "error");
+      return;
+    }
+    const ok = await copyToClipboard(`${viewerUrl}/edit`);
+    showToast(ok ? "Copied editor URL" : "Copy failed", ok ? "success" : "error");
   }
 
   async function loadOpenFolders(dir: string) {
@@ -1577,7 +1718,7 @@ export function App(props: AppProps) {
     docPath?: string,
     options?: { text?: string; heading?: string; label?: string; noHeading?: boolean; noCheck?: boolean },
   ) {
-    const target = docPath ?? currentDoc;
+    const target = docPath ?? currentDocument;
     if (!target) {
       showToast("Select a document first.", "error");
       return;
@@ -1843,7 +1984,7 @@ export function App(props: AppProps) {
       }
       case "view": {
         const parsed = parseViewArgsForUi(rest);
-        const target = parsed.file ?? currentDoc ?? null;
+        const target = parsed.file ?? currentDocument ?? null;
         if (!target) {
           showToast("flux view: missing <file>", "error");
           return;
@@ -1854,12 +1995,13 @@ export function App(props: AppProps) {
           allowNet: parsed.allowNet,
           port: parsed.port,
           advanceTime: parsed.advanceTime,
+          editorDist: parsed.editorDist,
         });
         setRoute("doc");
         return;
       }
       case "check": {
-        const target = firstFileArg(rest) ?? currentDoc ?? null;
+        const target = firstFileArg(rest) ?? currentDocument ?? null;
         if (!target) {
           showToast("flux check: missing <file>", "error");
           return;
@@ -1870,7 +2012,7 @@ export function App(props: AppProps) {
         return;
       }
       case "fmt": {
-        const target = firstFileArg(rest) ?? currentDoc ?? null;
+        const target = firstFileArg(rest) ?? currentDocument ?? null;
         if (!target) {
           showToast("flux fmt: missing <file>", "error");
           return;
@@ -2167,6 +2309,7 @@ function parseViewArgsForUi(args: string[]) {
   let docstepMs: number | undefined;
   let seed: number | undefined;
   let advanceTime: boolean | undefined;
+  let editorDist: string | undefined;
   const allowNet: string[] = [];
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -2208,6 +2351,15 @@ function parseViewArgsForUi(args: string[]) {
       allowNet.push(...raw.split(",").map((item) => item.trim()).filter(Boolean));
       continue;
     }
+    if (arg === "--editor-dist") {
+      editorDist = args[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--editor-dist=")) {
+      editorDist = arg.slice("--editor-dist=".length);
+      continue;
+    }
     if (arg === "--no-time") {
       advanceTime = false;
       continue;
@@ -2219,7 +2371,7 @@ function parseViewArgsForUi(args: string[]) {
       file = arg;
     }
   }
-  return { file, port, docstepMs, seed, allowNet, advanceTime };
+  return { file, port, docstepMs, seed, allowNet, advanceTime, editorDist };
 }
 
 function parseAddArgsForUi(args: string[]) {

@@ -53,3 +53,7 @@ export { computeGridLayout } from "./layout.js";
 
 // Static checks
 export { checkDocument } from "./checks.js";
+
+// Guided transforms (edit helpers)
+export type { AddTransformKind, AddTransformOptions } from "./transform.js";
+export { applyAddTransform, formatFluxSource } from "./transform.js";

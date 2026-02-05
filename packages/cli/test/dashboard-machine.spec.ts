@@ -7,6 +7,11 @@ describe("dashboard state machine", () => {
     expect(result).toEqual({ route: "open", pendingAction: "export" });
   });
 
+  it("routes to open and sets pending edit when no current doc", () => {
+    const result = resolveActionRoute(null, "edit");
+    expect(result).toEqual({ route: "open", pendingAction: "edit" });
+  });
+
   it("routes directly to action when current doc exists", () => {
     const result = resolveActionRoute("/tmp/demo.flux", "doctor");
     expect(result).toEqual({ route: "doctor", pendingAction: null });
@@ -15,6 +20,11 @@ describe("dashboard state machine", () => {
   it("continues to the pending action after opening a document", () => {
     const result = resolveRouteAfterOpen("format");
     expect(result).toEqual({ route: "format", pendingAction: null });
+  });
+
+  it("continues to edit after opening a document", () => {
+    const result = resolveRouteAfterOpen("edit");
+    expect(result).toEqual({ route: "edit", pendingAction: null });
   });
 
   it("returns to doc details when no pending action exists", () => {

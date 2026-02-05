@@ -5,10 +5,16 @@ import {
   parseDocument,
   checkDocument,
   createDocumentRuntimeIR,
+  applyAddTransform,
+  formatFluxSource,
+  type AddTransformOptions,
+  type DocumentNode,
+  type FluxDocument,
   type RenderDocumentIR,
 } from "@flux-lang/core";
 import { renderHtml, type RenderHtmlResult } from "@flux-lang/render-html";
 import { createTypesetterBackend } from "@flux-lang/typesetter";
+import { buildEditorMissingHtml, resolveEditorDist } from "./editor-dist.js";
 
 export interface ViewerServerOptions {
   docPath: string;
@@ -19,6 +25,7 @@ export interface ViewerServerOptions {
   allowNet?: string[];
   docstepStart?: number;
   advanceTime?: boolean;
+  editorDist?: string;
 }
 
 export interface ViewerServer {
@@ -33,6 +40,13 @@ interface ViewerState {
   ir: RenderDocumentIR;
   render: RenderHtmlResult;
   errors: string[];
+}
+
+interface OutlineNode {
+  id: string;
+  kind: string;
+  label: string;
+  children?: OutlineNode[];
 }
 
 interface SlotPatchPayload {
@@ -76,34 +90,42 @@ const REMOTE_TIMEOUT_MS = 5000;
 export async function startViewerServer(options: ViewerServerOptions): Promise<ViewerServer> {
   const docPath = path.resolve(options.docPath);
   const docRoot = path.dirname(docPath);
-  const source = await fs.readFile(docPath, "utf8");
-  let doc: ReturnType<typeof parseDocument> | null = null;
+  let currentSource = await fs.readFile(docPath, "utf8");
+  let baseDoc: FluxDocument | null = null;
   let errors: string[] = [];
-  try {
-    doc = parseDocument(source, {
-      sourcePath: docPath,
-      docRoot,
-      resolveIncludes: true,
-    });
-    errors = checkDocument(docPath, doc);
-  } catch (err) {
-    errors = [String((err as Error)?.message ?? err)];
-  }
 
-  const baseDoc = doc;
-  let runtime = baseDoc
-    ? createDocumentRuntimeIR(baseDoc, {
-        seed: options.seed ?? 0,
-        docstep: options.docstepStart ?? 0,
-        assetCwd: docRoot,
-      })
-    : null;
+  const parseSource = (source: string): { doc: FluxDocument | null; errors: string[] } => {
+    try {
+      const parsed = parseDocument(source, {
+        sourcePath: docPath,
+        docRoot,
+        resolveIncludes: true,
+      });
+      const diagnostics = checkDocument(docPath, parsed);
+      return { doc: parsed, errors: diagnostics };
+    } catch (err) {
+      return { doc: null, errors: [String((err as Error)?.message ?? err)] };
+    }
+  };
+
+  ({ doc: baseDoc, errors } = parseSource(currentSource));
+
+  const buildRuntime = (doc: FluxDocument, overrides: { seed?: number; docstep?: number; time?: number } = {}) =>
+    createDocumentRuntimeIR(doc, {
+      seed: overrides.seed ?? options.seed ?? 0,
+      docstep: overrides.docstep ?? options.docstepStart ?? 0,
+      time: overrides.time ?? 0,
+      assetCwd: docRoot,
+    });
+
+  let runtime = baseDoc ? buildRuntime(baseDoc) : null;
 
   const initialIr = runtime ? runtime.render() : buildEmptyIR();
   const renderOptions = {
     assetUrl: (assetId: string) => `/assets/${encodeURIComponent(assetId)}`,
     rawUrl: (raw: string) => `/asset?src=${encodeURIComponent(raw)}`,
   };
+  const editorDist = await resolveEditorDist({ editorDist: options.editorDist });
 
   let current: ViewerState = {
     docPath,
@@ -148,29 +170,52 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
   let lastSlotMap: Record<string, string> = current.render.slots;
   let lastPatchPayload: SlotPatchPayload = buildPatchPayload(current.render.slots);
 
-  const rebuildCurrent = (nextRuntime: ReturnType<typeof createDocumentRuntimeIR>): void => {
-    const nextIr = nextRuntime.render();
+  const rebuildCurrent = (nextRuntime: ReturnType<typeof createDocumentRuntimeIR> | null, nextErrors: string[]): void => {
+    const nextIr = nextRuntime ? nextRuntime.render() : buildEmptyIR();
     const nextRender = renderHtml(nextIr, renderOptions);
     current = {
       ...current,
       ir: nextIr,
       render: nextRender,
-      errors: [],
+      errors: nextErrors,
     };
     lastSlotMap = nextRender.slots;
     lastPatchPayload = buildPatchPayload(nextRender.slots);
   };
 
+  const rebuildFromSource = (nextSource: string): void => {
+    const parsed = parseSource(nextSource);
+    baseDoc = parsed.doc;
+    errors = parsed.errors;
+    const wasRunning = running;
+    runtime = baseDoc
+      ? buildRuntime(baseDoc, {
+          seed: runtime?.seed ?? options.seed ?? 0,
+          docstep: runtime?.docstep ?? options.docstepStart ?? 0,
+          time: runtime?.time ?? 0,
+        })
+      : null;
+    rebuildCurrent(runtime, errors);
+    const canRun = runtime !== null && errors.length === 0;
+    running = wasRunning && canRun;
+    if (running) {
+      lastTickAt = Date.now();
+      nextTickAt = Date.now() + intervalMs;
+      scheduleTick();
+    } else {
+      stopTicking();
+    }
+  };
+
   const resetRuntime = (payload: { seed?: number; docstep?: number; time?: number }): boolean => {
-    if (!baseDoc) return false;
-    const next = createDocumentRuntimeIR(baseDoc, {
-      seed: payload.seed ?? runtime?.seed ?? 0,
-      docstep: payload.docstep ?? runtime?.docstep ?? 0,
+    if (!baseDoc || errors.length) return false;
+    const next = buildRuntime(baseDoc, {
+      seed: payload.seed ?? runtime?.seed ?? options.seed ?? 0,
+      docstep: payload.docstep ?? runtime?.docstep ?? options.docstepStart ?? 0,
       time: payload.time ?? runtime?.time ?? 0,
-      assetCwd: docRoot,
     });
     runtime = next;
-    rebuildCurrent(next);
+    rebuildCurrent(next, errors);
     lastTickAt = Date.now();
     nextTickAt = Date.now() + intervalMs;
     broadcastPatchUpdate(lastPatchPayload);
@@ -180,6 +225,15 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
   const broadcastPatchUpdate = (payload: SlotPatchPayload = lastPatchPayload): void => {
     if (sseClients.size === 0) return;
     const message = `data: ${JSON.stringify(payload)}\n\n`;
+    for (const client of sseClients) {
+      client.write(message);
+    }
+  };
+
+  const broadcastDocChanged = (): void => {
+    if (sseClients.size === 0) return;
+    const payload = { docstep: current.ir.docstep, time: current.ir.time };
+    const message = `event: doc-changed\ndata: ${JSON.stringify(payload)}\n\n`;
     for (const client of sseClients) {
       client.write(message);
     }
@@ -243,6 +297,58 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
     scheduleTick();
   };
 
+  const buildEditState = async () => {
+    const stats = await fs.stat(docPath).catch(() => null);
+    const title = baseDoc?.meta?.title ?? path.basename(docPath);
+    const banks = baseDoc?.assets?.banks?.map((bank) => ({
+      name: bank.name,
+      kind: bank.kind,
+      root: bank.root,
+      include: bank.include,
+      tags: bank.tags ?? [],
+      strategy: bank.strategy ?? null,
+      bankTag: `bank:${bank.name}`,
+    }));
+    return {
+      docPath,
+      title,
+      lastModified: stats ? new Date(stats.mtimeMs).toISOString() : null,
+      diagnosticsSummary: {
+        ok: current.errors.length === 0,
+        errorCount: current.errors.length,
+        errors: current.errors,
+      },
+      assetsBanks: banks ?? [],
+      capabilities: {
+        addSection: true,
+        addFigure: true,
+      },
+    };
+  };
+
+  const buildOutline = (): OutlineNode[] => {
+    if (!baseDoc?.body?.nodes) return [];
+    const outlineFromNodes = (nodes: DocumentNode[]) => {
+      const result: OutlineNode[] = [];
+      for (const node of nodes ?? []) {
+        const childNodes = outlineFromNodes(node.children ?? []);
+        if (node.kind === "page" || node.kind === "section" || node.kind === "figure") {
+          const label = deriveOutlineLabel(node);
+          result.push({
+            id: node.id,
+            kind: node.kind,
+            label,
+            children: childNodes.length ? childNodes : undefined,
+          });
+        } else if (childNodes.length) {
+          result.push(...childNodes);
+        }
+      }
+      return result;
+    };
+    return outlineFromNodes(baseDoc.body.nodes);
+  };
+
   scheduleTick();
   startKeepAlive();
 
@@ -252,6 +358,25 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       applyCsp(res);
+
+      if (url.pathname === "/edit" || url.pathname.startsWith("/edit/")) {
+        if (!editorDist.dir || !editorDist.indexPath) {
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...noCacheHeaders() });
+          res.end(buildEditorMissingHtml(editorDist));
+          return;
+        }
+        const relative = url.pathname === "/edit" ? "" : url.pathname.slice("/edit/".length);
+        const decoded = decodeURIComponent(relative);
+        const target = path.resolve(editorDist.dir, decoded);
+        if (!isWithinOrEqual(editorDist.dir, target)) {
+          res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end("Forbidden");
+          return;
+        }
+        const resolvedPath = await resolveStaticPath(editorDist.dir, target);
+        await serveFile(res, resolvedPath ?? editorDist.indexPath, noCacheHeaders());
+        return;
+      }
 
       if (url.pathname === "/") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -286,6 +411,74 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           docstep: runtime?.docstep ?? 0,
           time: runtime?.time ?? 0,
         });
+        return;
+      }
+
+      if (url.pathname === "/api/edit/state") {
+        const state = await buildEditState();
+        sendJson(res, state);
+        return;
+      }
+
+      if (url.pathname === "/api/edit/outline") {
+        sendJson(res, { outline: buildOutline() });
+        return;
+      }
+
+      if (url.pathname === "/api/edit/transform" && req.method === "POST") {
+        const payload = await readJson(req);
+        if (payload?.docPath && path.resolve(payload.docPath) !== docPath) {
+          res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "Document path not allowed" }));
+          return;
+        }
+
+        const op = payload?.op;
+        const args = payload?.args ?? {};
+        const toOptions = (): AddTransformOptions => {
+          if (op === "addSection") {
+            return {
+              kind: "section",
+              heading: typeof args.heading === "string" ? args.heading : undefined,
+              noHeading: typeof args.noHeading === "boolean" ? args.noHeading : undefined,
+            };
+          }
+          if (op === "addFigure") {
+            return {
+              kind: "figure",
+              bankName: typeof args.bankName === "string" ? args.bankName : undefined,
+              tags: Array.isArray(args.tags) ? args.tags.map((tag: any) => String(tag)) : undefined,
+              caption: typeof args.caption === "string" ? args.caption : undefined,
+              label: typeof args.label === "string" ? args.label : undefined,
+              reserve: args.reserve,
+              fit: typeof args.fit === "string" ? args.fit : undefined,
+            };
+          }
+          throw new Error("Unsupported edit operation");
+        };
+
+        try {
+          const source = await fs.readFile(docPath, "utf8");
+          const parsed = parseSource(source);
+          if (!parsed.doc) {
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: parsed.errors.join("; ") }));
+            return;
+          }
+          const nextSource = formatFluxSource(applyAddTransform(source, parsed.doc, toOptions()));
+          await fs.writeFile(docPath, nextSource);
+          currentSource = nextSource;
+          rebuildFromSource(nextSource);
+          broadcastDocChanged();
+          sendJson(res, {
+            ok: current.errors.length === 0,
+            diagnostics: { errors: current.errors },
+            updatedState: await buildEditState(),
+          });
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: String((err as Error)?.message ?? err) }));
+        }
         return;
       }
 
@@ -806,6 +999,11 @@ export function getViewerJs(): string {
         pollTimer = null;
       }
     };
+    sse.addEventListener("doc-changed", () => {
+      loadInitial().catch((err) => {
+        console.warn("doc reload failed", err);
+      });
+    });
     sse.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
@@ -891,11 +1089,29 @@ function isWithin(root: string, target: string): boolean {
   return !!rel && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
-async function serveFile(res: http.ServerResponse, filePath: string): Promise<void> {
+function isWithinOrEqual(root: string, target: string): boolean {
+  const rel = path.relative(root, target);
+  if (rel === "") return true;
+  return !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+async function resolveStaticPath(root: string, target: string): Promise<string | null> {
+  if (!isWithinOrEqual(root, target)) return null;
+  try {
+    const stat = await fs.stat(target);
+    if (stat.isFile()) return target;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function serveFile(res: http.ServerResponse, filePath: string, headers: Record<string, string> = {}): Promise<void> {
   const stat = await fs.stat(filePath);
   res.writeHead(200, {
     "Content-Type": guessMime(filePath),
     "Content-Length": String(stat.size),
+    ...headers,
   });
   const stream = (await import("node:fs")).createReadStream(filePath);
   stream.pipe(res);
@@ -904,6 +1120,20 @@ async function serveFile(res: http.ServerResponse, filePath: string): Promise<vo
 function guessMime(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   switch (ext) {
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+    case ".mjs":
+      return "application/javascript; charset=utf-8";
+    case ".json":
+    case ".map":
+      return "application/json; charset=utf-8";
+    case ".txt":
+      return "text/plain; charset=utf-8";
+    case ".ico":
+      return "image/x-icon";
     case ".png":
       return "image/png";
     case ".jpg":
@@ -1004,4 +1234,31 @@ function buildErrorHtml(errors: string[]): string {
     `</section>`,
     `</main>`,
   ].join("");
+}
+
+function deriveOutlineLabel(node: DocumentNode): string {
+  if (node.kind === "figure") {
+    const label = getLiteralString(node.props?.label);
+    if (label && label.trim()) return label;
+  }
+  const content = findFirstTextContent(node);
+  if (content) return content;
+  return node.id;
+}
+
+function findFirstTextContent(node: DocumentNode): string | null {
+  if (node.kind === "text") {
+    const content = getLiteralString(node.props?.content);
+    if (content && content.trim()) return content;
+  }
+  for (const child of node.children ?? []) {
+    const content = findFirstTextContent(child);
+    if (content) return content;
+  }
+  return null;
+}
+
+function getLiteralString(value: DocumentNode["props"][string] | undefined): string | null {
+  if (!value || value.kind !== "LiteralValue") return null;
+  return typeof value.value === "string" ? value.value : null;
 }

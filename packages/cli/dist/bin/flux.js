@@ -316,6 +316,7 @@ function printViewHelp() {
         "  --docstep-ms <n>    Docstep interval in milliseconds.",
         "  --seed <n>          Seed for deterministic rendering.",
         "  --allow-net <orig>  Allow remote assets for origin (repeatable or comma-separated).",
+        "  --editor-dist <p>   Serve editor assets from this dist folder.",
         "  --no-time           Disable automatic time advancement.",
         "  --tty               Use the legacy TTY grid viewer.",
         "  -h, --help          Show this message.",
@@ -621,6 +622,7 @@ async function runView(args, globals) {
     let docstepMs;
     let seed;
     let useTty = false;
+    let editorDist;
     const allowNet = [];
     let file;
     let advanceTime = true;
@@ -664,6 +666,13 @@ async function runView(args, globals) {
             else if (arg.startsWith("--allow-net=")) {
                 const raw = arg.slice("--allow-net=".length);
                 allowNet.push(...raw.split(",").map((item) => item.trim()).filter(Boolean));
+            }
+            else if (arg === "--editor-dist") {
+                editorDist = args[i + 1];
+                i += 1;
+            }
+            else if (arg.startsWith("--editor-dist=")) {
+                editorDist = arg.slice("--editor-dist=".length);
             }
             else if (!arg.startsWith("-")) {
                 file = arg;
@@ -711,6 +720,7 @@ async function runView(args, globals) {
         seed,
         allowNet,
         advanceTime,
+        editorDist,
     });
     if (!result.ok || !result.data) {
         console.error(result.error?.message ?? "flux view failed");

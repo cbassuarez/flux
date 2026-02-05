@@ -1621,7 +1621,7 @@ function materializeBankAsset(bank, relPath, fullPath) {
         name: relPath,
         kind: bank.kind,
         path: fullPath,
-        tags: [...(bank.tags ?? [])],
+        tags: [...(bank.tags ?? []), `bank:${bank.name}`],
         weight: 1,
         source: { type: "bank", name: bank.name },
         strategy: bank.strategy,
