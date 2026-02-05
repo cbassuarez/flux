@@ -96,13 +96,13 @@ export function ModalOverlay({
   if (!isOpen) return null;
 
   return (
-    <Box position="absolute" top={0} left={0} width={columns} height={rows}>
-      <Box position="absolute" top={0} left={0} width={columns} height={rows}>
+    <Box position="absolute" width={columns} height={rows}>
+      <Box position="absolute" width={columns} height={rows}>
         <Text backgroundColor={color.panel} color={color.panel}>{scrimFill}</Text>
       </Box>
-      <Box position="absolute" top={layout.top} left={layout.left} width={layout.width} height={layout.height}>
+      <Box position="absolute" marginTop={layout.top} marginLeft={layout.left} width={layout.width} height={layout.height}>
         <Box position="relative" width={layout.width} height={layout.height}>
-          <Box position="absolute" top={0} left={0} width={layout.width} height={layout.height}>
+          <Box position="absolute" width={layout.width} height={layout.height}>
             <Text backgroundColor={color.panelAlt} color={color.panelAlt}>{panelFill}</Text>
           </Box>
           <Box
