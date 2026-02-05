@@ -9,7 +9,6 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "jsx": "preserve",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true

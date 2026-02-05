@@ -25,10 +25,10 @@ import {
 } from "@flux-lang/cli-core";
 import type { ViewerSession } from "@flux-lang/cli-core";
 import { AppFrame } from "../components/AppFrame.js";
+import { Card } from "../components/Card.js";
 import { NavList } from "../components/NavList.js";
 import { CommandPaletteModal } from "../components/CommandPaletteModal.js";
 import { ToastHost } from "../components/ToastHost.js";
-import { Card } from "../components/Card.js";
 import { HelpOverlay } from "../components/HelpOverlay.js";
 import { Clickable } from "../components/Clickable.js";
 import { NewWizardScreen } from "../screens/NewWizardScreen.js";
@@ -40,7 +40,7 @@ import { FormatScreen } from "../screens/FormatScreen.js";
 import { EditScreen } from "../screens/EditScreen.js";
 import { SettingsScreen } from "../screens/SettingsScreen.js";
 import { MouseProvider } from "../state/mouse.js";
-import { defaultFocusForRoute, type AppRoute, type FocusTarget } from "../state/focus.js";
+import { defaultFocusForRoute, isModalFocus, type AppRoute, type FocusTarget } from "../state/focus.js";
 import { applyOpenSearchInput, shouldEnterOpenSearch, shouldExitOpenSearch } from "../state/open-search.js";
 import { useToasts } from "../state/toasts.js";
 import { useProgress } from "../state/progress.js";
@@ -51,6 +51,7 @@ import { hasControlChars, sanitizePrintableInput } from "../ui/input.js";
 import { getLayoutMetrics, isTerminalTooSmall, MIN_COLS, MIN_ROWS } from "../ui/layout.js";
 import { useDebouncedValue } from "../ui/useDebouncedValue.js";
 import { useTerminalDimensions } from "../ui/useTerminalDimensions.js";
+import { ModalOverlay, getModalLayout } from "../ui/ModalOverlay.js";
 import type {
   FontsPreset,
   FontFallback,
@@ -129,7 +130,7 @@ export function App(props: AppProps) {
   const { exit } = useApp();
   const initialRoute: AppRoute = props.mode === "new" ? "new" : "open";
   const initialFocusTarget: FocusTarget =
-    props.helpCommand || props.version ? "modal" : defaultFocusForRoute(initialRoute);
+    props.helpCommand ? "help" : props.version ? "modal" : defaultFocusForRoute(initialRoute);
   const [recents, setRecents] = useState<NavItem[]>([]);
   const [recentsPath, setRecentsPath] = useState<string | undefined>(undefined);
   const [currentDocument, setCurrentDocument] = useState<string | null>(null);
@@ -255,17 +256,18 @@ export function App(props: AppProps) {
   const layout = useMemo(() => getLayoutMetrics(cols, rows), [cols, rows]);
   const {
     innerWidth,
-    overlayWidth,
     navWidth,
     navContentWidth,
     paneContentWidth,
     navListHeight,
   } = layout;
+  const modalLayout = useMemo(() => getModalLayout({ columns: cols, rows }), [cols, rows]);
   const terminalTooSmall = useMemo(() => isTerminalTooSmall(cols, rows), [cols, rows]);
 
   const openDebouncedQuery = useDebouncedValue(openQuery, SEARCH_DEBOUNCE_MS);
 
-  const mouseDisabled = paletteOpen || helpOpen || versionOpen;
+  const isModalOpen = paletteOpen || helpOpen || versionOpen;
+  const mouseDisabled = isModalOpen;
 
   useEffect(() => {
     void refreshRecents();
@@ -521,27 +523,21 @@ export function App(props: AppProps) {
       exit();
       return;
     }
-
-    if (shouldExitOpenSearch({ focusTarget, key })) {
-      setFocusTarget("open.results");
+    if (key.escape) {
       return;
     }
 
     if (versionOpen) {
-      if (key.escape || key.return) closeVersion();
+      if (key.return) closeVersion();
       return;
     }
 
     if (helpOpen) {
-      if (key.escape || key.return) closeHelp();
+      if (key.return) closeHelp();
       return;
     }
 
     if (paletteOpen) {
-      if (key.escape) {
-        closePalette();
-        return;
-      }
       if (key.return) {
         const item = limitedPalette[paletteIndex];
         if (item) {
@@ -567,6 +563,18 @@ export function App(props: AppProps) {
         setPaletteQuery((prev) => prev + paletteInput);
         return;
       }
+      return;
+    }
+  }, { isActive: isModalOpen });
+
+  useInput(async (input, key) => {
+    if (key.ctrl && input === "c") {
+      exit();
+      return;
+    }
+
+    if (shouldExitOpenSearch({ focusTarget, key })) {
+      setFocusTarget("open.results");
       return;
     }
 
@@ -647,7 +655,7 @@ export function App(props: AppProps) {
       await handleEditInput(printableInput, key);
       return;
     }
-  });
+  }, { isActive: !isModalOpen && !isModalFocus(focusTarget) });
 
   const wizardSteps = useMemo<WizardStep[]>(() => {
     const steps: WizardStep[] = [
@@ -957,7 +965,8 @@ export function App(props: AppProps) {
 
   return (
     <MouseProvider disabled={mouseDisabled}>
-      <AppFrame debug={debugLayout}>
+      <Box position="relative" width="100%" height="100%">
+        <AppFrame debug={debugLayout}>
         <Box flexDirection="row" gap={2} height="100%">
           <PaneFrame focused={focusTarget === "nav"} width={navWidth} height="100%">
             <Box flexDirection="column" gap={1}>
@@ -1009,39 +1018,55 @@ export function App(props: AppProps) {
           <ToastHost toasts={toasts} busy={busy} progress={progress} />
         </Box>
 
-        {paletteOpen ? (
-          <Box position="absolute" marginTop={2} marginLeft={Math.max(2, Math.floor((innerWidth - overlayWidth) / 2))}>
-            <CommandPaletteModal
-              query={paletteQuery}
-              groups={paletteGroups}
-              selectedId={limitedPalette[paletteIndex]?.id}
-              width={overlayWidth}
-              debug={debugLayout}
-            />
-          </Box>
-        ) : null}
+        </AppFrame>
 
-        {helpOpen ? (
-          <Box position="absolute" marginTop={2} marginLeft={Math.max(2, Math.floor((innerWidth - overlayWidth) / 2))}>
-            <HelpOverlay
-              width={overlayWidth}
-              version={props.version}
-              recentsPath={recentsPath}
-              backend={BACKEND_LABEL}
-              extraLines={props.helpCommand ? getHelpLines(props.helpCommand) : undefined}
-            />
-          </Box>
-        ) : null}
+        <ModalOverlay
+          isOpen={paletteOpen}
+          title="Command Palette"
+          subtitle="Esc to close · ↑↓ to navigate · Enter to run"
+          width={modalLayout.width}
+          height={modalLayout.height}
+          onRequestClose={closePalette}
+        >
+          <CommandPaletteModal
+            query={paletteQuery}
+            groups={paletteGroups}
+            selectedId={limitedPalette[paletteIndex]?.id}
+            width={modalLayout.contentWidth}
+            debug={debugLayout}
+          />
+        </ModalOverlay>
 
-        {versionOpen ? (
-          <Box position="absolute" marginTop={2} marginLeft={Math.max(2, Math.floor((innerWidth - overlayWidth) / 2))}>
-            <Card title="Flux CLI" meta="" accent ruleWidth={overlayWidth - 6} debug={debugLayout}>
-              <Text color={color.muted}>{props.version ?? "version unknown"}</Text>
-              <Text color={color.muted}>Press Esc to close</Text>
-            </Card>
+        <ModalOverlay
+          isOpen={helpOpen}
+          title="Help"
+          subtitle="Esc to close"
+          width={modalLayout.width}
+          height={modalLayout.height}
+          onRequestClose={closeHelp}
+        >
+          <HelpOverlay
+            width={modalLayout.contentWidth}
+            version={props.version}
+            recentsPath={recentsPath}
+            backend={BACKEND_LABEL}
+            extraLines={props.helpCommand ? getHelpLines(props.helpCommand) : undefined}
+          />
+        </ModalOverlay>
+
+        <ModalOverlay
+          isOpen={versionOpen}
+          title="Flux CLI"
+          subtitle="Esc to close"
+          width={modalLayout.width}
+          height={modalLayout.height}
+          onRequestClose={closeVersion}
+        >
+          <Box flexDirection="column" gap={1}>
+            <Text color={color.muted}>{props.version ?? "version unknown"}</Text>
           </Box>
-        ) : null}
-      </AppFrame>
+        </ModalOverlay>
+      </Box>
     </MouseProvider>
   );
 
@@ -1140,7 +1165,7 @@ export function App(props: AppProps) {
     focusBeforeOverlay.current = focusTarget;
     routeBeforeOverlay.current = route;
     setHelpOpen(true);
-    setFocusTarget("modal");
+    setFocusTarget("help");
   }
 
   function closeHelp() {

@@ -5,6 +5,8 @@ import { parseDocument, checkDocument, createDocumentRuntimeIR, applyAddTransfor
 import { renderHtml } from "@flux-lang/render-html";
 import { createTypesetterBackend } from "@flux-lang/typesetter";
 import { buildEditorMissingHtml, resolveEditorDist } from "./editor-dist.js";
+import { renderViewerToolbar, viewerToolbarCss } from "./ui/ViewerToolbar.js";
+import { viewerThemeCss } from "./ui/viewerTheme.js";
 const DEFAULT_DOCSTEP_MS = 1000;
 const MAX_TICK_SECONDS = 1;
 const NO_CACHE_HEADERS = {
@@ -750,17 +752,7 @@ function buildIndexHtml(title) {
         "</head>",
         "<body>",
         "<div id=\"app\">",
-        "  <header class=\"viewer-toolbar\">",
-        "    <div class=\"viewer-title-group\">",
-        "      <div class=\"viewer-title\">Flux Viewer</div>",
-        "      <div class=\"viewer-status\" id=\"viewer-status\">Live: docstep 0 · t=0.00</div>",
-        "    </div>",
-        "    <div class=\"viewer-controls\">",
-        "      <button id=\"viewer-toggle\">Pause</button>",
-        "      <label>Interval <input id=\"viewer-interval\" type=\"number\" min=\"50\" step=\"50\"></label>",
-        "      <button id=\"viewer-export\">Export PDF</button>",
-        "    </div>",
-        "  </header>",
+        renderViewerToolbar(title),
         "  <main id=\"viewer-doc\"></main>",
         "</div>",
         '<script src="/viewer.js" defer></script>',
@@ -769,106 +761,240 @@ function buildIndexHtml(title) {
     ].join("\n");
 }
 function getViewerCss() {
-    return `
+    return [
+        viewerThemeCss,
+        `
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
-  background: #1b1a18;
-  color: #ece7df;
-  font-family: "Source Sans 3", "Segoe UI", sans-serif;
+  background: var(--viewer-neutral-50);
+  color: var(--viewer-text);
+  font-family: var(--viewer-font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
 }
 
 #app {
   min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
-.viewer-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  background: #141311;
-  border-bottom: 1px solid #2b2925;
-}
-
-.viewer-title-group {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.viewer-title {
-  font-size: 14px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: #cdbf9f;
-}
-
-.viewer-status {
-  font-size: 12px;
-  color: #9f9788;
-  letter-spacing: 0.08em;
-}
-
-.viewer-controls {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  font-size: 13px;
-}
-
-.viewer-controls button {
-  background: #cdbf9f;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
-  color: #241f16;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.viewer-controls input {
-  width: 90px;
-  padding: 4px 6px;
-  border-radius: 4px;
-  border: 1px solid #6b655a;
-  background: #24211c;
-  color: #ece7df;
-}
-
 #viewer-doc {
   flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 20px 32px;
+  background: radial-gradient(circle at 20% 0%, rgba(0, 205, 254, 0.08), transparent 45%),
+    radial-gradient(circle at 80% 10%, rgba(123, 233, 74, 0.06), transparent 45%),
+    var(--viewer-neutral-50);
+}
+
+#viewer-doc.viewer-debug-slots [data-flux-id] {
+  outline: 1px dashed rgba(0, 205, 254, 0.5);
+  outline-offset: 2px;
+}
+
+#viewer-doc.viewer-debug-ids [data-flux-id] {
+  position: relative;
+}
+
+#viewer-doc.viewer-debug-ids [data-flux-id]::after {
+  content: attr(data-flux-id);
+  position: absolute;
+  top: -14px;
+  left: 0;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  pointer-events: none;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .viewer-error {
   padding: 32px;
-  color: #f6d1d1;
+  color: #b45309;
 }
 
 .viewer-error h2 {
   margin-top: 0;
-  color: #f2b2b2;
+  color: #b45309;
 }
-`.trim();
+`.trim(),
+        viewerToolbarCss,
+    ].join("\n\n");
 }
 export function getViewerJs() {
     return `
 (() => {
+  const toolbar = document.getElementById("viewer-toolbar");
   const docRoot = document.getElementById("viewer-doc");
+  const titleEl = document.getElementById("viewer-title");
+  const liveEl = document.getElementById("viewer-live");
+  const liveDotEl = liveEl ? liveEl.querySelector(".viewer-live__dot") : null;
+  const liveLabelEl = liveEl ? liveEl.querySelector(".viewer-live__label") : null;
+  const metricsFullEl = document.getElementById("viewer-metrics-full");
+  const metricsCompactEl = document.getElementById("viewer-metrics-compact");
+  const docPathEl = document.getElementById("viewer-doc-path");
+  const seedEl = document.getElementById("viewer-seed");
+
+  const resetBtn = document.getElementById("viewer-reset");
+  const stepBackBtn = document.getElementById("viewer-step-back");
   const toggleBtn = document.getElementById("viewer-toggle");
-  const intervalInput = document.getElementById("viewer-interval");
+  const stepForwardBtn = document.getElementById("viewer-step-forward");
+  const intervalSelect = document.getElementById("viewer-interval");
   const exportBtn = document.getElementById("viewer-export");
-  const statusEl = document.getElementById("viewer-status");
+
+  const overflowWrapper = document.getElementById("viewer-overflow-wrapper");
+  const overflowBtn = document.getElementById("viewer-overflow");
+  const overflowMenu = document.getElementById("viewer-overflow-menu");
+  const debugSlotsToggle = document.getElementById("viewer-debug-slots");
+  const debugIdsToggle = document.getElementById("viewer-debug-ids");
+  const debugPatchesToggle = document.getElementById("viewer-debug-patches");
+
+  if (!docRoot || !toggleBtn || !intervalSelect || !exportBtn) {
+    return;
+  }
 
   let running = true;
   let pollTimer = null;
   let sse = null;
+  let intervalMs = 1000;
+  let currentDocstep = 0;
+  let currentTime = 0;
+  let currentSeed = 0;
+  let initialRuntime = { seed: 0, docstep: 0, time: 0 };
+  let advanceTimeEnabled = null;
+  let logPatches = false;
+  let fullTitle = titleEl ? titleEl.textContent || "Flux Viewer" : "Flux Viewer";
 
   const fetchJson = async (url, options) => {
     const res = await fetch(url, options);
     if (!res.ok) throw new Error("Request failed: " + res.status);
     return res.json();
+  };
+
+  const isEditableTarget = (target) => {
+    if (!target || !(target instanceof HTMLElement)) return false;
+    const tag = target.tagName.toLowerCase();
+    return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
+  };
+
+  const truncateMiddle = (value, maxChars) => {
+    const input = String(value ?? "");
+    if (input.length <= maxChars) return input;
+    const keep = Math.max(4, maxChars - 3);
+    const head = Math.ceil(keep / 2);
+    const tail = Math.floor(keep / 2);
+    return input.slice(0, head) + "..." + input.slice(input.length - tail);
+  };
+
+  const formatTime = (time) => {
+    if (!Number.isFinite(time)) return "0.0";
+    return Number(time).toFixed(1);
+  };
+
+  const formatIntervalLabel = (value) => {
+    if (!Number.isFinite(value)) return "—";
+    if (value >= 1000) {
+      const seconds = value / 1000;
+      return Number.isInteger(seconds) ? String(seconds) + "s" : seconds.toFixed(1) + "s";
+    }
+    return String(value) + "ms";
+  };
+
+  const ensureIntervalOption = (value) => {
+    if (!intervalSelect) return;
+    const numeric = Number(value);
+    const options = Array.from(intervalSelect.options ?? []);
+    const exists = options.some((opt) => Number(opt.value) === numeric);
+    if (!exists) {
+      const option = document.createElement("option");
+      option.value = String(numeric);
+      option.textContent = formatIntervalLabel(numeric);
+      option.dataset.custom = "true";
+      intervalSelect.appendChild(option);
+    }
+    intervalSelect.value = String(numeric);
+  };
+
+  const updateTitle = () => {
+    if (!titleEl) return;
+    const width = titleEl.clientWidth || 0;
+    const maxChars = Math.max(16, Math.floor(width / 7));
+    titleEl.textContent = truncateMiddle(fullTitle, maxChars);
+    titleEl.title = fullTitle;
+  };
+
+  const updateDocIdentity = (docPath, titleOverride) => {
+    if (typeof titleOverride === "string" && titleOverride.trim().length) {
+      fullTitle = titleOverride;
+    } else if (docPath && typeof docPath === "string") {
+      fullTitle = docPath;
+    }
+    if (docPathEl) {
+      docPathEl.textContent = docPath || "—";
+      docPathEl.title = docPath || "";
+    }
+    updateTitle();
+  };
+
+  const updateMetrics = (seed, docstep, time) => {
+    const timeText = formatTime(time);
+    if (metricsFullEl) {
+      metricsFullEl.textContent = "seed " + seed + " · docstep " + docstep + " · t " + timeText + "s";
+    }
+    if (metricsCompactEl) {
+      metricsCompactEl.textContent = "s" + seed + " · d" + docstep + " · t" + timeText + "s";
+    }
+    if (seedEl) seedEl.textContent = String(seed ?? 0);
+    if (stepBackBtn) {
+      if (docstep <= 0) stepBackBtn.setAttribute("disabled", "");
+      else stepBackBtn.removeAttribute("disabled");
+    }
+  };
+
+  const setRunningState = (nextRunning) => {
+    running = nextRunning;
+    if (toggleBtn) {
+      toggleBtn.classList.toggle("is-active", running);
+      toggleBtn.setAttribute("aria-label", running ? "Pause" : "Play");
+      toggleBtn.setAttribute("aria-pressed", running ? "true" : "false");
+      const icon = toggleBtn.querySelector(".toolbar-icon");
+      if (icon) icon.textContent = running ? "⏸" : "▶";
+      const sr = toggleBtn.querySelector(".sr-only");
+      if (sr) sr.textContent = running ? "Pause" : "Play";
+    }
+    if (liveEl) {
+      liveEl.classList.toggle("is-live", running);
+      liveEl.classList.toggle("is-paused", !running);
+    }
+    if (liveDotEl) liveDotEl.textContent = running ? "●" : "○";
+    if (liveLabelEl) liveLabelEl.textContent = running ? "Live" : "Paused";
+  };
+
+  const updateToolbarShadow = () => {
+    if (!toolbar) return;
+    toolbar.classList.toggle("is-shadow", docRoot.scrollTop > 0);
+  };
+
+  const setDebugClass = (className, enabled) => {
+    docRoot.classList.toggle(className, enabled);
   };
 
   const getPreviewDocument = () => {
@@ -1015,11 +1141,24 @@ export function getViewerJs() {
       "</ul></div>";
   };
 
+  const updateDocState = (payload) => {
+    if (!payload) return;
+    const nextDocstep = typeof payload.docstep === "number" ? payload.docstep : currentDocstep;
+    const nextTime = typeof payload.time === "number" ? payload.time : currentTime;
+    if (advanceTimeEnabled === null && nextDocstep !== currentDocstep) {
+      const delta = Math.abs(nextTime - currentTime);
+      advanceTimeEnabled = delta > 0.0001;
+    } else if (advanceTimeEnabled === false && Math.abs(nextTime - currentTime) > 0.0001) {
+      advanceTimeEnabled = true;
+    }
+    currentDocstep = nextDocstep;
+    currentTime = nextTime;
+    updateMetrics(currentSeed, currentDocstep, currentTime);
+  };
+
   const updateStatus = (payload) => {
-    if (!statusEl || !payload) return;
-    const docstep = typeof payload.docstep === "number" ? payload.docstep : 0;
-    const time = typeof payload.time === "number" ? payload.time : 0;
-    statusEl.textContent = "Live: docstep " + docstep + " · t=" + time.toFixed(2);
+    if (!payload) return;
+    updateDocState(payload);
   };
 
   const applyPatchPayload = (payload) => {
@@ -1027,6 +1166,9 @@ export function getViewerJs() {
     if (payload.errors) {
       showError(payload.errors);
       return;
+    }
+    if (logPatches && payload.slotPatches) {
+      console.info("slot patches", payload);
     }
     updateStatus(payload);
     if (payload.slotPatches) {
@@ -1037,16 +1179,33 @@ export function getViewerJs() {
   const loadInitial = async () => {
     const config = await fetchJson("/api/config");
     running = config.running;
-    intervalInput.value = String(config.docstepMs);
-    toggleBtn.textContent = running ? "Pause" : "Start";
+    intervalMs = config.docstepMs;
+    currentSeed = typeof config.seed === "number" ? config.seed : currentSeed;
+    currentDocstep = typeof config.docstep === "number" ? config.docstep : currentDocstep;
+    currentTime = typeof config.time === "number" ? config.time : currentTime;
+    initialRuntime = { seed: currentSeed, docstep: currentDocstep, time: currentTime };
+    advanceTimeEnabled = null;
+    ensureIntervalOption(intervalMs);
+    setRunningState(running);
+    updateMetrics(currentSeed, currentDocstep, currentTime);
 
-    const render = await fetchJson("/api/render");
+    const [render, irPayload] = await Promise.all([
+      fetchJson("/api/render"),
+      fetchJson("/api/ir").catch(() => null),
+    ]);
+    const metaTitle =
+      irPayload && irPayload.ir && irPayload.ir.meta && typeof irPayload.ir.meta.title === "string"
+        ? irPayload.ir.meta.title
+        : null;
+    updateDocIdentity(config.docPath, metaTitle);
+
     docRoot.innerHTML = render.html;
     const root = getPreviewDocument();
     const win = getPreviewWindow();
     applyAssets(root);
     requestAnimationFrame(() => applyFits(root, win));
     updateStatus(render);
+    updateToolbarShadow();
   };
 
   const poll = async () => {
@@ -1094,28 +1253,189 @@ export function getViewerJs() {
     };
   };
 
-  toggleBtn.addEventListener("click", async () => {
-    running = !running;
-    toggleBtn.textContent = running ? "Pause" : "Start";
-    await fetchJson("/api/ticker", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ running }),
-    });
+  const toggleRunning = async () => {
+    const previous = running;
+    const next = !running;
+    setRunningState(next);
+    try {
+      const response = await fetchJson("/api/ticker", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ running: next }),
+      });
+      if (typeof response?.running === "boolean") {
+        setRunningState(response.running);
+      }
+      if (typeof response?.docstepMs === "number") {
+        intervalMs = response.docstepMs;
+        ensureIntervalOption(intervalMs);
+      }
+    } catch (err) {
+      console.warn("toggle failed", err);
+      setRunningState(previous);
+    }
+  };
+
+  const applyRuntime = async (payload) => {
+    try {
+      const response = await fetchJson("/api/runtime", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (response?.ok) {
+        currentSeed = typeof response.seed === "number" ? response.seed : currentSeed;
+        currentDocstep = typeof response.docstep === "number" ? response.docstep : currentDocstep;
+        currentTime = typeof response.time === "number" ? response.time : currentTime;
+        updateMetrics(currentSeed, currentDocstep, currentTime);
+      }
+    } catch (err) {
+      console.warn("runtime update failed", err);
+    }
+  };
+
+  const stepBy = async (delta) => {
+    const nextDocstep = Math.max(0, currentDocstep + delta);
+    if (nextDocstep === currentDocstep) return;
+    let nextTime = currentTime;
+    if (advanceTimeEnabled !== false) {
+      nextTime = Math.max(0, currentTime + (intervalMs / 1000) * delta);
+    }
+    await applyRuntime({ docstep: nextDocstep, time: nextTime });
+  };
+
+  const resetRuntime = async () => {
+    await applyRuntime(initialRuntime);
+  };
+
+  const setOverflowOpen = (open) => {
+    if (!overflowWrapper || !overflowBtn || !overflowMenu) return;
+    overflowWrapper.classList.toggle("is-open", open);
+    overflowBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    overflowMenu.setAttribute("aria-hidden", open ? "false" : "true");
+  };
+
+  toggleBtn.addEventListener("click", () => {
+    toggleRunning();
   });
 
-  intervalInput.addEventListener("change", async () => {
-    const value = Number(intervalInput.value);
-    if (!Number.isFinite(value)) return;
-    await fetchJson("/api/ticker", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ docstepMs: value }),
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      resetRuntime();
     });
+  }
+
+  if (stepBackBtn) {
+    stepBackBtn.addEventListener("click", () => {
+      stepBy(-1);
+    });
+  }
+
+  if (stepForwardBtn) {
+    stepForwardBtn.addEventListener("click", () => {
+      stepBy(1);
+    });
+  }
+
+  intervalSelect.addEventListener("change", async () => {
+    const value = Number(intervalSelect.value);
+    if (!Number.isFinite(value)) return;
+    intervalMs = value;
+    try {
+      const response = await fetchJson("/api/ticker", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docstepMs: value }),
+      });
+      if (typeof response?.docstepMs === "number") {
+        intervalMs = response.docstepMs;
+        ensureIntervalOption(intervalMs);
+      }
+    } catch (err) {
+      console.warn("interval update failed", err);
+    }
   });
 
   exportBtn.addEventListener("click", () => {
     window.open("/api/pdf", "_blank");
+  });
+
+  if (overflowBtn && overflowWrapper && overflowMenu) {
+    overflowBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setOverflowOpen(!overflowWrapper.classList.contains("is-open"));
+    });
+    document.addEventListener("click", (event) => {
+      if (!(event.target instanceof Node)) return;
+      if (!overflowWrapper.contains(event.target)) setOverflowOpen(false);
+    });
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setOverflowOpen(false);
+  });
+
+  if (debugSlotsToggle) {
+    setDebugClass("viewer-debug-slots", debugSlotsToggle.checked);
+    debugSlotsToggle.addEventListener("change", (event) => {
+      setDebugClass("viewer-debug-slots", event.target.checked);
+    });
+  }
+
+  if (debugIdsToggle) {
+    setDebugClass("viewer-debug-ids", debugIdsToggle.checked);
+    debugIdsToggle.addEventListener("change", (event) => {
+      setDebugClass("viewer-debug-ids", event.target.checked);
+    });
+  }
+
+  if (debugPatchesToggle) {
+    logPatches = debugPatchesToggle.checked;
+    debugPatchesToggle.addEventListener("change", (event) => {
+      logPatches = event.target.checked;
+    });
+  }
+
+  if (toolbar) {
+    docRoot.addEventListener("scroll", updateToolbarShadow, { passive: true });
+  }
+
+  window.addEventListener("resize", () => {
+    window.requestAnimationFrame(updateTitle);
+  });
+
+  if (typeof ResizeObserver !== "undefined" && titleEl) {
+    const observer = new ResizeObserver(() => updateTitle());
+    observer.observe(titleEl);
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (isEditableTarget(event.target)) return;
+    if (event.key === " ") {
+      event.preventDefault();
+      toggleRunning();
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      stepBy(-1);
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      stepBy(1);
+      return;
+    }
+    if (event.key === "r" || event.key === "R") {
+      event.preventDefault();
+      resetRuntime();
+      return;
+    }
+    if (event.key === "e" || event.key === "E") {
+      event.preventDefault();
+      window.open("/api/pdf", "_blank");
+    }
   });
 
   loadInitial().then(startSse);

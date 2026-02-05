@@ -12,6 +12,7 @@ export type FocusTarget =
   | "edit"
   | "settings"
   | "palette"
+  | "help"
   | "modal";
 
 export function defaultFocusForRoute(route: AppRoute): FocusTarget {
@@ -38,5 +39,9 @@ export function defaultFocusForRoute(route: AppRoute): FocusTarget {
 }
 
 export function isPaneFocus(target: FocusTarget) {
-  return target !== "nav" && target !== "palette" && target !== "modal";
+  return target !== "nav" && target !== "palette" && target !== "help" && target !== "modal";
+}
+
+export function isModalFocus(target: FocusTarget) {
+  return target === "palette" || target === "help" || target === "modal";
 }
