@@ -22,7 +22,9 @@ export function useTerminalDimensions() {
     };
     update();
     stdout.on("resize", update);
-    return () => stdout.off("resize", update);
+    return () => {
+      stdout.off("resize", update);
+    };
   }, [stdout]);
 
   return dimensions;
