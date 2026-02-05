@@ -53,6 +53,7 @@ export function OpenScreen({
   indexing,
   truncated,
   preview,
+  searchFocused,
   onToggleShowAll,
   onOpenSelected,
   onSelectResult,
@@ -60,6 +61,8 @@ export function OpenScreen({
   onSelectPinned,
   onSelectRecent,
   onTogglePin,
+  onFocusSearch,
+  onFocusResults,
   debug,
 }: {
   width: number;
@@ -77,6 +80,7 @@ export function OpenScreen({
   indexing: boolean;
   truncated: boolean;
   preview: PreviewInfo | null;
+  searchFocused: boolean;
   onToggleShowAll: () => void;
   onOpenSelected: () => void;
   onSelectResult: (index: number) => void;
@@ -84,6 +88,8 @@ export function OpenScreen({
   onSelectPinned: (dir: string) => void;
   onSelectRecent: (dir: string) => void;
   onTogglePin: () => void;
+  onFocusSearch: () => void;
+  onFocusResults: () => void;
   debug?: boolean;
 }) {
   const resultsList = limitList(results, selectedIndex, 8);
@@ -111,7 +117,9 @@ export function OpenScreen({
       >
         <Box flexDirection="row" gap={1} alignItems="center">
           <Text color={color.muted}>Search</Text>
-          <InputLine value={query} placeholder="Type to filter" />
+          <Clickable id="open-search-focus" onClick={onFocusSearch} priority={2}>
+            <InputLine value={query} placeholder="Type to filter" focused={searchFocused} />
+          </Clickable>
           <Clickable id="toggle-filter" onClick={onToggleShowAll} priority={1}>
             <Text color={color.muted}>
               {showAll ? "Filter: all" : "Filter: *.flux"}
@@ -119,32 +127,34 @@ export function OpenScreen({
           </Clickable>
         </Box>
 
-        <Box flexDirection="column" gap={0}>
-          <Text color={color.muted}>{activeList === "results" ? "Results" : "Results (inactive)"}</Text>
-          {results.length === 0 ? (
-            <Text color={color.muted}>No matches yet.</Text>
-          ) : (
-            <Box flexDirection="column" gap={0}>
-              {resultsList.showTop ? <Text color={color.muted}>…</Text> : null}
-              {resultsList.items.map((item, idx) => {
-                const absoluteIndex = resultsList.offset + idx;
-                const selected = activeList === "results" && absoluteIndex === selectedIndex;
-                return (
-                  <Clickable key={item.id} id={`open-result-${item.id}`} onClick={() => onSelectResult(absoluteIndex)} priority={1}>
-                    <Text inverse={selected} color={selected ? color.fg : color.fg}>
-                      {`${selected ? ">" : " "} ${item.label}`}
-                      {item.meta ? ` ${item.meta}` : ""}
-                    </Text>
-                  </Clickable>
-                );
-              })}
-              {resultsList.showBottom ? <Text color={color.muted}>…</Text> : null}
+        <Clickable id="open-results-focus" onClick={onFocusResults} priority={0}>
+          <Box flexDirection="column" gap={0}>
+            <Text color={color.muted}>{activeList === "results" ? "Results" : "Results (inactive)"}</Text>
+            {results.length === 0 ? (
+              <Text color={color.muted}>No matches yet.</Text>
+            ) : (
+              <Box flexDirection="column" gap={0}>
+                {resultsList.showTop ? <Text color={color.muted}>…</Text> : null}
+                {resultsList.items.map((item, idx) => {
+                  const absoluteIndex = resultsList.offset + idx;
+                  const selected = activeList === "results" && absoluteIndex === selectedIndex;
+                  return (
+                    <Clickable key={item.id} id={`open-result-${item.id}`} onClick={() => onSelectResult(absoluteIndex)} priority={1}>
+                      <Text inverse={selected} color={selected ? color.fg : color.fg}>
+                        {`${selected ? ">" : " "} ${item.label}`}
+                        {item.meta ? ` ${item.meta}` : ""}
+                      </Text>
+                    </Clickable>
+                  );
+                })}
+                {resultsList.showBottom ? <Text color={color.muted}>…</Text> : null}
+              </Box>
+            )}
+            <Box marginTop={1}>
+              <Button id="open-selected" label="Open selected" icon="↩" onClick={onOpenSelected} />
             </Box>
-          )}
-          <Box marginTop={1}>
-            <Button id="open-selected" label="Open selected" icon="↩" onClick={onOpenSelected} />
           </Box>
-        </Box>
+        </Clickable>
 
         <Box flexDirection="column" gap={0}>
           <Text color={color.muted}>Pinned / Recent directories</Text>

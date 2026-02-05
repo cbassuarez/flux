@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef } from "react";
-import { DOMElement, measureElement } from "ink";
+import { DOMElement, measureElement, useInput } from "ink";
 
 type RegionBounds = { x: number; y: number; width: number; height: number };
 
@@ -38,37 +38,29 @@ export function MouseProvider({ children, disabled }: { children: React.ReactNod
     };
   }, [disabled]);
 
-  useEffect(() => {
+  useInput((input) => {
     if (disabled) return;
-    const stdin = process.stdin;
-    if (!stdin?.on || !stdin.isTTY) return;
-    const handleData = (data: Buffer) => {
-      const input = data.toString("utf8");
-      const events = parseMouseSequences(input);
-      for (const event of events) {
-        if (!event.pressed || event.button !== 0) continue;
-        const x = event.x - 1;
-        const y = event.y - 1;
-        const matches = Array.from(regionsRef.current.values()).filter((region) => {
-          const withinX = x >= region.bounds.x && x < region.bounds.x + region.bounds.width;
-          const withinY = y >= region.bounds.y && y < region.bounds.y + region.bounds.height;
-          return withinX && withinY;
-        });
-        if (matches.length === 0) continue;
-        matches.sort((a, b) => {
-          if (b.priority !== a.priority) return b.priority - a.priority;
-          const areaA = a.bounds.width * a.bounds.height;
-          const areaB = b.bounds.width * b.bounds.height;
-          return areaA - areaB;
-        });
-        matches[0]?.onClick();
-      }
-    };
-    stdin.on("data", handleData);
-    return () => {
-      stdin.off("data", handleData);
-    };
-  }, [disabled]);
+    if (!input || !input.includes("\u001b[<")) return;
+    const events = parseMouseSequences(input);
+    for (const event of events) {
+      if (!event.pressed || event.button !== 0) continue;
+      const x = event.x - 1;
+      const y = event.y - 1;
+      const matches = Array.from(regionsRef.current.values()).filter((region) => {
+        const withinX = x >= region.bounds.x && x < region.bounds.x + region.bounds.width;
+        const withinY = y >= region.bounds.y && y < region.bounds.y + region.bounds.height;
+        return withinX && withinY;
+      });
+      if (matches.length === 0) continue;
+      matches.sort((a, b) => {
+        if (b.priority !== a.priority) return b.priority - a.priority;
+        const areaA = a.bounds.width * a.bounds.height;
+        const areaB = b.bounds.width * b.bounds.height;
+        return areaA - areaB;
+      });
+      matches[0]?.onClick();
+    }
+  }, { isActive: !disabled });
 
   return (
     <MouseContext.Provider value={{ register, unregister }}>

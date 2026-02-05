@@ -19,11 +19,11 @@ export function HelpOverlay({
   const lines = [
     "Navigation",
     "  Tab switch focus · ↑/↓ move · Enter select",
-    "  / or Ctrl+K command palette",
+    "  Ctrl+K command palette",
     "  ? help overlay · Esc close overlays or return to Open",
     "  q quit",
     "Open picker",
-    "  Type to search · Backspace to go up a folder (empty search)",
+    "  / focus search · Esc exit search · Backspace go up a folder",
     "Flows",
     "  Open → Doc Details → Edit / Export / Doctor / Format",
     "Diagnostics",

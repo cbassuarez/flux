@@ -68,7 +68,7 @@ export function DashboardScreen({
             <Button id="empty-new" label="New" onClick={() => onEmptyAction("new")} />
             <Button id="empty-open" label="Open" onClick={() => onEmptyAction("open")} />
           </Box>
-          <Text color={color.muted}>Tip: Press / for the command palette.</Text>
+          <Text color={color.muted}>Tip: Press Ctrl+K for the command palette.</Text>
         </Card>
       ) : null}
 

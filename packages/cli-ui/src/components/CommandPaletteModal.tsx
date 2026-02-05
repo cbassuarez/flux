@@ -20,10 +20,10 @@ export function CommandPaletteModal({
 }) {
   return (
     <Box width={width}>
-      <Card title="Command Palette" meta="/" accent ruleWidth={width - 6} debug={debug}>
+      <Card title="Command Palette" meta="Ctrl+K" accent ruleWidth={width - 6} debug={debug}>
         <Box flexDirection="row" gap={1}>
           <Text color={color.muted}>Search</Text>
-          <InputLine value={query} placeholder="Type to filter" />
+          <InputLine value={query} placeholder="Type to filter" focused />
         </Box>
         <Box flexDirection="column" gap={1}>
           {groups.length === 0 ? (
