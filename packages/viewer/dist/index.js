@@ -450,7 +450,7 @@ export async function startViewerServer(options) {
                 sendJson(res, lastPatchPayload);
                 return;
             }
-            if (url.pathname === "/api/stream") {
+            if (url.pathname === "/api/stream" || url.pathname === "/api/events") {
                 res.writeHead(200, {
                     "Content-Type": "text/event-stream; charset=utf-8",
                     Connection: "keep-alive",
@@ -980,7 +980,7 @@ function applyCsp(res) {
         "connect-src 'self'",
         "object-src 'none'",
         "base-uri 'none'",
-        "frame-ancestors 'none'",
+        "frame-ancestors 'self'",
     ].join("; "));
 }
 function sendJson(res, payload) {
