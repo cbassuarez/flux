@@ -13,6 +13,9 @@ interface LauncherConfig {
   channel: Channel;
   pinnedVersion?: string;
   lastResolved?: Partial<Record<Channel, string>>;
+  lastCheckMs?: number;
+  autoUpdate?: boolean;
+  ttlMinutes?: number;
 }
 
 interface ResolvedCli {
@@ -25,14 +28,23 @@ const CONFIG_PATH = path.join(paths.config, "config.json");
 const CACHE_ROOT = path.join(paths.cache, "cli");
 const LOCK_PATH = path.join(paths.cache, "install.lock");
 const DEFAULT_CHANNEL: Channel = "canary";
+const DEFAULT_TTL_MINUTES = 10;
 const FIX_HINT = "Re-run online or set a pinned version via `flux self pin <version>`.";
 
 async function readConfig(): Promise<LauncherConfig> {
   try {
     const raw = await fs.readFile(CONFIG_PATH, "utf8");
-    return JSON.parse(raw) as LauncherConfig;
+    const cfg = JSON.parse(raw) as LauncherConfig;
+    return {
+      channel: cfg.channel ?? DEFAULT_CHANNEL,
+      pinnedVersion: cfg.pinnedVersion,
+      lastResolved: cfg.lastResolved ?? {},
+      lastCheckMs: cfg.lastCheckMs,
+      autoUpdate: cfg.autoUpdate ?? true,
+      ttlMinutes: cfg.ttlMinutes ?? DEFAULT_TTL_MINUTES,
+    };
   } catch {
-    return { channel: DEFAULT_CHANNEL };
+    return { channel: DEFAULT_CHANNEL, autoUpdate: true, ttlMinutes: DEFAULT_TTL_MINUTES };
   }
 }
 
@@ -102,6 +114,32 @@ async function resolveDistTag(channel: Channel): Promise<string> {
   return stdout.trim().replace(/"/g, "");
 }
 
+async function hasInstalled(version: string): Promise<boolean> {
+  const pkg = await loadPackageJsonFrom(cliPackageDir(path.join(CACHE_ROOT, version)));
+  return Boolean(pkg?.version === version && pkg.bin && pkg.bin.flux);
+}
+
+async function resolveInstalledBin(version: string): Promise<string | null> {
+  const installDir = path.join(CACHE_ROOT, version);
+  const pkg = await loadPackageJsonFrom(cliPackageDir(installDir));
+  if (pkg?.version === version && pkg.bin?.flux) {
+    return path.join(cliPackageDir(installDir), pkg.bin.flux);
+  }
+  return null;
+}
+
+async function newestCachedVersion(): Promise<string | null> {
+  try {
+    const entries = await fs.readdir(CACHE_ROOT, { withFileTypes: true });
+    const versions = entries.filter((e) => e.isDirectory()).map((e) => e.name).filter((v) => semver.valid(v));
+    if (!versions.length) return null;
+    versions.sort((a, b) => semver.rcompare(a, b));
+    return versions[0];
+  } catch {
+    return null;
+  }
+}
+
 async function ensureInstalled(version: string): Promise<ResolvedCli> {
   const installDir = path.join(CACHE_ROOT, version);
   const pkg = await loadPackageJsonFrom(cliPackageDir(installDir));
@@ -130,7 +168,17 @@ async function ensureInstalled(version: string): Promise<ResolvedCli> {
   return { version, binPath: path.join(cliPackageDir(installDir), installedPkg.bin.flux) };
 }
 
-async function resolveTargetVersion(cfg: LauncherConfig, overrides: { channel?: Channel; pin?: string | null }): Promise<string> {
+function effectiveAutoUpdate(cfg: LauncherConfig): boolean {
+  const override = process.env.FLUX_AUTO_UPDATE;
+  if (override?.toLowerCase() === "0" || override?.toLowerCase() === "false") return false;
+  if (override?.toLowerCase() === "1" || override?.toLowerCase() === "true") return true;
+  return cfg.autoUpdate ?? true;
+}
+
+async function resolveTargetVersion(
+  cfg: LauncherConfig,
+  overrides: { channel?: Channel; pin?: string | null; forceRefresh?: boolean },
+): Promise<string> {
   if (overrides.pin !== undefined) {
     cfg.pinnedVersion = overrides.pin || undefined;
     await writeConfig(cfg);
@@ -138,13 +186,22 @@ async function resolveTargetVersion(cfg: LauncherConfig, overrides: { channel?: 
   if (cfg.pinnedVersion) return cfg.pinnedVersion;
 
   const channel = overrides.channel ?? cfg.channel ?? DEFAULT_CHANNEL;
+  const ttlMinutes = cfg.ttlMinutes ?? DEFAULT_TTL_MINUTES;
+  const now = Date.now();
+  const useCache = !overrides.forceRefresh && cfg.lastCheckMs && now - cfg.lastCheckMs < ttlMinutes * 60_000;
+
+  if (useCache && cfg.lastResolved?.[channel]) {
+    return cfg.lastResolved[channel] as string;
+  }
+
   try {
     const version = await resolveDistTag(channel);
     cfg.channel = channel;
     cfg.lastResolved = { ...(cfg.lastResolved ?? {}), [channel]: version };
+    cfg.lastCheckMs = now;
     await writeConfig(cfg);
     return version;
-  } catch (err) {
+  } catch {
     const cached = cfg.lastResolved?.[channel];
     if (cached) return cached;
     throw new Error(`Offline and no cached version available for channel '${channel}'. ${FIX_HINT}`);
@@ -171,10 +228,29 @@ async function runSelfCommand(cmd: string | undefined, cfg: LauncherConfig, args
     case "status": {
       console.log(`channel ${cfg.channel ?? DEFAULT_CHANNEL}`);
       console.log(`pinned ${cfg.pinnedVersion ?? "none"}`);
+      console.log(`autoUpdate ${effectiveAutoUpdate(cfg) ? "on" : "off"}`);
+      console.log(`ttlMinutes ${cfg.ttlMinutes ?? DEFAULT_TTL_MINUTES}`);
       const last = cfg.lastResolved ?? {};
       for (const key of Object.keys(last)) {
         console.log(`${key} ${last[key as Channel]}`);
       }
+      return 0;
+    }
+    case "autoupdate": {
+      const next = (args[0] ?? "").toLowerCase();
+      if (next !== "on" && next !== "off") {
+        console.error("Usage: flux self autoupdate on|off");
+        return 1;
+      }
+      cfg.autoUpdate = next === "on";
+      await writeConfig(cfg);
+      console.log(`autoUpdate ${cfg.autoUpdate ? "on" : "off"}`);
+      return 0;
+    }
+    case "update": {
+      const version = await resolveTargetVersion(cfg, { forceRefresh: true });
+      await ensureInstalled(version);
+      console.log(`updated @flux-lang/cli to ${version}`);
       return 0;
     }
     case "channel": {
@@ -215,13 +291,41 @@ async function runSelfCommand(cmd: string | undefined, cfg: LauncherConfig, args
 async function main(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   const cfg = await readConfig();
+  const autoUpdate = effectiveAutoUpdate(cfg);
 
   if (parsed.selfCmd) {
     return runSelfCommand(parsed.selfCmd, cfg, parsed.passthrough);
   }
 
   const version = await resolveTargetVersion(cfg, { channel: parsed.channel, pin: parsed.pin });
-  const resolved = await ensureInstalled(version);
+
+  let resolved: ResolvedCli | null = null;
+  if (autoUpdate) {
+    resolved = await ensureInstalled(version);
+  } else {
+    const bin = await resolveInstalledBin(version);
+    if (bin) {
+      resolved = { version, binPath: bin };
+    } else {
+      const cached = await newestCachedVersion();
+      if (cached) {
+        const cachedBin = await resolveInstalledBin(cached);
+        if (cachedBin) {
+          console.error(
+            `Update available (@flux-lang/cli ${version}). Auto-update is off; using cached ${cached}. ` +
+              `Run 'flux self update' or 'flux self autoupdate on' to install.`,
+          );
+          resolved = { version: cached, binPath: cachedBin };
+        }
+      }
+      if (!resolved) {
+        console.error(
+          `No installed CLI found. Run 'flux self update' or enable auto-update with 'flux self autoupdate on'.`,
+        );
+        return 1;
+      }
+    }
+  }
 
   const nodeArgs = [resolved.binPath, ...parsed.passthrough];
   const child = spawn(process.execPath, nodeArgs, { stdio: "inherit" });
