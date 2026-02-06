@@ -18,6 +18,7 @@ const repoRoot = path.resolve(__dirname, "..");
 const publishSet = [
   "@flux-lang/cli",
   "@flux-lang/cli-core",
+  "@flux-lang/cli-ui",
   "@flux-lang/viewer",
   "@flux-lang/flux",
 ];

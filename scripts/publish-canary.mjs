@@ -16,6 +16,7 @@ const repoRoot = path.resolve(__dirname, "..");
 
 const publishOrder = [
   "@flux-lang/cli-core",
+  "@flux-lang/cli-ui",
   "@flux-lang/viewer",
   "@flux-lang/cli",
   "@flux-lang/flux",
