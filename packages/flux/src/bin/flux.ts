@@ -301,7 +301,25 @@ async function main(argv: string[]): Promise<number> {
 
   let resolved: ResolvedCli | null = null;
   if (autoUpdate) {
-    resolved = await ensureInstalled(version);
+    try {
+      resolved = await ensureInstalled(version);
+    } catch (err) {
+      // If cached dist-tag is stale right after a publish, force-refresh once and retry.
+      if (!cfg.pinnedVersion) {
+        const freshVersion = await resolveTargetVersion(cfg, {
+          channel: parsed.channel,
+          pin: parsed.pin,
+          forceRefresh: true,
+        });
+        if (freshVersion !== version) {
+          resolved = await ensureInstalled(freshVersion);
+        } else {
+          throw err;
+        }
+      } else {
+        throw err;
+      }
+    }
   } else {
     const bin = await resolveInstalledBin(version);
     if (bin) {
