@@ -4,7 +4,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import envPaths from "env-paths";
 import semver from "semver";
 
@@ -13,7 +12,7 @@ type Channel = "canary" | "latest";
 interface LauncherConfig {
   channel: Channel;
   pinnedVersion?: string;
-  lastResolved?: Record<Channel, string>;
+  lastResolved?: Partial<Record<Channel, string>>;
 }
 
 interface ResolvedCli {
