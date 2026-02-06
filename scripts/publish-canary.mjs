@@ -15,9 +15,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 
 const publishOrder = [
+  "@flux-lang/core",
+  "@flux-lang/render-html",
+  "@flux-lang/typesetter",
+  "@flux-lang/viewer",
   "@flux-lang/cli-core",
   "@flux-lang/cli-ui",
-  "@flux-lang/viewer",
   "@flux-lang/cli",
   "@flux-lang/flux",
 ];
