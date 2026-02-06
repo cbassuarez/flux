@@ -91,14 +91,12 @@ export async function fetchEditNode(id: string): Promise<unknown> {
 }
 
 export async function postTransform(request: TransformRequest): Promise<unknown> {
-  const file = getFileParam();
-  const payload = file ? { ...request, file } : request;
   return fetchJson<unknown>("/api/edit/transform", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(request)
   });
 }
 

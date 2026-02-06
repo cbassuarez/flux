@@ -2238,6 +2238,7 @@ function CaptionInspector({
         <span>Text</span>
         <input
           className="input"
+          data-testid="inspector-field:caption"
           value={draft}
           onChange={(event) => {
             setDraft(event.target.value);
@@ -2574,6 +2575,7 @@ function SlotInspector({
                   <div key={index} className="variant-row">
                     <input
                       className="input"
+                      data-testid={`inspector-field:slot-variant-${index}`}
                       value={value}
                       onChange={(event) => handleVariantChange(index, event.target.value)}
                     />
@@ -2605,7 +2607,12 @@ function SlotInspector({
                     </div>
                   </div>
                 ))}
-                <button type="button" className="btn btn-ghost btn-xs" onClick={handleAddVariant}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  data-testid="inspector-action:add-variant"
+                  onClick={handleAddVariant}
+                >
                   Add variant
                 </button>
               </div>
