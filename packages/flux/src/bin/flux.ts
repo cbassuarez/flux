@@ -111,10 +111,15 @@ async function ensureInstalled(version: string): Promise<ResolvedCli> {
 
   await withLock(async () => {
     await fs.mkdir(installDir, { recursive: true });
-    const args = ["install", `@flux-lang/cli@${version}`, "--no-audit", "--no-fund", "--silent", "--prefix", installDir];
-    const { exitCode, stderr } = await spawnAsync("npm", args, { env: npmEnv() });
+    const args = ["install", `@flux-lang/cli@${version}`, "--no-audit", "--no-fund", "--prefix", installDir];
+    const { exitCode, stdout, stderr } = await spawnAsync("npm", args, { env: npmEnv() });
     if (exitCode !== 0) {
-      throw new Error(`Failed to install @flux-lang/cli@${version}: ${stderr}`);
+      const details = [stdout, stderr].map((chunk) => chunk.trim()).filter(Boolean).join("\n");
+      throw new Error(
+        `Failed to install @flux-lang/cli@${version}.\n` +
+          `Command: npm ${args.join(" ")}\n` +
+          `${details || "No npm output captured."}`,
+      );
     }
   });
 
@@ -233,6 +238,10 @@ async function spawnAsync(cmd: string, args: string[], options: { env?: NodeJS.P
     });
     child.stderr?.on("data", (buf) => {
       stderr += buf.toString();
+    });
+    child.on("error", (err) => {
+      stderr += `\n${String(err?.message ?? err)}`;
+      resolve({ stdout, stderr, exitCode: 1 });
     });
     child.on("close", (code) => resolve({ stdout, stderr, exitCode: code }));
   });
