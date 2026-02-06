@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promises as fs } from "node:fs";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -22,8 +23,9 @@ const publishOrder = [
 
 async function pkgVersion(pkg) {
   const pkgPath = path.join(repoRoot, "packages", pkg.split("/").pop(), "package.json");
-  const json = await import(pkgPath, { assert: { type: "json" } });
-  return json.default?.version ?? json.version;
+  const raw = await fs.readFile(pkgPath, "utf8");
+  const json = JSON.parse(raw);
+  return json.version;
 }
 
 async function existsOnNpm(pkg, version) {
