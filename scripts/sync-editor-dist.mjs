@@ -2,6 +2,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 const argMap = new Map();
@@ -20,10 +21,11 @@ for (let i = 0; i < args.length; i += 1) {
   }
 }
 
-const repoRoot = process.cwd();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "..");
 const from = argMap.get("from")
   ? path.resolve(repoRoot, argMap.get("from"))
-  : path.resolve(repoRoot, "..", "flux-site", "dist");
+  : path.resolve(repoRoot, "packages", "editor-ui", "dist");
 const to = path.resolve(repoRoot, "packages", "viewer", "editor-dist");
 
 async function main() {
@@ -34,7 +36,7 @@ async function main() {
     }
   } catch (err) {
     console.error(`Missing editor dist at ${from}`);
-    console.error("Provide a path with --from <path> or place flux-site next to this repo.");
+    console.error("Run `npm run build --workspace @flux-lang/editor-ui` first, or pass --from <path>.");
     process.exit(1);
   }
 
@@ -43,7 +45,7 @@ async function main() {
     const html = await fs.readFile(indexPath, "utf8");
     if (!html.includes('="/edit/') && !html.includes("='/edit/")) {
       console.warn("[sync-editor] Warning: editor bundle does not appear to be built with base /edit/.");
-      console.warn("[sync-editor] Run `npm --prefix ../flux-site run build:edit` then sync again.");
+      console.warn("[sync-editor] Run `npm run build --workspace @flux-lang/editor-ui` then sync again.");
     }
   } catch {
     console.warn(`[sync-editor] Warning: unable to read ${indexPath} to verify base path.`);

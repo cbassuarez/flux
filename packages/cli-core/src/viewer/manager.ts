@@ -1,5 +1,12 @@
 import path from "node:path";
-import { startViewerServer, type ViewerServer, type ViewerServerOptions } from "@flux-lang/viewer";
+import {
+  startViewerServer,
+  computeBuildId,
+  defaultEmbeddedDir,
+  VIEWER_VERSION,
+  type ViewerServer,
+  type ViewerServerOptions,
+} from "@flux-lang/viewer";
 import { ensureDir, fallbackStatePath, findGitRoot, readJsonFile, writeJsonFile } from "../fs.js";
 
 export interface ViewerRegistryEntry {
@@ -9,6 +16,8 @@ export interface ViewerRegistryEntry {
   pid?: number;
   startedAt: string;
   lastSeen: string;
+  buildId?: string | null;
+  editorDist?: string | null;
 }
 
 export interface ViewerRegistry {
@@ -23,6 +32,8 @@ export interface ViewerSession {
   url: string;
   port: number;
   attached: boolean;
+  buildId?: string | null;
+  editorDist?: string | null;
   server?: ViewerServer;
   close?: () => Promise<void>;
 }
@@ -64,6 +75,69 @@ async function probeServer(url: string, timeoutMs = 600): Promise<boolean> {
   }
 }
 
+interface ExpectedComponents {
+  viewerVersion: string;
+  editorBuildId: string | null;
+}
+
+interface HealthSnapshot {
+  viewerVersion: string | null;
+  editorBuildId: string | null;
+}
+
+async function loadExpectedComponents(): Promise<ExpectedComponents> {
+  const viewerVersion = VIEWER_VERSION;
+  let editorBuildId: string | null = null;
+  try {
+    const embeddedDir = defaultEmbeddedDir();
+    const indexPath = path.join(embeddedDir, "index.html");
+    editorBuildId = await computeBuildId(embeddedDir, indexPath);
+  } catch {
+    editorBuildId = null;
+  }
+  return { viewerVersion, editorBuildId };
+}
+
+async function fetchHealth(url: string): Promise<HealthSnapshot> {
+  const res = await fetch(`${url}/api/health`, { cache: "no-store" as RequestCache });
+  if (!res.ok) {
+    throw new Error(`Viewer health check failed: ${res.status}`);
+  }
+  const headers = res.headers;
+  const viewerVersion = headers.get("x-flux-viewer-version");
+  const editorBuildId = headers.get("x-flux-editor-build");
+  return { viewerVersion, editorBuildId };
+}
+
+export function validateHandshake(expected: ExpectedComponents, health: HealthSnapshot): string | null {
+  const viewerMismatch = health.viewerVersion && health.viewerVersion !== expected.viewerVersion;
+  const editorMismatch =
+    expected.editorBuildId && health.editorBuildId && health.editorBuildId !== expected.editorBuildId;
+
+  if (viewerMismatch || editorMismatch) {
+    const remoteViewer = health.viewerVersion ?? "unknown";
+    const remoteEditor = health.editorBuildId ?? "unknown";
+    return (
+      `Flux component mismatch: CLI expects viewer ${expected.viewerVersion}` +
+      ` / editor ${expected.editorBuildId ?? "unknown"},` +
+      ` but server is viewer ${remoteViewer} / editor ${remoteEditor}.`
+    );
+  }
+  return null;
+}
+
+async function assertHandshake(url: string): Promise<void> {
+  const expected = await loadExpectedComponents();
+  const health = await fetchHealth(url);
+
+  const mismatch = validateHandshake(expected, health);
+  if (mismatch) {
+    const hint =
+      "Fix: update global launcher `npm i -g @flux-lang/flux@canary` (or switch channel with `flux self channel canary`).";
+    throw new Error(`${mismatch} ${hint}`);
+  }
+}
+
 export async function attachOrStartViewer(options: ViewerStartOptions): Promise<ViewerSession> {
   const docPath = path.resolve(options.docPath);
   const registry = await getRegistry(options.cwd);
@@ -73,6 +147,7 @@ export async function attachOrStartViewer(options: ViewerStartOptions): Promise<
   for (const entry of registry.entries) {
     if (path.resolve(entry.docPath) !== docPath) continue;
     if (await probeServer(entry.url)) {
+      await assertHandshake(entry.url);
       entry.lastSeen = now;
       await saveRegistry(registry);
       return {
@@ -80,6 +155,8 @@ export async function attachOrStartViewer(options: ViewerStartOptions): Promise<
         url: entry.url,
         port: entry.port,
         attached: true,
+        buildId: entry.buildId,
+        editorDist: entry.editorDist,
       };
     }
   }
@@ -93,11 +170,20 @@ export async function attachOrStartViewer(options: ViewerStartOptions): Promise<
     pid: process.pid,
     startedAt: now,
     lastSeen: now,
+    buildId: (server as any).buildId ?? null,
+    editorDist: (server as any).editorDist ?? null,
   };
 
   const filtered = registry.entries.filter((e) => path.resolve(e.docPath) !== docPath);
   registry.entries = [entry, ...filtered].slice(0, 8);
   await saveRegistry(registry);
+
+  try {
+    await assertHandshake(server.url);
+  } catch (err) {
+    await server.close();
+    throw err;
+  }
 
   const close = async (): Promise<void> => {
     await server.close();
@@ -111,6 +197,8 @@ export async function attachOrStartViewer(options: ViewerStartOptions): Promise<
     url: server.url,
     port: server.port,
     attached: false,
+    buildId: (server as any).buildId ?? null,
+    editorDist: (server as any).editorDist ?? null,
     server,
     close,
   };

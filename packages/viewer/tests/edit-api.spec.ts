@@ -132,7 +132,7 @@ describe("editor API transforms", () => {
           body {
             page p1 {
               section s1 {
-                text p1 { content = "Old paragraph"; }
+                text para1 { content = "Old paragraph"; }
               }
             }
           }
@@ -145,7 +145,7 @@ describe("editor API transforms", () => {
       const res = await fetch(`${server.url}/api/edit/transform`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ op: "setText", args: { id: "p1", text: "Updated paragraph" } }),
+        body: JSON.stringify({ op: "setText", args: { id: "para1", text: "Updated paragraph" } }),
       });
       expect(res.ok).toBe(true);
       const payload = await res.json();
@@ -200,7 +200,7 @@ describe("editor API transforms", () => {
           meta { version = "0.2.0"; }
           body {
             page p1 {
-              text t1 { content = "Missing brace" }
+              text t1 { content = "Missing brace"
             }
           }
         }

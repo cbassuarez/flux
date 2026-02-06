@@ -1,0 +1,110 @@
+:root {
+  --flux-accent: #00cdfe;
+  --flux-accent-green: #7BE94A;
+  --flux-accent-gradient: linear-gradient(135deg, var(--flux-accent) 0%, var(--flux-accent-green) 100%);
+}
+
+.flux-gradient-text {
+  background-image: linear-gradient(120deg, #0ea5e9, #22d3ee, #22c55e);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: flux-gradient-lava 12s ease-in-out infinite;
+}
+
+@keyframes flux-gradient-lava {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flux-gradient-text {
+    animation: none;
+    background-position: 50% 50%;
+  }
+}
+
+.font-plex-mono {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.flux-gradient-border {
+  border-image: var(--flux-accent-gradient) 1;
+}
+
+.flux-gradient-bg {
+  background-image: var(--flux-accent-gradient);
+}
+
+.hero-brand-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.flux-mark-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid transparent;
+  border-image-slice: 1;
+  font-family: "IBM Plex Mono", "SFMono-Regular", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  text-transform: lowercase;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
+.flux-mark-pill.flux-gradient-border {
+  border-image: var(--flux-accent-gradient) 1;
+}
+
+.flux-mark-pill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.flux-brand-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
+}
+
+.flux-brand-strip-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  font-family: "IBM Plex Mono", "SFMono-Regular", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  text-transform: lowercase;
+}
+
+.flux-brand-strip-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.flux-brand-strip-subtitle {
+  font-size: 0.75rem;
+  color: #475569;
+}

@@ -1,0 +1,3 @@
+document {
+  paragraph { content: "Hello world" }
+}

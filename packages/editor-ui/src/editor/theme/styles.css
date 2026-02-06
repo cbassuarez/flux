@@ -1,0 +1,41 @@
+.editor-root {
+  --editor-surface-app: #1b1f22;
+  --editor-surface-panel: #202528;
+  --editor-surface-desk: #14181b;
+  --editor-surface-paper: #f7f2ea;
+  --editor-surface-hover: rgba(255, 255, 255, 0.06);
+  --editor-surface-scrim: rgba(7, 9, 11, 0.62);
+
+  --editor-text-fg: #eceeed;
+  --editor-text-muted: #a3a9ae;
+  --editor-text-ink: #1d1b18;
+
+  --editor-line-hairline: rgba(255, 255, 255, 0.08);
+  --editor-line-muted: rgba(255, 255, 255, 0.05);
+  --editor-line-paper: rgba(18, 20, 22, 0.12);
+
+  --editor-accent: #1fc8b7;
+  --editor-accent-strong: #2be0bd;
+  --editor-accent-muted: rgba(43, 224, 189, 0.18);
+  --editor-accent-gradient: linear-gradient(96deg, #2bc6d4 0%, #1fc8b7 52%, #2be0bd 100%);
+
+  --editor-status-ok: #2be0bd;
+  --editor-status-warn: #d9aa63;
+  --editor-status-error: #d77474;
+
+  --editor-radius-xs: 4px;
+  --editor-radius-sm: 6px;
+  --editor-radius-md: 10px;
+  --editor-radius-lg: 14px;
+
+  --editor-space-1: 4px;
+  --editor-space-2: 8px;
+  --editor-space-3: 12px;
+  --editor-space-4: 16px;
+
+  --editor-shadow-paper: 0 22px 45px rgba(0, 0, 0, 0.45), 0 3px 6px rgba(0, 0, 0, 0.3);
+  --editor-shadow-stack: 0 8px 16px rgba(0, 0, 0, 0.3);
+
+  --editor-font-ui: "Inter", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --editor-font-doc: "STIX Two Text", "Source Serif 4", Georgia, "Times New Roman", serif;
+}

@@ -6,7 +6,9 @@ import { parseCommand, checkCommand, renderCommand, tickCommand, stepCommand, vi
 import { runViewer } from "../view/runViewer.js";
 import { createRuntime, parseDocument } from "@flux-lang/core";
 import { shouldLaunchUi } from "../ui-routing.js";
-const VERSION = "0.3.0";
+import { computeBuildId, defaultEmbeddedDir, VIEWER_VERSION as VIEWER_PACKAGE_VERSION, } from "@flux-lang/viewer";
+import { FLUX_CLI_VERSION } from "../version.js";
+const CLI_VERSION = FLUX_CLI_VERSION;
 void (async () => {
     try {
         const code = await main(process.argv.slice(2));
@@ -35,11 +37,11 @@ async function main(argv) {
             initialArgs: args,
             detach: parsed.detach,
             helpCommand: parsed.help ? args[0] : undefined,
-            version: parsed.version ? `flux v${VERSION}` : undefined,
+            version: parsed.version ? `flux v${CLI_VERSION}` : undefined,
         });
     }
     if (parsed.version) {
-        console.log(`flux v${VERSION}`);
+        await printVersion(parsed.json);
         return 0;
     }
     if (parsed.help) {
@@ -146,6 +148,32 @@ function parseGlobalArgs(argv) {
     }
     return { ...flags, args };
 }
+async function collectComponentVersions() {
+    let editorBuildId = null;
+    try {
+        const embedded = defaultEmbeddedDir();
+        const indexPath = path.join(embedded, "index.html");
+        editorBuildId = await computeBuildId(embedded, indexPath);
+    }
+    catch {
+        editorBuildId = null;
+    }
+    return {
+        cli: CLI_VERSION,
+        viewer: VIEWER_PACKAGE_VERSION,
+        editorBuildId,
+    };
+}
+async function printVersion(asJson) {
+    const info = await collectComponentVersions();
+    if (asJson) {
+        console.log(JSON.stringify(info));
+        return;
+    }
+    console.log(`cli ${info.cli}`);
+    console.log(`viewer ${info.viewer}`);
+    console.log(`editor ${info.editorBuildId ?? "unknown"}`);
+}
 function printCommandHelp(cmd) {
     if (cmd === "parse")
         return printParseHelp();
@@ -175,7 +203,7 @@ function printCommandHelp(cmd) {
 }
 function printGlobalHelp() {
     console.log([
-        `Flux CLI v${VERSION}`,
+        `Flux CLI v${CLI_VERSION}`,
         "",
         "Usage:",
         "  flux                (launch UI in TTY)",
@@ -894,10 +922,31 @@ async function runEdit(args, globals) {
     const session = result.data.session;
     const absolutePath = path.resolve(file);
     const editorUrl = `${session.url}/edit?file=${encodeURIComponent(absolutePath)}`;
+    let buildId = session.buildId;
+    let editorDistPath = session.editorDist;
+    if (!buildId) {
+        const fetchImpl = globalThis?.fetch;
+        if (fetchImpl) {
+            try {
+                const res = await fetchImpl(`${session.url}/edit/build-id.json`, { cache: "no-store" });
+                if (res.ok) {
+                    const json = await res.json();
+                    buildId = json?.buildId ?? null;
+                    editorDistPath = json?.editorDist ?? editorDistPath;
+                }
+            }
+            catch {
+                // ignore
+            }
+        }
+    }
     if (globals.json) {
         process.stdout.write(JSON.stringify({ ...session, editorUrl }) + "\n");
     }
     else if (!globals.quiet) {
+        if (buildId || editorDistPath) {
+            console.log(`[flux] editor build ${buildId ?? "unknown"} (${editorDistPath ?? "unknown"})`);
+        }
         console.log(`Flux editor running at ${editorUrl}`);
         if (session.attached) {
             console.log("Attached to existing editor.");

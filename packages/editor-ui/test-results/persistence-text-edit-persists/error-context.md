@@ -1,0 +1,124 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - toolbar [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e8]: Flux Document
+        - generic [ref=e11]: Saved ✓
+      - generic [ref=e12]:
+        - generic [ref=e13]:
+          - button "Fit Width" [disabled] [ref=e14]
+          - button "100%" [disabled] [ref=e15]
+          - button "−" [disabled] [ref=e16]
+          - button "+" [disabled] [ref=e17]
+        - generic [ref=e19]:
+          - button "◀" [disabled] [ref=e20]
+          - generic [ref=e21]: 12 / 42
+          - button "▶" [disabled] [ref=e22]
+        - generic [ref=e24]:
+          - button "Preview" [ref=e25] [cursor=pointer]
+          - button "Edit Text" [ref=e26] [cursor=pointer]
+          - button "Source" [ref=e27] [cursor=pointer]
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - generic [ref=e30]: Editor
+          - generic [ref=e31]: …
+        - button "Find" [ref=e32] [cursor=pointer]
+        - button "Commands" [ref=e33] [cursor=pointer]
+        - button "Show IDs" [ref=e34] [cursor=pointer]
+        - button "Export PDF" [ref=e35] [cursor=pointer]
+        - button "⋯" [ref=e36] [cursor=pointer]
+    - generic [ref=e37]:
+      - generic [ref=e38]:
+        - generic [ref=e39]: Mode
+        - generic [ref=e40]:
+          - button "Edit" [ref=e41] [cursor=pointer]
+          - button "Playback" [ref=e42] [cursor=pointer]
+      - generic [ref=e43]:
+        - generic [ref=e44]: Seed
+        - spinbutton [ref=e45]: "0"
+      - generic [ref=e46]:
+        - button "Play" [disabled] [ref=e47]
+        - slider [ref=e48]: "0"
+        - generic [ref=e49]: 0.0s
+        - combobox [disabled] [ref=e50]:
+          - option "0.25×"
+          - option "0.5×"
+          - option "1×" [selected]
+          - option "2×"
+      - generic [ref=e51]:
+        - generic [ref=e52]: Docstep
+        - generic [ref=e53]:
+          - button "−" [ref=e54] [cursor=pointer]
+          - spinbutton [ref=e55]: "0"
+          - button "+" [ref=e56] [cursor=pointer]
+        - generic [ref=e57]:
+          - checkbox "Auto" [ref=e58]
+          - text: Auto
+      - generic [ref=e60]:
+        - checkbox "Reduced motion" [ref=e61]
+        - text: Reduced motion
+    - main [ref=e62]:
+      - complementary [ref=e63]:
+        - generic [ref=e64]:
+          - generic [ref=e65]:
+            - generic [ref=e66]: Outline
+            - generic [ref=e67]: Page page1
+          - button "Hide Assets" [ref=e69] [cursor=pointer]
+        - textbox "Filter outline…" [ref=e71]
+        - generic [ref=e74]:
+          - button "page Page page1" [disabled] [ref=e75] [cursor=pointer]:
+            - generic [ref=e76]: page
+            - generic [ref=e77]: Page page1
+          - generic [ref=e79]:
+            - button "section Section section1" [disabled] [ref=e80] [cursor=pointer]:
+              - generic [ref=e81]: section
+              - generic [ref=e82]: Section section1
+            - generic [ref=e83]:
+              - button "text Hello world" [ref=e85] [cursor=pointer]:
+                - generic [ref=e86]: text
+                - generic [ref=e87]: Hello world
+              - button "figure figure figure1" [ref=e89] [cursor=pointer]:
+                - generic [ref=e90]: figure
+                - generic [ref=e91]: figure figure1
+        - generic [ref=e94]: Asset Bank
+        - generic [ref=e97]:
+          - textbox "Search assets…" [ref=e98]
+          - generic [ref=e99]:
+            - button "Grid" [ref=e100] [cursor=pointer]
+            - button "List" [ref=e101] [cursor=pointer]
+      - separator [ref=e102]
+      - iframe [ref=e107]:
+        - generic [active] [ref=f2e1]:
+          - text: The server is configured with a public base URL of /edit/ - did you mean to visit
+          - link "/edit/preview?rev=1" [ref=f2e2] [cursor=pointer]:
+            - /url: /edit/preview?rev=1
+          - text: instead?
+      - separator [ref=e108]
+      - complementary [ref=e109]:
+        - generic [ref=e110]:
+          - generic [ref=e111]: Inspector
+          - button "Palette" [ref=e113] [cursor=pointer]
+        - generic [ref=e115]:
+          - generic [ref=e116]:
+            - generic [ref=e117]: Page page1
+            - generic [ref=e118]:
+              - generic [ref=e119]: page
+              - button "#page1" [ref=e120] [cursor=pointer]
+            - generic [ref=e121]:
+              - button "Duplicate" [disabled] [ref=e122]
+              - button "Delete" [disabled] [ref=e123]
+          - generic [ref=e124]:
+            - generic [ref=e125]: Content
+            - generic [ref=e126]: Switch to Edit Text to modify content.
+    - contentinfo [ref=e127]:
+      - generic [ref=e129]: Saved ✓
+      - generic [ref=e130]:
+        - generic [ref=e131]: Diagnostics
+        - generic [ref=e132]: Pass 0
+        - generic [ref=e133]: Warn 0
+        - generic [ref=e134]: Fail 0
+  - status [ref=e135]
+```

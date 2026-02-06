@@ -1,0 +1,258 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - toolbar [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e8]: Flux Document
+        - generic [ref=e11]: Saved ✓
+      - generic [ref=e12]:
+        - generic [ref=e13]:
+          - button "Fit Width" [disabled] [ref=e14]
+          - button "100%" [disabled] [ref=e15]
+          - button "−" [disabled] [ref=e16]
+          - button "+" [disabled] [ref=e17]
+        - generic [ref=e19]:
+          - button "◀" [disabled] [ref=e20]
+          - generic [ref=e21]: 12 / 42
+          - button "▶" [disabled] [ref=e22]
+        - generic [ref=e24]:
+          - button "Preview" [ref=e25] [cursor=pointer]
+          - button "Edit Text" [ref=e26] [cursor=pointer]
+          - button "Source" [ref=e27] [cursor=pointer]
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - generic [ref=e30]: Editor
+          - generic [ref=e31]: …
+        - button "Find" [ref=e32] [cursor=pointer]
+        - button "Commands" [ref=e33] [cursor=pointer]
+        - button "Show IDs" [ref=e34] [cursor=pointer]
+        - button "Export PDF" [ref=e35] [cursor=pointer]
+        - button "⋯" [ref=e36] [cursor=pointer]
+    - generic [ref=e37]:
+      - generic [ref=e38]:
+        - generic [ref=e39]: Mode
+        - generic [ref=e40]:
+          - button "Edit" [ref=e41] [cursor=pointer]
+          - button "Playback" [ref=e42] [cursor=pointer]
+      - generic [ref=e43]:
+        - generic [ref=e44]: Seed
+        - spinbutton [ref=e45]: "0"
+      - generic [ref=e46]:
+        - button "Play" [disabled] [ref=e47]
+        - slider [ref=e48]: "0"
+        - generic [ref=e49]: 0.0s
+        - combobox [disabled] [ref=e50]:
+          - option "0.25×"
+          - option "0.5×"
+          - option "1×" [selected]
+          - option "2×"
+      - generic [ref=e51]:
+        - generic [ref=e52]: Docstep
+        - generic [ref=e53]:
+          - button "−" [ref=e54] [cursor=pointer]
+          - spinbutton [ref=e55]: "0"
+          - button "+" [ref=e56] [cursor=pointer]
+        - generic [ref=e57]:
+          - checkbox "Auto" [ref=e58]
+          - text: Auto
+      - generic [ref=e60]:
+        - checkbox "Reduced motion" [ref=e61]
+        - text: Reduced motion
+    - main [ref=e62]:
+      - complementary [ref=e63]:
+        - generic [ref=e64]:
+          - generic [ref=e65]:
+            - generic [ref=e66]: Outline
+            - generic [ref=e67]: Page page1 › Section section1 › slot1
+          - button "Hide Assets" [ref=e69] [cursor=pointer]
+        - textbox "Filter outline…" [ref=e71]
+        - generic [ref=e74]:
+          - button "page Page page1" [disabled] [ref=e75] [cursor=pointer]:
+            - generic [ref=e76]: page
+            - generic [ref=e77]: Page page1
+          - generic [ref=e79]:
+            - button "section Section section1" [disabled] [ref=e80] [cursor=pointer]:
+              - generic [ref=e81]: section
+              - generic [ref=e82]: Section section1
+            - generic [ref=e83]:
+              - button "text Hello world" [ref=e85] [cursor=pointer]:
+                - generic [ref=e86]: text
+                - generic [ref=e87]: Hello world
+              - button "figure figure figure1" [ref=e89] [cursor=pointer]:
+                - generic [ref=e90]: figure
+                - generic [ref=e91]: figure figure1
+        - generic [ref=e94]: Asset Bank
+        - generic [ref=e97]:
+          - textbox "Search assets…" [ref=e98]
+          - generic [ref=e99]:
+            - button "Grid" [ref=e100] [cursor=pointer]
+            - button "List" [ref=e101] [cursor=pointer]
+      - separator [ref=e102]
+      - iframe [ref=e107]:
+        - generic [active] [ref=f2e1]:
+          - text: The server is configured with a public base URL of /edit/ - did you mean to visit
+          - link "/edit/preview?rev=3" [ref=f2e2] [cursor=pointer]:
+            - /url: /edit/preview?rev=3
+          - text: instead?
+      - separator [ref=e108]
+      - complementary [ref=e109]:
+        - generic [ref=e110]:
+          - generic [ref=e111]: Inspector
+          - button "Palette" [ref=e113] [cursor=pointer]
+        - generic [ref=e115]:
+          - generic [ref=e116]:
+            - generic [ref=e117]: slot1
+            - generic [ref=e118]:
+              - generic [ref=e119]: inline_slot
+              - button "#slot1" [ref=e120] [cursor=pointer]
+            - generic [ref=e121]:
+              - button "Duplicate" [disabled] [ref=e122]
+              - button "Delete" [disabled] [ref=e123]
+          - generic [ref=e124]:
+            - generic [ref=e125]: Slot
+            - generic [ref=e126]:
+              - generic [ref=e127]:
+                - generic [ref=e128]: Content
+                - generic [ref=e131]: blue
+                - generic [ref=e132]: Source / generator
+                - generic [ref=e133]:
+                  - generic [ref=e134]:
+                    - generic [ref=e135]: kind
+                    - generic [ref=e136]: choose
+                  - generic [ref=e137]:
+                    - generic [ref=e138]: count
+                    - generic [ref=e139]: "3"
+                  - generic [ref=e140]:
+                    - generic [ref=e141]: values
+                    - generic [ref=e142]: red · blue ·
+                - generic [ref=e143]: Variants
+                - generic [ref=e144]:
+                  - generic [ref=e145]:
+                    - textbox [ref=e146]: red
+                    - generic [ref=e147]:
+                      - button "↑" [disabled] [ref=e148]
+                      - button "↓" [ref=e149] [cursor=pointer]
+                      - button "✕" [ref=e150] [cursor=pointer]
+                  - generic [ref=e151]:
+                    - textbox [ref=e152]: blue
+                    - generic [ref=e153]:
+                      - button "↑" [ref=e154] [cursor=pointer]
+                      - button "↓" [ref=e155] [cursor=pointer]
+                      - button "✕" [ref=e156] [cursor=pointer]
+                  - generic [ref=e157]:
+                    - textbox [ref=e158]
+                    - generic [ref=e159]:
+                      - button "↑" [ref=e160] [cursor=pointer]
+                      - button "↓" [disabled] [ref=e161]
+                      - button "✕" [ref=e162] [cursor=pointer]
+                  - button "Add variant" [ref=e163] [cursor=pointer]
+                - generic [ref=e164]:
+                  - generic [ref=e165]: Simulate next 12 changes
+                  - generic [ref=e166]:
+                    - generic [ref=e167]:
+                      - generic [ref=e168]: Bucket
+                      - generic [ref=e169]: Time
+                      - generic [ref=e170]: Value
+                      - generic [ref=e171]: Hash
+                    - generic [ref=e172]:
+                      - generic [ref=e173]: "1"
+                      - generic [ref=e174]: 0.00s
+                      - generic [ref=e176]: 1a7b582e
+                    - generic [ref=e177]:
+                      - generic [ref=e178]: "2"
+                      - generic [ref=e179]: 0.00s
+                      - generic [ref=e180]: blue
+                      - generic [ref=e181]: 396bdedc
+                    - generic [ref=e182]:
+                      - generic [ref=e183]: "3"
+                      - generic [ref=e184]: 0.00s
+                      - generic [ref=e186]: 1a7b582e
+                    - generic [ref=e187]:
+                      - generic [ref=e188]: "4"
+                      - generic [ref=e189]: 0.00s
+                      - generic [ref=e190]: red
+                      - generic [ref=e191]: 73695de8
+                    - generic [ref=e192]:
+                      - generic [ref=e193]: "5"
+                      - generic [ref=e194]: 0.00s
+                      - generic [ref=e195]: red
+                      - generic [ref=e196]: 73695de8
+                    - generic [ref=e197]:
+                      - generic [ref=e198]: "6"
+                      - generic [ref=e199]: 0.00s
+                      - generic [ref=e200]: red
+                      - generic [ref=e201]: 73695de8
+                    - generic [ref=e202]:
+                      - generic [ref=e203]: "7"
+                      - generic [ref=e204]: 0.00s
+                      - generic [ref=e205]: red
+                      - generic [ref=e206]: 73695de8
+                    - generic [ref=e207]:
+                      - generic [ref=e208]: "8"
+                      - generic [ref=e209]: 0.00s
+                      - generic [ref=e211]: 1a7b582e
+                    - generic [ref=e212]:
+                      - generic [ref=e213]: "9"
+                      - generic [ref=e214]: 0.00s
+                      - generic [ref=e215]: red
+                      - generic [ref=e216]: 73695de8
+                    - generic [ref=e217]:
+                      - generic [ref=e218]: "10"
+                      - generic [ref=e219]: 0.00s
+                      - generic [ref=e221]: 1a7b582e
+                    - generic [ref=e222]:
+                      - generic [ref=e223]: "11"
+                      - generic [ref=e224]: 0.00s
+                      - generic [ref=e226]: 1a7b582e
+                    - generic [ref=e227]:
+                      - generic [ref=e228]: "12"
+                      - generic [ref=e229]: 0.00s
+                      - generic [ref=e230]: blue
+                      - generic [ref=e231]: 396bdedc
+                - generic [ref=e232]:
+                  - generic [ref=e233]:
+                    - generic [ref=e234]: Reserve
+                    - textbox "Reserve" [ref=e235]: fixedWidth(8, ch)
+                  - generic [ref=e236]:
+                    - generic [ref=e237]: Fit
+                    - combobox "Fit" [ref=e238]:
+                      - option "clip"
+                      - option "ellipsis" [selected]
+                      - option "shrink"
+                      - option "scaleDown"
+              - generic [ref=e239]:
+                - generic [ref=e240]: Refresh
+                - generic [ref=e241]:
+                  - generic [ref=e242]:
+                    - generic [ref=e243]: Mode
+                    - combobox "Mode" [ref=e244]:
+                      - option "never"
+                      - option "docstep" [selected]
+                      - option "every"
+                      - option "at"
+                      - option "atEach"
+                      - option "poisson"
+                      - option "chance"
+                  - button "Apply" [ref=e246] [cursor=pointer]
+              - generic [ref=e247]:
+                - generic [ref=e248]: Transition
+                - generic [ref=e250]:
+                  - generic [ref=e251]: Mode
+                  - combobox "Mode" [ref=e252]:
+                    - option "none" [selected]
+                    - option "appear"
+                    - option "fade"
+                    - option "wipe"
+                    - option "flash"
+                - button "Preview transition" [ref=e253] [cursor=pointer]
+    - contentinfo [ref=e254]:
+      - generic [ref=e256]: Saved ✓
+      - generic [ref=e257]:
+        - generic [ref=e258]: Diagnostics
+        - generic [ref=e259]: Pass 0
+        - generic [ref=e260]: Warn 0
+        - generic [ref=e261]: Fail 0
+  - status [ref=e262]
+```

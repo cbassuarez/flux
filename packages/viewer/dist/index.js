@@ -7,6 +7,9 @@ import { createTypesetterBackend } from "@flux-lang/typesetter";
 import { buildEditorMissingHtml, resolveEditorDist } from "./editor-dist.js";
 import { renderViewerToolbar, viewerToolbarCss } from "./ui/ViewerToolbar.js";
 import { viewerThemeCss } from "./ui/viewerTheme.js";
+import crypto from "node:crypto";
+import viewerPkg from "../package.json" with { type: "json" };
+export const VIEWER_VERSION = viewerPkg.version ?? "0.0.0";
 const DEFAULT_DOCSTEP_MS = 1000;
 const MAX_TICK_SECONDS = 1;
 const NO_CACHE_HEADERS = {
@@ -15,6 +18,18 @@ const NO_CACHE_HEADERS = {
 };
 export function noCacheHeaders(extra = {}) {
     return { ...NO_CACHE_HEADERS, ...extra };
+}
+export async function computeBuildId(dir, indexPath) {
+    if (!dir || !indexPath)
+        return null;
+    try {
+        const index = await fs.readFile(indexPath, "utf8");
+        const hash = crypto.createHash("sha1").update(index).digest("hex").slice(0, 12);
+        return `editor-${hash}`;
+    }
+    catch {
+        return null;
+    }
 }
 export function advanceViewerRuntime(runtime, renderOptions, advanceTime, dtSeconds, timeRate) {
     const rate = Number.isFinite(timeRate) ? timeRate : 1;
@@ -73,6 +88,15 @@ export async function startViewerServer(options) {
         rawUrl: (raw) => `/asset?src=${encodeURIComponent(raw)}`,
     };
     const editorDist = await resolveEditorDist({ editorDist: options.editorDist });
+    const buildId = await computeBuildId(editorDist.dir, editorDist.indexPath);
+    if (buildId) {
+        console.log(`[flux] editor build ${buildId} from ${editorDist.dir ?? "missing"}`);
+    }
+    const buildHeaders = {
+        "X-Flux-Viewer-Version": VIEWER_VERSION,
+        "X-Flux-Editor-Build": buildId ?? "unknown",
+        "X-Flux-Editor-Dist": editorDist.dir ?? "unknown",
+    };
     let current = {
         docPath,
         docRoot,
@@ -363,7 +387,24 @@ export async function startViewerServer(options) {
     const server = http.createServer(async (req, res) => {
         try {
             const url = new URL(req.url ?? "/", "http://localhost");
+            res.setHeader("X-Flux-Viewer-Version", VIEWER_VERSION);
+            res.setHeader("X-Flux-Editor-Build", buildId ?? "unknown");
+            res.setHeader("X-Flux-Editor-Dist", editorDist.dir ?? "unknown");
             applyCsp(res);
+            if (url.pathname === "/api/health") {
+                res.writeHead(200, {
+                    "Content-Type": "application/json; charset=utf-8",
+                    ...noCacheHeaders(),
+                    ...buildHeaders,
+                });
+                res.end(JSON.stringify({
+                    ok: true,
+                    viewerVersion: VIEWER_VERSION,
+                    editorBuildId: buildId ?? null,
+                    editorDist: editorDist.dir ?? null,
+                }));
+                return;
+            }
             if (url.pathname.startsWith("/api/edit/")) {
                 const requestedFile = url.searchParams.get("file");
                 if (requestedFile && path.resolve(requestedFile) !== docPath) {
@@ -372,9 +413,23 @@ export async function startViewerServer(options) {
                     return;
                 }
             }
+            if (url.pathname === "/edit/build-id.json") {
+                const body = JSON.stringify({ buildId: buildId ?? null, editorDist: editorDist.dir ?? null });
+                res.writeHead(200, {
+                    ...noCacheHeaders(),
+                    "Content-Type": "application/json; charset=utf-8",
+                    ...buildHeaders,
+                });
+                res.end(body);
+                return;
+            }
             if (url.pathname === "/edit" || url.pathname.startsWith("/edit/")) {
                 if (!editorDist.dir || !editorDist.indexPath) {
-                    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...noCacheHeaders() });
+                    res.writeHead(200, {
+                        "Content-Type": "text/html; charset=utf-8",
+                        ...noCacheHeaders(),
+                        ...buildHeaders,
+                    });
                     res.end(buildEditorMissingHtml(editorDist));
                     return;
                 }
@@ -387,7 +442,11 @@ export async function startViewerServer(options) {
                     return;
                 }
                 const resolvedPath = await resolveStaticPath(editorDist.dir, target);
-                await serveFile(res, resolvedPath ?? editorDist.indexPath, noCacheHeaders());
+                const headers = {
+                    ...noCacheHeaders(),
+                    ...buildHeaders,
+                };
+                await serveFile(res, resolvedPath ?? editorDist.indexPath, headers);
                 return;
             }
             if (editorDist.dir && editorDist.indexPath) {
@@ -447,12 +506,12 @@ export async function startViewerServer(options) {
                     docstep: runtime?.docstep ?? 0,
                     time: runtime?.time ?? 0,
                     timeRate,
-                });
+                }, buildHeaders);
                 return;
             }
             if (url.pathname === "/api/edit/state") {
                 const state = await buildEditState();
-                sendJson(res, state);
+                sendJson(res, state, buildHeaders);
                 return;
             }
             if (url.pathname === "/api/edit/source") {
@@ -463,11 +522,11 @@ export async function startViewerServer(options) {
                     revision,
                     lastValidRevision,
                     docPath,
-                });
+                }, buildHeaders);
                 return;
             }
             if (url.pathname === "/api/edit/outline") {
-                sendJson(res, { outline: buildOutline() });
+                sendJson(res, { outline: buildOutline() }, buildHeaders);
                 return;
             }
             if (url.pathname === "/api/edit/node") {
@@ -488,7 +547,7 @@ export async function startViewerServer(options) {
                     res.end(JSON.stringify({ ok: false, error: "Node not found" }));
                     return;
                 }
-                sendJson(res, buildInspectorPayload(node));
+                sendJson(res, buildInspectorPayload(node), buildHeaders);
                 return;
             }
             if (url.pathname === "/api/edit/transform" && req.method === "POST") {
@@ -508,13 +567,13 @@ export async function startViewerServer(options) {
                         ok: false,
                         diagnostics: parsed.diagnostics,
                         error: parsed.errors.join("; "),
-                    });
+                    }, buildHeaders);
                     return;
                 }
                 if (op === "setSource") {
                     const nextRaw = typeof args.source === "string" ? args.source : "";
                     if (!nextRaw.trim()) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing source" });
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing source" }, buildHeaders);
                         return;
                     }
                     const formatted = formatFluxSource(nextRaw);
@@ -524,7 +583,7 @@ export async function startViewerServer(options) {
                             ok: false,
                             diagnostics: validated.diagnostics,
                             error: validated.errors.join("; "),
-                        });
+                        }, buildHeaders);
                         return;
                     }
                     await writeFileAtomic(docPath, formatted);
@@ -540,21 +599,96 @@ export async function startViewerServer(options) {
                         outline: buildOutline(),
                         state: await buildEditState(),
                         source: currentSource,
-                    });
+                    }, buildHeaders);
                     return;
                 }
                 let nextSource = null;
                 let selectedId;
-                if (op === "replaceNode") {
+                if (op === "setTextNodeContent") {
+                    const id = typeof args.id === "string" ? args.id : "";
+                    const text = typeof args.text === "string"
+                        ? args.text
+                        : typeof args.richText?.content === "string"
+                            ? args.richText.content
+                            : "";
+                    const result = applySetTextTransform(source, parsed.doc, id, text, docPath);
+                    if (!result.ok) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
+                        return;
+                    }
+                    nextSource = formatFluxSource(result.source);
+                    selectedId = id;
+                }
+                else if (op === "setNodeProps") {
+                    const id = typeof args.id === "string" ? args.id : "";
+                    const props = typeof args.props === "object" && args.props ? args.props : {};
+                    const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
+                    if (!node) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, buildHeaders);
+                        return;
+                    }
+                    const merged = { ...node, props: { ...(node.props ?? {}), ...wrapLiteralProps(props) } };
+                    const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
+                    if (!result.ok) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
+                        return;
+                    }
+                    nextSource = formatFluxSource(result.source);
+                    selectedId = id;
+                }
+                else if (op === "setSlotProps") {
+                    const id = typeof args.id === "string" ? args.id : "";
+                    const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
+                    if (!node) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, buildHeaders);
+                        return;
+                    }
+                    const nextProps = { ...(node.props ?? {}) };
+                    if (args.reserve !== undefined)
+                        nextProps.reserve = wrapLiteral(args.reserve);
+                    if (args.fit !== undefined)
+                        nextProps.fit = wrapLiteral(args.fit);
+                    if (args.refresh !== undefined)
+                        nextProps.refresh = args.refresh;
+                    if (args.transition !== undefined)
+                        nextProps.transition = args.transition;
+                    const merged = { ...node, props: nextProps };
+                    const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
+                    if (!result.ok) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
+                        return;
+                    }
+                    nextSource = formatFluxSource(result.source);
+                    selectedId = id;
+                }
+                else if (op === "setSlotGenerator") {
+                    const id = typeof args.id === "string" ? args.id : "";
+                    const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
+                    if (!node) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, buildHeaders);
+                        return;
+                    }
+                    const nextProps = { ...(node.props ?? {}) };
+                    nextProps.generator = args.generator;
+                    const merged = { ...node, props: nextProps };
+                    const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
+                    if (!result.ok) {
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
+                        return;
+                    }
+                    nextSource = formatFluxSource(result.source);
+                    selectedId = id;
+                }
+                else if (op === "replaceNode") {
                     const id = typeof args.id === "string" ? args.id : "";
                     const node = typeof args.node === "object" && args.node ? args.node : null;
                     if (!node) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing node payload" });
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing node payload" }, buildHeaders);
                         return;
                     }
                     const result = applyReplaceNodeTransform(source, parsed.doc, id, node, docPath);
                     if (!result.ok) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) });
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
                         return;
                     }
                     nextSource = formatFluxSource(result.source);
@@ -565,7 +699,7 @@ export async function startViewerServer(options) {
                     const text = typeof args.text === "string" ? args.text : "";
                     const result = applySetTextTransform(source, parsed.doc, id, text, docPath);
                     if (!result.ok) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) });
+                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
                         return;
                     }
                     nextSource = formatFluxSource(result.source);
@@ -621,12 +755,12 @@ export async function startViewerServer(options) {
                             diagnostics: buildDiagnosticsBundle([
                                 buildDiagnosticFromMessage(String(err?.message ?? err), source, docPath, "fail"),
                             ]),
-                        });
+                        }, buildHeaders);
                         return;
                     }
                 }
                 if (!nextSource) {
-                    sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "No changes produced" });
+                    sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "No changes produced" }, buildHeaders);
                     return;
                 }
                 const validated = parseSource(nextSource);
@@ -635,7 +769,7 @@ export async function startViewerServer(options) {
                         ok: false,
                         diagnostics: validated.diagnostics,
                         error: validated.errors.join("; "),
-                    });
+                    }, buildHeaders);
                     return;
                 }
                 await writeFileAtomic(docPath, nextSource);
@@ -652,7 +786,8 @@ export async function startViewerServer(options) {
                     selectedId,
                     state: await buildEditState(),
                     source: currentSource,
-                });
+                    writeId: typeof payload?.writeId === "string" ? payload.writeId : null,
+                }, buildHeaders);
                 return;
             }
             if (url.pathname === "/api/render") {
@@ -662,31 +797,31 @@ export async function startViewerServer(options) {
                         docstep: current.ir.docstep,
                         time: current.ir.time,
                         errors: current.errors,
-                    });
+                    }, buildHeaders);
                 }
                 else {
                     sendJson(res, {
                         html: current.render.html,
                         docstep: current.ir.docstep,
                         time: current.ir.time,
-                    });
+                    }, buildHeaders);
                 }
                 return;
             }
             if (url.pathname === "/api/ir") {
                 if (current.errors.length) {
-                    sendJson(res, { errors: current.errors });
+                    sendJson(res, { errors: current.errors }, buildHeaders);
                 }
                 else {
                     sendJson(res, {
                         ir: current.ir,
                         slots: current.render.slots,
-                    });
+                    }, buildHeaders);
                 }
                 return;
             }
             if (url.pathname === "/api/patches") {
-                sendJson(res, lastPatchPayload);
+                sendJson(res, lastPatchPayload, buildHeaders);
                 return;
             }
             if (url.pathname === "/api/stream" || url.pathname === "/api/events") {
@@ -720,7 +855,7 @@ export async function startViewerServer(options) {
                     else
                         stopTicking();
                 }
-                sendJson(res, { ok: true, running, docstepMs: intervalMs });
+                sendJson(res, { ok: true, running, docstepMs: intervalMs }, buildHeaders);
                 return;
             }
             if (url.pathname === "/api/runtime" && req.method === "POST") {
@@ -740,7 +875,7 @@ export async function startViewerServer(options) {
                     seed: runtime?.seed ?? 0,
                     docstep: runtime?.docstep ?? 0,
                     time: runtime?.time ?? 0,
-                });
+                }, buildHeaders);
                 return;
             }
             if (url.pathname === "/api/pdf") {
@@ -817,6 +952,8 @@ export async function startViewerServer(options) {
     return {
         port: address.port,
         url: `http://${displayHost}:${address.port}`,
+        buildId,
+        editorDist: editorDist.dir ?? null,
         close: async () => {
             stopTicking();
             stopKeepAlive();
@@ -1690,8 +1827,8 @@ function applyCsp(res) {
         "frame-ancestors 'self'",
     ].join("; "));
 }
-function sendJson(res, payload) {
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", ...noCacheHeaders() });
+function sendJson(res, payload, headers = {}) {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", ...noCacheHeaders(), ...headers });
     res.end(JSON.stringify(payload));
 }
 async function readJson(req) {
@@ -2129,6 +2266,16 @@ function offsetToLineColumn(source, offset) {
     const lastLine = Math.max(1, lines.length);
     return { line: lastLine, column: (lines[lastLine - 1]?.length ?? 0) + 1 };
 }
+function findTextNodeById(nodes, id) {
+    for (const node of nodes ?? []) {
+        const childMatch = findTextNodeById(node.children ?? [], id);
+        if (childMatch)
+            return childMatch;
+        if (node.id === id && node.kind === "text")
+            return node;
+    }
+    return null;
+}
 function findNodeById(nodes, id) {
     for (const node of nodes ?? []) {
         if (node.id === id)
@@ -2138,6 +2285,18 @@ function findNodeById(nodes, id) {
             return child;
     }
     return null;
+}
+function wrapLiteral(value) {
+    if (value && typeof value === "object" && typeof value.kind === "string")
+        return value;
+    return { kind: "LiteralValue", value };
+}
+function wrapLiteralProps(props) {
+    const result = {};
+    for (const [key, val] of Object.entries(props ?? {})) {
+        result[key] = wrapLiteral(val);
+    }
+    return result;
 }
 function buildInspectorPayload(node) {
     const content = getLiteralString(node.props?.content);
@@ -2162,7 +2321,7 @@ function applySetTextTransform(source, doc, id, text, docPath) {
             diagnostic: buildDiagnosticFromMessage("Missing node id", source, docPath, "fail"),
         };
     }
-    const node = findNodeById(doc.body?.nodes ?? [], id);
+    const node = findTextNodeById(doc.body?.nodes ?? [], id) ?? findNodeById(doc.body?.nodes ?? [], id);
     if (!node) {
         const found = findIdInSource(source, id);
         if (found) {
@@ -2214,8 +2373,8 @@ function applySetTextTransform(source, doc, id, text, docPath) {
         };
     }
     const startIndex = lineColumnToOffset(source, loc.line, loc.column);
-    const endIndex = lineColumnToOffset(source, loc.endLine, loc.endColumn);
-    const block = source.slice(startIndex, endIndex);
+    const endIndexExclusive = Math.min(source.length, lineColumnToOffset(source, loc.endLine, loc.endColumn) + 1);
+    const block = source.slice(startIndex, endIndexExclusive);
     const updatedBlock = replaceContentLiteral(block, text);
     if (!updatedBlock) {
         return {
@@ -2223,7 +2382,7 @@ function applySetTextTransform(source, doc, id, text, docPath) {
             diagnostic: buildDiagnosticFromNode(node, source, docPath, "Unable to locate content property for this node."),
         };
     }
-    const nextSource = source.slice(0, startIndex) + updatedBlock + source.slice(endIndex);
+    const nextSource = source.slice(0, startIndex) + updatedBlock + source.slice(endIndexExclusive);
     return { ok: true, source: nextSource };
 }
 function applyReplaceNodeTransform(source, doc, id, replacement, docPath) {
@@ -2272,10 +2431,10 @@ function applyReplaceNodeTransform(source, doc, id, replacement, docPath) {
         };
     }
     const startIndex = lineColumnToOffset(source, loc.line, loc.column);
-    const endIndex = lineColumnToOffset(source, loc.endLine, loc.endColumn);
+    const endIndexExclusive = Math.min(source.length, lineColumnToOffset(source, loc.endLine, loc.endColumn) + 1);
     const indent = getLineIndent(source, loc.line);
     const printed = printDocumentNode(replacement, indent);
-    const nextSource = source.slice(0, startIndex) + printed + source.slice(endIndex);
+    const nextSource = source.slice(0, startIndex) + printed + source.slice(endIndexExclusive);
     return { ok: true, source: nextSource };
 }
 function replaceContentLiteral(block, text) {
@@ -2519,4 +2678,5 @@ async function writeFileAtomic(filePath, contents) {
     await fs.writeFile(tempPath, contents, "utf8");
     await fs.rename(tempPath, filePath);
 }
+export { resolveEditorDist, defaultEmbeddedDir } from "./editor-dist.js";
 //# sourceMappingURL=index.js.map
