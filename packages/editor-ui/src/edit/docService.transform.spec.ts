@@ -47,6 +47,13 @@ const fetchEditStateMock = fetchEditState as unknown as Mock;
 const fetchEditSourceMock = fetchEditSource as unknown as Mock;
 const postTransformMock = postTransform as unknown as Mock;
 
+function containsLoc(obj: any): boolean {
+  if (!obj || typeof obj !== "object") return false;
+  if (Array.isArray(obj)) return obj.some(containsLoc);
+  if (Object.prototype.hasOwnProperty.call(obj, "loc")) return true;
+  return Object.values(obj).some(containsLoc);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   fetchEditStateMock.mockResolvedValue({ doc: baseDoc, revision: 1, source: baseSource });
@@ -80,7 +87,9 @@ describe("docService transform requests", () => {
 
     await service.applyTransform({ type: "setTextNodeContent", id: "t1", richText });
 
-    expect(postTransformMock.mock.calls[0][0]?.op).toBe("replaceNode");
+    const request = postTransformMock.mock.calls[0][0];
+    expect(request?.op).toBe("replaceNode");
+    expect(containsLoc(request?.args?.node)).toBe(false);
   });
 
   it("keeps setTextNodeContent as primary for plain text", async () => {
@@ -98,7 +107,9 @@ describe("docService transform requests", () => {
 
     await service.applyTransform({ type: "setSlotProps", id: "s1", reserve: "fixedWidth(9, ch)" });
 
-    expect(postTransformMock.mock.calls[0][0]?.op).toBe("replaceNode");
+    const request = postTransformMock.mock.calls[0][0];
+    expect(request?.op).toBe("replaceNode");
+    expect(containsLoc(request?.args?.node)).toBe(false);
   });
 
   it("uses replaceNode as the primary request for slot generators", async () => {
@@ -111,7 +122,9 @@ describe("docService transform requests", () => {
       generator: { kind: "LiteralValue", value: "x" },
     });
 
-    expect(postTransformMock.mock.calls[0][0]?.op).toBe("replaceNode");
+    const request = postTransformMock.mock.calls[0][0];
+    expect(request?.op).toBe("replaceNode");
+    expect(containsLoc(request?.args?.node)).toBe(false);
   });
 
   it("retries with fallback on header no-op responses", async () => {
@@ -176,6 +189,31 @@ describe("docService transform requests", () => {
 
     expect(postTransformMock).toHaveBeenCalledTimes(2);
     expect(postTransformMock.mock.calls[1][0]?.op).toBe("replaceNode");
+    expect(containsLoc(postTransformMock.mock.calls[1][0]?.args?.node)).toBe(false);
+  });
+
+  it("strips loc from replaceNode payloads at all depths", async () => {
+    const docWithLoc = JSON.parse(JSON.stringify(baseDoc));
+    docWithLoc.body.nodes[1].loc = { column: 10, endColumn: 20 };
+    docWithLoc.body.nodes[1].children = [
+      {
+        id: "t2",
+        kind: "text",
+        props: { content: { kind: "LiteralValue", value: "nested" } },
+        children: [],
+        loc: { column: 1, endColumn: 2 },
+      },
+    ];
+    fetchEditStateMock.mockResolvedValueOnce({ doc: docWithLoc, revision: 1, source: baseSource });
+
+    const service = createDocService();
+    await service.loadDoc();
+
+    await service.applyTransform({ type: "setSlotProps", id: "s1", reserve: "fixedWidth(9, ch)" });
+
+    const request = postTransformMock.mock.calls[0][0];
+    expect(request?.op).toBe("replaceNode");
+    expect(containsLoc(request?.args?.node)).toBe(false);
   });
 
   it("preserves null literals in slot generator retries", async () => {
