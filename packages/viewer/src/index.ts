@@ -707,41 +707,49 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
 
       if (url.pathname === "/api/edit/transform" && req.method === "POST") {
         const payload = await readJson(req);
-        const requestedPath = typeof payload?.file === "string" ? payload.file : payload?.docPath;
-        if (requestedPath && path.resolve(requestedPath) !== docPath) {
-          res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ ok: false, error: "Document path not allowed" }));
-          return;
-        }
-
         const op = payload?.op;
         const args = payload?.args ?? {};
 
         const source = await fs.readFile(docPath, "utf8");
+        const beforeHash = crypto.createHash("sha1").update(source).digest("hex").slice(0, 12);
+        const buildEditHeaders = (applied: boolean, afterHash: string, error?: string) => ({
+          ...buildHeaders,
+          "X-Flux-Edit-Applied": applied ? "1" : "0",
+          "X-Flux-Edit-Before": beforeHash,
+          "X-Flux-Edit-After": afterHash,
+          ...(error ? { "X-Flux-Edit-Error": error } : {}),
+        });
+        const sendTransform = (payload: unknown, options: { applied: boolean; afterHash?: string; error?: string }) => {
+          const afterHash = options.afterHash ?? beforeHash;
+          sendJson(res, payload, buildEditHeaders(options.applied, afterHash, options.error));
+        };
         const parsed = parseSource(source);
         if (!parsed.doc || parsed.errors.length) {
-          sendJson(res, {
+          sendTransform({
             ok: false,
             diagnostics: parsed.diagnostics,
             error: parsed.errors.join("; "),
-          }, buildHeaders);
+          }, { applied: false });
           return;
         }
 
         if (op === "setSource") {
           const nextRaw = typeof args.source === "string" ? args.source : "";
           if (!nextRaw.trim()) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing source" }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing source" },
+              { applied: false },
+            );
             return;
           }
           const formatted = formatFluxSource(nextRaw);
           const validated = parseSource(formatted);
           if (!validated.doc || validated.errors.length) {
-            sendJson(res, {
+            sendTransform({
               ok: false,
               diagnostics: validated.diagnostics,
               error: validated.errors.join("; "),
-            }, buildHeaders);
+            }, { applied: false });
             return;
           }
           await writeFileAtomic(docPath, formatted);
@@ -750,14 +758,17 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           lastValidRevision = revision;
           rebuildFromSource(formatted);
           broadcastDocChanged();
-          sendJson(res, {
+          sendTransform({
             ok: current.errors.length === 0,
             newRevision: revision,
             diagnostics: current.diagnostics,
             outline: buildOutline(),
             state: await buildEditState(),
             source: currentSource,
-          }, buildHeaders);
+          }, {
+            applied: true,
+            afterHash: crypto.createHash("sha1").update(formatted).digest("hex").slice(0, 12),
+          });
           return;
         }
 
@@ -774,7 +785,10 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
                 : "";
           const result = applySetTextTransform(source, parsed.doc, id, text, docPath);
           if (!result.ok) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { applied: false },
+            );
             return;
           }
           nextSource = formatFluxSource(result.source);
@@ -784,13 +798,19 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const props = typeof args.props === "object" && args.props ? (args.props as Record<string, any>) : {};
           const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
           if (!node) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" },
+              { applied: false },
+            );
             return;
           }
           const merged: DocumentNode = { ...node, props: { ...(node.props ?? {}), ...wrapLiteralProps(props) } };
           const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
           if (!result.ok) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { applied: false },
+            );
             return;
           }
           nextSource = formatFluxSource(result.source);
@@ -799,7 +819,10 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const id = typeof args.id === "string" ? args.id : "";
           const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
           if (!node) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" },
+              { applied: false },
+            );
             return;
           }
           const nextProps: Record<string, any> = { ...(node.props ?? {}) };
@@ -810,7 +833,10 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const merged: DocumentNode = { ...node, props: nextProps };
           const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
           if (!result.ok) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { applied: false },
+            );
             return;
           }
           nextSource = formatFluxSource(result.source);
@@ -819,7 +845,10 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const id = typeof args.id === "string" ? args.id : "";
           const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
           if (!node) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" },
+              { applied: false },
+            );
             return;
           }
           const nextProps: Record<string, any> = { ...(node.props ?? {}) };
@@ -827,7 +856,10 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const merged: DocumentNode = { ...node, props: nextProps };
           const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
           if (!result.ok) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { applied: false },
+            );
             return;
           }
           nextSource = formatFluxSource(result.source);
@@ -836,12 +868,18 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const id = typeof args.id === "string" ? args.id : "";
           const node = typeof args.node === "object" && args.node ? (args.node as DocumentNode) : null;
           if (!node) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing node payload" }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing node payload" },
+              { applied: false },
+            );
             return;
           }
           const result = applyReplaceNodeTransform(source, parsed.doc, id, node, docPath);
           if (!result.ok) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { applied: false },
+            );
             return;
           }
           nextSource = formatFluxSource(result.source);
@@ -851,7 +889,10 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const text = typeof args.text === "string" ? args.text : "";
           const result = applySetTextTransform(source, parsed.doc, id, text, docPath);
           if (!result.ok) {
-            sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { applied: false },
+            );
             return;
           }
           nextSource = formatFluxSource(result.source);
@@ -901,28 +942,31 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           try {
             nextSource = formatFluxSource(applyAddTransform(source, parsed.doc, toOptions()));
           } catch (err) {
-            sendJson(res, {
+            sendTransform({
               ok: false,
               diagnostics: buildDiagnosticsBundle([
                 buildDiagnosticFromMessage(String((err as Error)?.message ?? err), source, docPath, "fail"),
               ]),
-            }, buildHeaders);
+            }, { applied: false });
             return;
           }
         }
 
         if (!nextSource) {
-          sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "No changes produced" }, buildHeaders);
+          sendTransform(
+            { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "No changes produced" },
+            { applied: false },
+          );
           return;
         }
 
         const validated = parseSource(nextSource);
         if (!validated.doc || validated.errors.length) {
-          sendJson(res, {
+          sendTransform({
             ok: false,
             diagnostics: validated.diagnostics,
             error: validated.errors.join("; "),
-          }, buildHeaders);
+          }, { applied: false });
           return;
         }
 
@@ -933,7 +977,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
         rebuildFromSource(nextSource);
         broadcastDocChanged();
 
-        sendJson(res, {
+        sendTransform({
           ok: current.errors.length === 0,
           newRevision: revision,
           diagnostics: current.diagnostics,
@@ -942,7 +986,10 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           state: await buildEditState(),
           source: currentSource,
           writeId: typeof payload?.writeId === "string" ? payload.writeId : null,
-        }, buildHeaders);
+        }, {
+          applied: true,
+          afterHash: crypto.createHash("sha1").update(nextSource).digest("hex").slice(0, 12),
+        });
         return;
       }
 
