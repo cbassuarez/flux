@@ -3600,7 +3600,7 @@ function findSlotGeneratorProp(props: Record<string, unknown>): { key: string; v
 function unwrapExpression(value: any): any {
   if (!value || typeof value !== "object") return value;
   if (value.kind === "LiteralValue") return { kind: "Literal", value: value.value };
-  if (value.kind === "ExpressionValue" || value.kind === "ExprValue") {
+  if (value.kind === "DynamicValue" || value.kind === "ExpressionValue" || value.kind === "ExprValue") {
     return value.expr ?? value.expression ?? value.value ?? value;
   }
   return value;

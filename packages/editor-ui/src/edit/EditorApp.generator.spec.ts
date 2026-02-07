@@ -31,7 +31,7 @@ describe("slot generator expression", () => {
     expect(expr).not.toBeNull();
 
     const generator = wrapExpressionValue(expr);
-    expect(generator.kind).toBe("ExpressionValue");
+    expect(generator.kind).toBe("DynamicValue");
     expect(generator.expr.kind).toBe("CallExpression");
     expect(generator.expr.callee).toEqual({ kind: "Identifier", name: "choose" });
     expect(generator.expr.args).toEqual([

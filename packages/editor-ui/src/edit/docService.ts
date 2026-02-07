@@ -808,8 +808,10 @@ function stripLocDeep(node: unknown): unknown {
 function normalizeVariantChooseNull(generator: unknown): unknown {
   if (!generator || typeof generator !== "object") return generator;
   const record = generator as Record<string, any>;
-  if (record.kind !== "ExpressionValue") return generator;
-  const expr = record.expr;
+  if (record.kind !== "DynamicValue" && record.kind !== "ExpressionValue" && record.kind !== "ExprValue") {
+    return generator;
+  }
+  const expr = record.expr ?? record.expression ?? record.value;
   if (!expr || typeof expr !== "object" || expr.kind !== "CallExpression") return generator;
   const callee = expr.callee;
   if (!callee || typeof callee !== "object") return generator;
@@ -821,7 +823,11 @@ function normalizeVariantChooseNull(generator: unknown): unknown {
   if (firstArg.kind !== "Literal" || firstArg.value !== "null") return generator;
   const nextArgs = [...args];
   nextArgs[0] = { ...firstArg, value: null };
-  return { ...record, expr: { ...expr, args: nextArgs } };
+  const nextExpr = { ...expr, args: nextArgs };
+  const next: Record<string, unknown> = { ...record, expr: nextExpr };
+  if (record.expression !== undefined) next.expression = nextExpr;
+  if (record.value !== undefined && record.kind !== "DynamicValue") next.value = nextExpr;
+  return next;
 }
 
 function makeReplaceNodeRequest(id: string, node: DocumentNode): TransformRequest {

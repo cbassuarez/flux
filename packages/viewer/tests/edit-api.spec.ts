@@ -10,6 +10,15 @@ async function writeDoc(dir: string, source: string): Promise<string> {
   return docPath;
 }
 
+function findNodeById(nodes: any[] | undefined, id: string): any | null {
+  for (const node of nodes ?? []) {
+    if (node?.id === id) return node;
+    const child = findNodeById(node?.children, id);
+    if (child) return child;
+  }
+  return null;
+}
+
 describe("editor API transforms", () => {
   const networkDisabled = process.env.CODEX_SANDBOX_NETWORK_DISABLED === "1";
   const itNetwork = networkDisabled ? it.skip : it;
@@ -188,6 +197,116 @@ describe("editor API transforms", () => {
       expect(updated).toContain("Keep me");
     } finally {
       await server.close();
+    }
+  });
+
+  itNetwork("normalizes slot generator expression payloads and keeps them after reload", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flux-edit-slot-generator-"));
+    const docPath = await writeDoc(
+      tmpDir,
+      `
+        document {
+          meta { version = "0.2.0"; }
+          body {
+            page p1 {
+              slot s1 {
+                generator = null;
+              }
+            }
+          }
+        }
+      `,
+    );
+
+    const server = await startViewerServer({ docPath });
+    try {
+      const stateRes = await fetch(`${server.url}/api/edit/state`);
+      expect(stateRes.ok).toBe(true);
+      const state = await stateRes.json();
+      const slot = findNodeById(state.doc?.body?.nodes, "s1");
+      expect(slot).toBeTruthy();
+
+      const replaceRes = await fetch(`${server.url}/api/edit/transform`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "replaceNode",
+          args: {
+            id: "s1",
+            node: {
+              ...slot,
+              props: {
+                ...(slot?.props ?? {}),
+                generator: {
+                  kind: "ExpressionValue",
+                  expr: {
+                    kind: "CallExpression",
+                    callee: { kind: "Identifier", name: "choose" },
+                    args: [
+                      { kind: "Literal", value: null },
+                      { kind: "Literal", value: "variant_2" },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        }),
+      });
+      expect(replaceRes.ok).toBe(true);
+      const replacePayload = await replaceRes.json();
+      expect(replacePayload.ok).toBe(true);
+
+      const editRes = await fetch(`${server.url}/api/edit/transform`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "setSlotGenerator",
+          args: {
+            id: "s1",
+            generator: {
+              kind: "ExpressionValue",
+              expression: {
+                kind: "CallExpression",
+                callee: { kind: "Identifier", name: "choose" },
+                args: [
+                  { kind: "Literal", value: null },
+                  { kind: "Literal", value: "nul" },
+                ],
+              },
+            },
+          },
+        }),
+      });
+      expect(editRes.ok).toBe(true);
+      const editPayload = await editRes.json();
+      expect(editPayload.ok).toBe(true);
+
+      const updated = await fs.readFile(docPath, "utf8");
+      expect(updated).toContain('generator = @choose(null, "nul");');
+
+      const hydratedRes = await fetch(`${server.url}/api/edit/state`);
+      expect(hydratedRes.ok).toBe(true);
+      const hydrated = await hydratedRes.json();
+      const hydratedSlot = findNodeById(hydrated.doc?.body?.nodes, "s1");
+      expect(hydratedSlot?.props?.generator?.kind).toBe("DynamicValue");
+      expect(hydratedSlot?.props?.generator?.expr?.callee?.name).toBe("choose");
+      expect(hydratedSlot?.props?.generator?.expr?.args?.[1]?.value).toBe("nul");
+    } finally {
+      await server.close();
+    }
+
+    const reloadedServer = await startViewerServer({ docPath });
+    try {
+      const reloadedRes = await fetch(`${reloadedServer.url}/api/edit/state`);
+      expect(reloadedRes.ok).toBe(true);
+      const reloaded = await reloadedRes.json();
+      const reloadedSlot = findNodeById(reloaded.doc?.body?.nodes, "s1");
+      expect(reloadedSlot?.props?.generator?.kind).toBe("DynamicValue");
+      expect(reloadedSlot?.props?.generator?.expr?.callee?.name).toBe("choose");
+      expect(reloadedSlot?.props?.generator?.expr?.args?.[1]?.value).toBe("nul");
+    } finally {
+      await reloadedServer.close();
     }
   });
 

@@ -729,7 +729,9 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
         }, 10000);
         try {
           logEvent("before body parse");
-          const payload = await readJson(req, { timeoutMs: 9000 });
+          const payload = normalizeEditTransformPayload(await readJson(req, { timeoutMs: 9000 })) as
+            | Record<string, any>
+            | null;
           logEvent("after body parse");
           const op = payload?.op;
           const args = payload?.args ?? {};
@@ -2664,6 +2666,69 @@ function findNodeById(nodes: DocumentNode[], id: string): DocumentNode | null {
     if (child) return child;
   }
   return null;
+}
+
+function normalizeEditTransformPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload;
+  const record = payload as Record<string, unknown>;
+  if (typeof record.op !== "string" || !record.args || typeof record.args !== "object") return payload;
+  const args = { ...(record.args as Record<string, unknown>) };
+
+  if (record.op === "setSlotGenerator") {
+    args.generator = normalizeSlotGeneratorValue(args.generator);
+    return { ...record, args };
+  }
+
+  if (record.op === "replaceNode") {
+    const node = args.node;
+    if (node && typeof node === "object") {
+      args.node = normalizeSlotGeneratorNode(node as DocumentNode);
+      return { ...record, args };
+    }
+  }
+
+  return payload;
+}
+
+function normalizeSlotGeneratorNode(node: DocumentNode): DocumentNode {
+  const nodeRecord = node as unknown as Record<string, unknown>;
+  const nextNode: DocumentNode & Record<string, unknown> = {
+    ...(nodeRecord as DocumentNode & Record<string, unknown>),
+    props: normalizeSlotGeneratorProps(node.props ?? {}),
+    children: (node.children ?? []).map((child) => normalizeSlotGeneratorNode(child)),
+  };
+  if ("generator" in nodeRecord) {
+    nextNode.generator = normalizeSlotGeneratorValue(nodeRecord.generator);
+  }
+  if ("source" in nodeRecord) {
+    nextNode.source = normalizeSlotGeneratorValue(nodeRecord.source);
+  }
+  return nextNode;
+}
+
+function normalizeSlotGeneratorProps(props: Record<string, NodePropValue>): Record<string, NodePropValue> {
+  const nextProps: Record<string, NodePropValue> = { ...props };
+  for (const key of ["generator", "source"]) {
+    if (!(key in nextProps)) continue;
+    nextProps[key] = normalizeSlotGeneratorValue(nextProps[key]) as NodePropValue;
+  }
+  return nextProps;
+}
+
+function normalizeSlotGeneratorValue(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (record.kind === "DynamicValue") {
+    if (record.expr !== undefined) return value;
+    if (record.expression !== undefined) {
+      return { ...record, expr: record.expression };
+    }
+    return value;
+  }
+  if (record.kind !== "ExpressionValue" && record.kind !== "ExprValue") return value;
+  const expr = record.expr ?? record.expression ?? record.value;
+  if (!expr || typeof expr !== "object") return value;
+  return { kind: "DynamicValue", expr };
 }
 
 function wrapLiteral(value: any): NodePropValue {

@@ -98,5 +98,5 @@ export function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
 }
 
 export function wrapExpressionValue(expr: any): Record<string, unknown> {
-  return { kind: "ExpressionValue", expr };
+  return { kind: "DynamicValue", expr };
 }
