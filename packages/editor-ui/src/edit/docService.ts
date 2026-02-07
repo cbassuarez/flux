@@ -788,6 +788,27 @@ function readNumber(value: unknown): number {
   return 0;
 }
 
+function stripLocDeep(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(stripLocDeep);
+  }
+  if (!node || typeof node !== "object") return node;
+  const record = node as Record<string, unknown>;
+  const { loc: _loc, ...rest } = record;
+  const next: Record<string, unknown> = { ...rest };
+  if (Array.isArray(record.children)) {
+    next.children = record.children.map(stripLocDeep);
+  }
+  if (record.props && typeof record.props === "object") {
+    next.props = stripLocDeep(record.props) as Record<string, unknown>;
+  }
+  return next;
+}
+
+function makeReplaceNodeRequest(id: string, node: DocumentNode): TransformRequest {
+  return { op: "replaceNode", args: { id, node: stripLocDeep(node) as DocumentNode } };
+}
+
 function buildTransformRequest(transform: EditorTransform | TransformRequest, doc?: EditorDoc | null): {
   request: TransformRequest;
   fallback?: TransformRequest;
@@ -798,7 +819,7 @@ function buildTransformRequest(transform: EditorTransform | TransformRequest, do
     return { request: { op: "setSource", args: { source: transform.source } } };
   }
   if (transform.type === "replaceNode") {
-    return { request: { op: "replaceNode", args: { id: transform.id, node: transform.node } } };
+    return { request: makeReplaceNodeRequest(transform.id, transform.node) };
   }
   if (transform.type === "setTextNodeContent") {
     const plainTextFromRich = transform.richText ? extractTextFromRich(transform.richText) : undefined;
@@ -834,7 +855,7 @@ function buildTransformRequest(transform: EditorTransform | TransformRequest, do
           ...entry.node,
           props: { ...(entry.node.props ?? {}), ...transform.props },
         };
-        fallback = { op: "replaceNode", args: { id: transform.id, node: nextNode } };
+        fallback = makeReplaceNodeRequest(transform.id, nextNode);
       }
     }
     return { request, fallback };
@@ -907,7 +928,7 @@ function buildTextReplaceNodeFallback(
   }
 
   if (!nextNode) return undefined;
-  return { op: "replaceNode", args: { id: transform.id, node: nextNode } };
+  return makeReplaceNodeRequest(transform.id, nextNode);
 }
 
 function buildSlotPropsFallback(
@@ -936,7 +957,7 @@ function buildSlotPropsFallback(
   ) {
     (nextNode as any).transition = transform.transition;
   }
-  return { op: "replaceNode", args: { id: transform.id, node: nextNode } };
+  return makeReplaceNodeRequest(transform.id, nextNode);
 }
 
 function buildSlotGeneratorFallback(
@@ -956,7 +977,7 @@ function buildSlotGeneratorFallback(
   if ("generator" in (entry.node as any)) {
     (nextNode as any).generator = transform.generator;
   }
-  return { op: "replaceNode", args: { id: transform.id, node: nextNode } };
+  return makeReplaceNodeRequest(transform.id, nextNode);
 }
 
 function extractTextFromRich(json: JSONContent): string {
