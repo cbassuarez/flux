@@ -29,6 +29,15 @@ export class ApiError extends Error {
   }
 }
 
+export class RequestTimeoutError extends Error {
+  status: number;
+
+  constructor(message = "Request timed out") {
+    super(message);
+    this.status = 408;
+  }
+}
+
 async function parseBody(response: Response): Promise<unknown> {
   if (response.status === 204) return null;
   const contentType = response.headers.get("content-type") ?? "";
@@ -92,13 +101,29 @@ export async function fetchEditNode(id: string): Promise<unknown> {
 }
 
 export async function postTransform(request: TransformRequest): Promise<unknown> {
-  return fetchJson<unknown>(withFileParam("/api/edit/transform"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(request)
-  });
+  const timeoutMs = 9000;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchJson<unknown>(withFileParam("/api/edit/transform"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(request),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new RequestTimeoutError("Transform request timed out");
+    }
+    if ((error as { name?: string }).name === "AbortError") {
+      throw new RequestTimeoutError("Transform request timed out");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function getFileParam(): string | null {

@@ -1,6 +1,6 @@
 import { parseDocument, type DocumentNode, type FluxDocument, type RefreshPolicy } from "@flux-lang/core";
 import type { JSONContent } from "@tiptap/core";
-import { fetchEditSource, fetchEditState, postTransform, type TransformRequest } from "./api";
+import { fetchEditSource, fetchEditState, postTransform, RequestTimeoutError, type TransformRequest } from "./api";
 import { tiptapToFluxText } from "./richText";
 import { hashString } from "./slotRuntime";
 
@@ -27,6 +27,8 @@ export type TraceEventType =
   | "COMMIT_START"
   | "COMMIT_OK"
   | "COMMIT_FAIL"
+  | "COMMIT_TIMEOUT"
+  | "COMMIT_SKIPPED"
   | "CANON_SET"
   | "FETCH_SOURCE_OK"
   | "FETCH_NODE_OK"
@@ -470,6 +472,16 @@ export function createDocService(): DocService {
     transform: EditorTransform | TransformRequest,
     options?: { pushHistory?: boolean; writeId?: string; reason?: LastLoadReason },
   ) => {
+    if (state.isApplying) {
+      appendTrace({ eventType: "COMMIT_SKIPPED", beforeHash: hashSource(state.doc?.source ?? "") });
+      return {
+        ok: false,
+        nextAst: state.doc?.ast ?? null,
+        nextSource: state.doc?.source ?? "",
+        diagnostics: state.doc?.diagnostics,
+        error: "Transform already in progress",
+      };
+    }
     const writeId = options?.writeId ?? (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `write-${Date.now()}-${Math.random().toString(16).slice(2)}`);
     const seq = ++writeSeq;
     const prevSource = state.doc?.source ?? "";
@@ -578,8 +590,12 @@ export function createDocService(): DocService {
         diagnostics: nextDoc?.diagnostics,
       };
     } catch (error) {
+      const isTimeout =
+        error instanceof RequestTimeoutError ||
+        (error instanceof DOMException && error.name === "AbortError") ||
+        (error as { name?: string }).name === "AbortError";
       errorMessage = (error as Error)?.message ?? String(error);
-      appendTrace({ eventType: "COMMIT_FAIL", beforeHash, writeId });
+      appendTrace({ eventType: isTimeout ? "COMMIT_TIMEOUT" : "COMMIT_FAIL", beforeHash, writeId });
       setState({
         ...state,
         status: "error",

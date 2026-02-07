@@ -55,3 +55,27 @@ test("cli edit persists inspector + slot changes", async ({ page }) => {
   expect(transformHeaders?.["x-flux-edit-before"]).toBeTruthy();
   expect(transformHeaders?.["x-flux-edit-after"]).toBeTruthy();
 });
+
+test("transform responses resolve and saving clears within timeout", async ({ page }) => {
+  const docPath = await readDocPath();
+  await page.goto(`/edit?file=${encodeURIComponent(docPath)}&debug=1`);
+  await page.waitForSelector(".editor-root");
+
+  const figureOutline = page.locator(".outline-btn:has(.outline-label:has-text(\"figure fig1\"))");
+  await figureOutline.click();
+
+  const captionInput = page.getByTestId("inspector-field:caption");
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/edit/transform") &&
+      response.request().method() === "POST",
+    { timeout: 10000 },
+  );
+  await captionInput.click();
+  await captionInput.fill("Ensure response resolves");
+  await captionInput.blur();
+
+  const response = await responsePromise;
+  expect(response.ok()).toBeTruthy();
+  await expect(page.locator(".save-state")).not.toContainText("Saving…", { timeout: 10000 });
+});
