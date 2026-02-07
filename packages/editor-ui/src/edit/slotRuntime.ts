@@ -8,13 +8,13 @@ export type EditorRuntimeInputs = {
 };
 
 export type SlotGeneratorSpec =
-  | { kind: "literal"; value: string }
-  | { kind: "choose"; values: string[] }
-  | { kind: "cycle"; values: string[]; period?: number }
+  | { kind: "literal"; value: string | null }
+  | { kind: "choose"; values: Array<string | null> }
+  | { kind: "cycle"; values: Array<string | null>; period?: number }
   | { kind: "assetsPick"; tags: string[]; bank?: string }
   | { kind: "poisson"; ratePerSec: number }
-  | { kind: "at"; times: number[]; values: string[] }
-  | { kind: "every"; amount: number; unit?: string; values?: string[] }
+  | { kind: "at"; times: number[]; values: Array<string | null> }
+  | { kind: "every"; amount: number; unit?: string; values?: Array<string | null> }
   | { kind: "unknown"; summary: string };
 
 export type TransitionEase = "in" | "out" | "inOut" | "linear";
