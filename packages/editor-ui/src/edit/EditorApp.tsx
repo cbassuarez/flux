@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+runRichCommand,
   useRef,
   useState,
   useSyncExternalStore,
@@ -1027,6 +1028,23 @@ export default function EditorApp() {
     if (asset) setDraggingAsset(asset);
   }, []);
 
+    const runRichCommand = useCallback(
+      (fn: (editor: any) => void) => {
+        const editor = richEditorRef.current;
+        if (!editor?.chain) {
+          setToast({ kind: "info", message: "Select a text node and focus the editor first." });
+          return;
+        }
+        try {
+          fn(editor);
+        } catch (err) {
+          console.error("[editor-command]", err);
+          setToast({ kind: "error", message: "Command failed." });
+        }
+      },
+      [setToast],
+    );
+
   const commandItems = useMemo(() => {
     const insertItems = [
       { id: "insert-section", label: "Section", action: handleInsertSection },
@@ -1040,10 +1058,19 @@ export default function EditorApp() {
     ];
 
     const wrapItems = [
-      { id: "wrap-bold", label: "Wrap selection in Bold", action: () => richEditorRef.current?.chain().focus().toggleBold().run() },
-      { id: "wrap-italic", label: "Wrap selection in Italic", action: () => richEditorRef.current?.chain().focus().toggleItalic().run() },
-      { id: "wrap-code", label: "Wrap selection in Code", action: () => richEditorRef.current?.chain().focus().toggleCode().run() },
-      { id: "wrap-link", label: "Wrap selection in Link", action: () => richEditorRef.current?.chain().focus().toggleLink?.({ href: "" }).run() },
+        { id: "wrap-bold",   label: "Wrap selection in Bold",   action: () => runRichCommand((ed) => ed.chain().focus().toggleBold().run()) },
+        { id: "wrap-italic", label: "Wrap selection in Italic", action: () => runRichCommand((ed) => ed.chain().focus().toggleItalic().run()) },
+        { id: "wrap-code",   label: "Wrap selection in Code",   action: () => runRichCommand((ed) => ed.chain().focus().toggleCode().run()) },
+        { id: "wrap-link",   label: "Wrap selection in Link",   action: () =>
+          runRichCommand((ed) => {
+            const chain = ed.chain().focus();
+            if (!chain.toggleLink) {
+              setToast({ kind: "info", message: "Link command not available in this editor." });
+              return;
+            }
+            chain.toggleLink({ href: "" }).run();
+          })
+        },
     ];
 
     const headingItems = searchItems
