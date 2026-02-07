@@ -188,22 +188,22 @@ export default function EditorApp() {
     void docService.loadDoc();
   }, [docService]);
 
-  useEffect(() => {
-    const fetchBuildId = async () => {
-      try {
-        const res = await fetch("/edit/build-id.json", { cache: "no-store" });
-        if (!res.ok) return;
-        const json = await res.json();
-        setBuildInfo({
-          id: (json as any)?.buildId ?? null,
-          dist: (json as any)?.editorDist ?? null,
-        });
-      } catch {
-        // ignore
-      }
-    };
-    void fetchBuildId();
-  }, [handleSave]);
+    useEffect(() => {
+        const fetchBuildId = async () => {
+            try {
+                const res = await fetch("/edit/build-id.json", { cache: "no-store" });
+                if (!res.ok) return;
+                const json = await res.json();
+                setBuildInfo({
+                    id: (json as any)?.buildId ?? null,
+                    dist: (json as any)?.editorDist ?? null,
+                });
+            } catch {
+                // ignore
+            }
+        };
+        void fetchBuildId();
+    }, []);
 
   useEffect(() => {
     if (!doc?.source) return;
