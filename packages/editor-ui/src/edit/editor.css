@@ -24,6 +24,21 @@
   flex-direction: column;
 }
 
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(260px, 340px);
+}
+
+.editor-error-banner {
+  padding: 8px var(--editor-space-4);
+  background: rgba(220, 38, 38, 0.15);
+  color: #fecaca;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(220, 38, 38, 0.35);
+}
+
 .editor-toolbar {
   height: 48px;
   display: grid;
@@ -33,6 +48,47 @@
   padding: 0 var(--editor-space-4);
   border-bottom: 1px solid var(--editor-line-hairline);
   background: var(--editor-surface-app);
+}
+
+.toolbar-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toolbar-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.toolbar-subtitle {
+  font-size: 11px;
+  color: var(--editor-text-muted);
+}
+
+.toolbar-center {
+  display: flex;
+  justify-content: center;
+}
+
+.toolbar-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.status-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--editor-line-muted);
+  background: var(--editor-surface-panel);
+}
+
+.outline-empty {
+  padding: var(--editor-space-4);
+  color: var(--editor-text-muted);
+  font-size: 12px;
 }
 
 .editor-transport {
