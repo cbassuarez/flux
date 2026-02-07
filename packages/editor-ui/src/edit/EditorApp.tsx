@@ -75,6 +75,7 @@ import {
   type SlotValue,
 } from "./slotRuntime";
 import { EditorRuntimeProvider, useEditorRuntimeState } from "./runtimeContext";
+import { buildGeneratorExpr, hasEmptyValue, isChooseCycleSpec, wrapExpressionValue } from "./generatorUtils";
 
 loader.config({ monaco });
 
@@ -2437,15 +2438,26 @@ function SlotInspector({
     [flushGeneratorUpdate],
   );
 
+  const commitChooseCycleVariants = (nextValues: Array<string | null>) => {
+    if (!isChooseCycleSpec(baseSpec)) return;
+    const nextSpec = { ...baseSpec, values: nextValues };
+    if (hasEmptyValue(nextSpec)) return;
+    onGeneratorChange(nextSpec);
+  };
+
   const handleVariantChange = (index: number, value: string) => {
     onDirty?.();
     const next = variants.map((item, idx) => (idx === index ? value : item));
     setVariants(next);
-    if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
-      pushGeneratorUpdate({ ...baseSpec, values: next });
-    } else if (baseSpec?.kind === "literal") {
+    if (baseSpec?.kind === "literal") {
       pushGeneratorUpdate({ ...baseSpec, value });
     }
+  };
+
+  const handleVariantCommit = (index: number, value: string) => {
+    const next = variants.map((item, idx) => (idx === index ? value : item));
+    setVariants(next);
+    commitChooseCycleVariants(next);
   };
 
   const handleAddVariant = () => {
@@ -2453,7 +2465,7 @@ function SlotInspector({
     const next = [...variants, ""];
     setVariants(next);
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
-      onGeneratorChange({ ...baseSpec, values: next });
+      return;
     } else if (baseSpec?.kind === "literal") {
       onGeneratorChange({ kind: "choose", values: next });
     }
@@ -2464,7 +2476,7 @@ function SlotInspector({
     const next = variants.filter((_, idx) => idx !== index);
     setVariants(next);
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
-      onGeneratorChange({ ...baseSpec, values: next });
+      commitChooseCycleVariants(next);
     } else if (baseSpec?.kind === "literal") {
       onGeneratorChange({ kind: "choose", values: next });
     }
@@ -2479,7 +2491,7 @@ function SlotInspector({
     next.splice(target, 0, moving);
     setVariants(next);
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
-      onGeneratorChange({ ...baseSpec, values: next });
+      commitChooseCycleVariants(next);
     } else if (baseSpec?.kind === "literal") {
       onGeneratorChange({ kind: "choose", values: next });
     }
@@ -2644,8 +2656,18 @@ function SlotInspector({
                       data-testid={`inspector-field:slot-variant-${index}`}
                       value={value ?? ""}
                       onFocus={handleFocus}
-                      onBlur={handleBlur}
+                      onBlur={(event) => {
+                        handleBlur();
+                        handleVariantCommit(index, event.target.value);
+                      }}
                       onChange={(event) => handleVariantChange(index, event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          handleVariantCommit(index, event.currentTarget.value);
+                          event.currentTarget.blur();
+                        }
+                      }}
                     />
                     <div className="variant-actions">
                       <button
@@ -3720,67 +3742,6 @@ function readNumberLiteral(expr: any): number | null {
 function coerceVariantValue(value: any): string | null {
   if (value === null) return null;
   return String(value ?? "");
-}
-
-function normalizeVariantLiteralValue(value: string | null): string | null {
-  if (value === "null") return null;
-  return value;
-}
-
-function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
-  if (spec.kind === "literal") {
-    return { kind: "Literal", value: normalizeVariantLiteralValue(spec.value) };
-  }
-  if (spec.kind === "choose" || spec.kind === "cycle") {
-    return {
-      kind: "CallExpression",
-      callee: { kind: "Identifier", name: spec.kind },
-      args: spec.values.map((value) => ({ kind: "Literal", value: normalizeVariantLiteralValue(value) })),
-    };
-  }
-  if (spec.kind === "assetsPick") {
-    return {
-      kind: "CallExpression",
-      callee: {
-        kind: "MemberExpression",
-        object: { kind: "Identifier", name: "assets" },
-        property: "pick",
-      },
-      args: spec.tags.map((tag) => ({ kind: "Literal", value: tag })),
-    };
-  }
-  if (spec.kind === "poisson") {
-    return {
-      kind: "CallExpression",
-      callee: { kind: "Identifier", name: "poisson" },
-      args: [{ kind: "Literal", value: spec.ratePerSec }],
-    };
-  }
-  if (spec.kind === "at") {
-    return {
-      kind: "CallExpression",
-      callee: { kind: "Identifier", name: "at" },
-      args: [
-        ...spec.times.map((time) => ({ kind: "Literal", value: time })),
-        ...spec.values.map((value) => ({ kind: "Literal", value: normalizeVariantLiteralValue(value) })),
-      ],
-    };
-  }
-  if (spec.kind === "every") {
-    return {
-      kind: "CallExpression",
-      callee: { kind: "Identifier", name: "every" },
-      args: [
-        { kind: "Literal", value: spec.amount },
-        ...(spec.values ?? []).map((value) => ({ kind: "Literal", value: normalizeVariantLiteralValue(value) })),
-      ],
-    };
-  }
-  return null;
-}
-
-function wrapExpressionValue(expr: any): Record<string, unknown> {
-  return { kind: "ExpressionValue", expr };
 }
 
 function isLiteralProp(value: unknown): boolean {
