@@ -75,7 +75,7 @@ import {
   type SlotValue,
 } from "./slotRuntime";
 import { EditorRuntimeProvider, useEditorRuntimeState } from "./runtimeContext";
-import { buildGeneratorExpr, hasEmptyValue, isChooseCycleSpec, wrapExpressionValue } from "./generatorUtils";
+import { buildGeneratorExpr, hasEmptyValue, isChooseCycleSpec, promoteVariants, wrapExpressionValue } from "./generatorUtils";
 
 loader.config({ monaco });
 
@@ -2462,13 +2462,10 @@ function SlotInspector({
 
   const handleAddVariant = () => {
     onDirty?.();
-    const next = [...variants, ""];
-    setVariants(next);
-    if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
-      return;
-    } else if (baseSpec?.kind === "literal") {
-      onGeneratorChange({ kind: "choose", values: next });
-    }
+    const promotion = promoteVariants(baseSpec, variants);
+    if (!promotion) return;
+    setVariants(promotion.nextVariants);
+    onGeneratorChange(promotion.nextSpec);
   };
 
   const handleRemoveVariant = (index: number) => {
