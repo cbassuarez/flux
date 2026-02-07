@@ -143,7 +143,7 @@ describe("docService transform requests", () => {
     await service.applyTransform({ type: "setTextNodeContent", id: "t1", richText });
 
     expect(postTransformMock).toHaveBeenCalledTimes(2);
-    expect(postTransformMock.mock.calls[1][0]?.op).toBe("replaceNode");
+    expect(postTransformMock.mock.calls[1][0]?.op).toBe("setTextNodeContent");
   });
 
   it("retries setNodeProps with replaceNode fallback after no-op", async () => {

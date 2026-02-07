@@ -976,7 +976,8 @@ function isComplexRichText(json: JSONContent): boolean {
     if (node.type === "inlineSlot") return true;
     const attrs = node.attrs;
     if (attrs && typeof attrs === "object") {
-      if ("id" in attrs || "textId" in attrs) return true;
+      const idValue = (attrs as any).id ?? (attrs as any).textId;
+      if (typeof idValue === "string" || typeof idValue === "number") return true;
     }
     if (typeof node.type === "string" && !["doc", "paragraph", "text"].includes(node.type)) return true;
     if (Array.isArray(node.content)) return node.content.some(visit);
