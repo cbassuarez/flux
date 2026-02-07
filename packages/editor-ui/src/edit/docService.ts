@@ -338,7 +338,12 @@ export function createDocService(): DocService {
       index,
       assetsIndex,
       diagnostics: (payloadState as any)?.diagnostics ?? state.doc?.diagnostics,
-      revision: (payloadState as any)?.revision ?? (payload as any)?.revision ?? state.doc?.revision,
+      revision:
+        (payloadState as any)?.revision ??
+        (payload as any)?.revision ??
+        (payloadState as any)?.newRevision ??
+        (payload as any)?.newRevision ??
+        state.doc?.revision,
       lastValidRevision:
         (payloadState as any)?.lastValidRevision ?? (payload as any)?.lastValidRevision ?? state.doc?.lastValidRevision,
       docPath,
@@ -349,6 +354,8 @@ export function createDocService(): DocService {
     const nextRevision =
       (payloadState as any)?.revision ??
       (payload as any)?.revision ??
+      (payloadState as any)?.newRevision ??
+      (payload as any)?.newRevision ??
       (payloadState as any)?.lastValidRevision ??
       (payload as any)?.lastValidRevision ??
       null;
@@ -420,8 +427,11 @@ export function createDocService(): DocService {
     const source = overrideSource ?? sourcePayload?.source ?? "";
     const incomingRevision =
       (sourcePayload as any)?.revision ??
+      (sourcePayload as any)?.newRevision ??
       (mergedState as any)?.revision ??
+      (mergedState as any)?.newRevision ??
       (statePayloadRaw as any)?.revision ??
+      (statePayloadRaw as any)?.newRevision ??
       null;
     const incomingHash = source ? hashSource(source) : null;
     appendTrace({
@@ -574,7 +584,13 @@ export function createDocService(): DocService {
         beforeHash,
         afterHash: nextSource ? hashSource(nextSource) : undefined,
         revision:
-          (nextState as any)?.revision ?? (payload as any)?.revision ?? (nextState as any)?.lastValidRevision ?? (payload as any)?.lastValidRevision ?? null,
+          (nextState as any)?.revision ??
+          (payload as any)?.revision ??
+          (nextState as any)?.newRevision ??
+          (payload as any)?.newRevision ??
+          (nextState as any)?.lastValidRevision ??
+          (payload as any)?.lastValidRevision ??
+          null,
         writeId,
       });
       const nextDoc = await refreshFromPayload(payload, nextSource, nextState ?? null, {
@@ -763,6 +779,9 @@ function buildTransformRequest(transform: EditorTransform | TransformRequest, do
       },
     };
     const fallback = buildTextReplaceNodeFallback(transform, doc);
+    if (transform.richText && fallback) {
+      return { request: fallback, fallback: request };
+    }
     return { request, fallback };
   }
   if (transform.type === "setNodeProps") {
@@ -786,10 +805,10 @@ function buildTransformRequest(transform: EditorTransform | TransformRequest, do
       },
     };
     const fallback = buildSlotPropsFallback(transform, doc);
-    return {
-      request,
-      fallback,
-    };
+    if (fallback) {
+      return { request: fallback, fallback: request };
+    }
+    return { request, fallback };
   }
   if (transform.type === "setSlotGenerator") {
     const request: TransformRequest = {
@@ -801,10 +820,10 @@ function buildTransformRequest(transform: EditorTransform | TransformRequest, do
       },
     };
     const fallback = buildSlotGeneratorFallback(transform, doc);
-    return {
-      request,
-      fallback,
-    };
+    if (fallback) {
+      return { request: fallback, fallback: request };
+    }
+    return { request, fallback };
   }
   if (transform.type === "reorderNode") {
     return {
