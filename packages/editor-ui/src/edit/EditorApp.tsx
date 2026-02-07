@@ -2437,15 +2437,26 @@ function SlotInspector({
     [flushGeneratorUpdate],
   );
 
+  const commitChooseCycleVariants = (nextValues: Array<string | null>) => {
+    if (!isChooseCycleSpec(baseSpec)) return;
+    const nextSpec = { ...baseSpec, values: nextValues };
+    if (hasEmptyValue(nextSpec)) return;
+    onGeneratorChange(nextSpec);
+  };
+
   const handleVariantChange = (index: number, value: string) => {
     onDirty?.();
     const next = variants.map((item, idx) => (idx === index ? value : item));
     setVariants(next);
-    if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
-      pushGeneratorUpdate({ ...baseSpec, values: next });
-    } else if (baseSpec?.kind === "literal") {
+    if (baseSpec?.kind === "literal") {
       pushGeneratorUpdate({ ...baseSpec, value });
     }
+  };
+
+  const handleVariantCommit = (index: number, value: string) => {
+    const next = variants.map((item, idx) => (idx === index ? value : item));
+    setVariants(next);
+    commitChooseCycleVariants(next);
   };
 
   const handleAddVariant = () => {
@@ -2453,7 +2464,7 @@ function SlotInspector({
     const next = [...variants, ""];
     setVariants(next);
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
-      onGeneratorChange({ ...baseSpec, values: next });
+      return;
     } else if (baseSpec?.kind === "literal") {
       onGeneratorChange({ kind: "choose", values: next });
     }
@@ -2464,7 +2475,7 @@ function SlotInspector({
     const next = variants.filter((_, idx) => idx !== index);
     setVariants(next);
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
-      onGeneratorChange({ ...baseSpec, values: next });
+      commitChooseCycleVariants(next);
     } else if (baseSpec?.kind === "literal") {
       onGeneratorChange({ kind: "choose", values: next });
     }
@@ -2479,7 +2490,7 @@ function SlotInspector({
     next.splice(target, 0, moving);
     setVariants(next);
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
-      onGeneratorChange({ ...baseSpec, values: next });
+      commitChooseCycleVariants(next);
     } else if (baseSpec?.kind === "literal") {
       onGeneratorChange({ kind: "choose", values: next });
     }
@@ -2644,8 +2655,18 @@ function SlotInspector({
                       data-testid={`inspector-field:slot-variant-${index}`}
                       value={value ?? ""}
                       onFocus={handleFocus}
-                      onBlur={handleBlur}
+                      onBlur={(event) => {
+                        handleBlur();
+                        handleVariantCommit(index, event.target.value);
+                      }}
                       onChange={(event) => handleVariantChange(index, event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          handleVariantCommit(index, event.currentTarget.value);
+                          event.currentTarget.blur();
+                        }
+                      }}
                     />
                     <div className="variant-actions">
                       <button
@@ -3727,7 +3748,16 @@ function normalizeVariantLiteralValue(value: string | null): string | null {
   return value;
 }
 
-function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
+function isChooseCycleSpec(spec: SlotGeneratorSpec | null | undefined): spec is Extract<SlotGeneratorSpec, { kind: "choose" | "cycle" }> {
+  return spec?.kind === "choose" || spec?.kind === "cycle";
+}
+
+function hasEmptyValue(spec: SlotGeneratorSpec | null | undefined): boolean {
+  if (!isChooseCycleSpec(spec)) return false;
+  return spec.values.some((value) => value === "");
+}
+
+export function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
   if (spec.kind === "literal") {
     return { kind: "Literal", value: normalizeVariantLiteralValue(spec.value) };
   }
@@ -3779,7 +3809,7 @@ function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
   return null;
 }
 
-function wrapExpressionValue(expr: any): Record<string, unknown> {
+export function wrapExpressionValue(expr: any): Record<string, unknown> {
   return { kind: "ExpressionValue", expr };
 }
 
