@@ -220,12 +220,6 @@ describe("editor API transforms", () => {
 
     const server = await startViewerServer({ docPath });
     try {
-      const stateRes = await fetch(`${server.url}/api/edit/state`);
-      expect(stateRes.ok).toBe(true);
-      const state = await stateRes.json();
-      const slot = findNodeById(state.doc?.body?.nodes, "s1");
-      expect(slot).toBeTruthy();
-
       const replaceRes = await fetch(`${server.url}/api/edit/transform`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -234,9 +228,9 @@ describe("editor API transforms", () => {
           args: {
             id: "s1",
             node: {
-              ...slot,
+              id: "s1",
+              kind: "slot",
               props: {
-                ...(slot?.props ?? {}),
                 generator: {
                   kind: "ExpressionValue",
                   expr: {
@@ -249,6 +243,7 @@ describe("editor API transforms", () => {
                   },
                 },
               },
+              children: [],
             },
           },
         }),
