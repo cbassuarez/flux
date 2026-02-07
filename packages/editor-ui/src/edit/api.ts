@@ -49,6 +49,7 @@ async function parseBody(response: Response): Promise<unknown> {
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
+      cache: "no-store",
     ...init,
     headers: {
       Accept: "application/json",
@@ -56,7 +57,15 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     }
   });
   const body = await parseBody(response);
-  if (!response.ok) {
+    if (response.ok) {
+        if (response.status !== 204) {
+          const contentType = response.headers.get("content-type") ?? "";
+          if (!contentType.includes("application/json")) {
+            throw new ApiError(502, `Expected JSON but got ${contentType || "unknown content-type"}`, body);
+          }
+        }
+        return body as T;
+      } else {
     const message =
       (typeof body === "object" && body && "message" in body && typeof (body as any).message === "string"
         ? (body as any).message
@@ -65,7 +74,22 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
           : `Request failed (${response.status})`);
     throw new ApiError(response.status, message, body);
   }
-  return body as T;
+}
+
+function getApiOrigin(): string {
+  if (typeof window === "undefined") return "";
+  const selfOrigin = window.location.origin;
+  const pathname = window.location.pathname ?? "";
+  const looksLikeEditor = pathname.startsWith("/edit");
+  if (looksLikeEditor) return selfOrigin;
+  try {
+    const ref = typeof document !== "undefined" ? document.referrer : "";
+    if (ref) return new URL(ref).origin;
+  } catch {}
+  try {
+    if (window.parent && window.parent !== window) return window.parent.location.origin;
+  } catch {}
+  return selfOrigin;
 }
 
 export async function fetchEditState(): Promise<EditState> {
@@ -213,9 +237,10 @@ function getFileParam(): string | null {
 }
 
 function withFileParam(path: string): string {
-  const file = getFileParam();
-  if (!file || typeof window === "undefined") return path;
-  const url = new URL(path, window.location.origin);
-  url.searchParams.set("file", file);
-  return `${url.pathname}${url.search}`;
+    if (typeof window === "undefined") return path;
+      const file = getFileParam();
+      const origin = getApiOrigin();
+      const url = new URL(path, origin);
+      if (file) url.searchParams.set("file", file);
+      return origin === window.location.origin ? `${url.pathname}${url.search}` : url.toString();
 }
