@@ -268,6 +268,62 @@ describe("docService transform requests", () => {
     expect(expr.args?.[1]).toMatchObject({ kind: "Literal", value: "" });
   });
 
+  it('normalizes choose("null", "") to choose(null, "") for outgoing requests', async () => {
+    const service = createDocService();
+    await service.loadDoc();
+
+    postTransformMock
+      .mockResolvedValueOnce({
+        ok: true,
+        source: baseSource,
+        doc: baseDoc,
+        revision: 2,
+        _fluxBefore: "a",
+        _fluxAfter: "a",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        source: baseSource,
+        doc: baseDoc,
+        revision: 3,
+        _fluxBefore: "a",
+        _fluxAfter: "b",
+      });
+
+    const generator = {
+      kind: "ExpressionValue",
+      expr: {
+        kind: "CallExpression",
+        callee: { kind: "Identifier", name: "choose" },
+        args: [
+          { kind: "Literal", value: "null" },
+          { kind: "Literal", value: "" },
+        ],
+      },
+    };
+
+    await service.applyTransform({
+      type: "setSlotGenerator",
+      id: "s1",
+      generator,
+    });
+
+    expect(postTransformMock).toHaveBeenCalledTimes(2);
+    const extractGenerator = (request: any) => {
+      const args = request?.args ?? {};
+      return args.generator ?? args.node?.props?.generator ?? args.node?.generator ?? args.node?.props?.source;
+    };
+
+    postTransformMock.mock.calls.forEach(([request]) => {
+      const requestGenerator = extractGenerator(request);
+      const expr = requestGenerator?.expr ?? requestGenerator?.expression ?? requestGenerator?.value ?? requestGenerator;
+      expect(expr?.kind).toBe("CallExpression");
+      expect(expr?.callee?.name).toBe("choose");
+      expect(expr?.args?.[0]).toMatchObject({ kind: "Literal", value: null });
+      expect(expr?.args?.[0]?.value).not.toBe("null");
+    });
+  });
+
   it("adopts newRevision as doc.revision after hydration", async () => {
     const service = createDocService();
     await service.loadDoc();
