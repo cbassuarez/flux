@@ -17,6 +17,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@flux-lang/core": "^0.1.6",
     "@monaco-editor/react": "^4.6.0",
+    "@radix-ui/react-menubar": "^1.1.16",
     "@tiptap/core": "^2.11.0",
     "@tiptap/extension-bold": "^2.11.0",
     "@tiptap/extension-code": "^2.11.0",
@@ -35,6 +36,8 @@
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
+    "@flux-lang/viewer": "^0.1.0",
+    "@playwright/test": "^1.58.1",
     "@testing-library/jest-dom": "^6.4.2",
     "@testing-library/react": "^16.0.1",
     "@types/node": "^22.0.0",
@@ -47,8 +50,6 @@
     "tailwindcss": "^3.4.0",
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
-    "vitest": "^2.1.4",
-    "@playwright/test": "^1.58.1",
-    "@flux-lang/viewer": "^0.1.0"
+    "vitest": "^2.1.4"
   }
 }
