@@ -94,7 +94,11 @@ type FindItem = {
 export default function EditorApp() {
   const serviceRef = useRef(createDocService());
   const docService = serviceRef.current;
-  const docState = useSyncExternalStore(docService.subscribe, docService.getState);
+    const docState = useSyncExternalStore(
+      docService.subscribe,
+      docService.getState,
+      docService.getState
+    );
   const doc = docState.doc;
   const selectedId = docState.selection.id;
   const runtimeStore = useEditorRuntimeState({
@@ -111,7 +115,7 @@ export default function EditorApp() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [assetPanelOpen, setAssetPanelOpen] = useState(true);
   const [outlineVisible, setOutlineVisible] = useState(true);
-  const [showStatusBar, setShowStatusBar] = useState(() => getStoredStatusBar());
+    const [showStatusBar, setShowStatusBar] = useState(true);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [docSettingsOpen, setDocSettingsOpen] = useState(false);
@@ -175,6 +179,10 @@ export default function EditorApp() {
     },
     [doc?.index, docService],
   );
+    
+    useEffect(() => {
+        setShowStatusBar(getStoredStatusBar());
+      }, []);
 
   useEffect(() => {
     void docService.loadDoc();
