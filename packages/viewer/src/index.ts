@@ -706,9 +706,33 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
       }
 
       if (url.pathname === "/api/edit/transform" && req.method === "POST") {
-        const payload = await readJson(req);
-        const op = payload?.op;
-        const args = payload?.args ?? {};
+        const logPrefix = "[edit/transform]";
+        const logEvent = (message: string, meta: Record<string, unknown> = {}) => {
+          console.info(logPrefix, message, meta);
+        };
+        logEvent("handler entry", {
+          method: req.method,
+          url: req.url,
+          contentLength: req.headers["content-length"],
+          contentType: req.headers["content-type"],
+        });
+        req.on("aborted", () => logEvent("request aborted"));
+        req.on("error", (error) => logEvent("request error", { error: String(error) }));
+        res.on("close", () => logEvent("response close", { status: res.statusCode }));
+        res.on("error", (error) => logEvent("response error", { error: String(error) }));
+        res.once("finish", () => logEvent("response finished", { status: res.statusCode }));
+        const responseTimeout = setTimeout(() => {
+          if (res.headersSent || res.writableEnded) return;
+          logEvent("response timeout");
+          res.writeHead(504, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "Transform response timed out" }));
+        }, 10000);
+        try {
+          logEvent("before body parse");
+          const payload = await readJson(req, { timeoutMs: 9000 });
+          logEvent("after body parse");
+          const op = payload?.op;
+          const args = payload?.args ?? {};
 
         const source = await fs.readFile(docPath, "utf8");
         const beforeHash = crypto.createHash("sha1").update(source).digest("hex").slice(0, 12);
@@ -719,58 +743,63 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           "X-Flux-Edit-After": afterHash,
           ...(error ? { "X-Flux-Edit-Error": error } : {}),
         });
-        const sendTransform = (payload: unknown, options: { applied: boolean; afterHash?: string; error?: string }) => {
-          const afterHash = options.afterHash ?? beforeHash;
-          sendJson(res, payload, buildEditHeaders(options.applied, afterHash, options.error));
-        };
-        const parsed = parseSource(source);
-        if (!parsed.doc || parsed.errors.length) {
-          sendTransform({
-            ok: false,
-            diagnostics: parsed.diagnostics,
-            error: parsed.errors.join("; "),
-          }, { applied: false });
-          return;
-        }
-
-        if (op === "setSource") {
-          const nextRaw = typeof args.source === "string" ? args.source : "";
-          if (!nextRaw.trim()) {
-            sendTransform(
-              { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing source" },
-              { applied: false },
-            );
-            return;
-          }
-          const formatted = formatFluxSource(nextRaw);
-          const validated = parseSource(formatted);
-          if (!validated.doc || validated.errors.length) {
+          const sendTransform = (payload: unknown, options: { applied: boolean; afterHash?: string; error?: string }) => {
+            if (res.writableEnded) {
+              logEvent("response already ended");
+              return;
+            }
+            const afterHash = options.afterHash ?? beforeHash;
+            logEvent("sending response", { applied: options.applied, error: options.error });
+            sendJson(res, payload, buildEditHeaders(options.applied, afterHash, options.error));
+          };
+          const parsed = parseSource(source);
+          if (!parsed.doc || parsed.errors.length) {
             sendTransform({
               ok: false,
-              diagnostics: validated.diagnostics,
-              error: validated.errors.join("; "),
+              diagnostics: parsed.diagnostics,
+              error: parsed.errors.join("; "),
             }, { applied: false });
             return;
           }
-          await writeFileAtomic(docPath, formatted);
-          currentSource = formatted;
-          revision += 1;
-          lastValidRevision = revision;
-          rebuildFromSource(formatted);
-          broadcastDocChanged();
-          sendTransform({
-            ok: current.errors.length === 0,
-            newRevision: revision,
-            diagnostics: current.diagnostics,
-            outline: buildOutline(),
-            state: await buildEditState(),
-            source: currentSource,
-          }, {
-            applied: true,
-            afterHash: crypto.createHash("sha1").update(formatted).digest("hex").slice(0, 12),
-          });
-          return;
-        }
+
+          if (op === "setSource") {
+            const nextRaw = typeof args.source === "string" ? args.source : "";
+            if (!nextRaw.trim()) {
+              sendTransform(
+                { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing source" },
+                { applied: false },
+              );
+              return;
+            }
+            const formatted = formatFluxSource(nextRaw);
+            const validated = parseSource(formatted);
+            if (!validated.doc || validated.errors.length) {
+              sendTransform({
+                ok: false,
+                diagnostics: validated.diagnostics,
+                error: validated.errors.join("; "),
+              }, { applied: false });
+              return;
+            }
+            await writeFileAtomic(docPath, formatted);
+            currentSource = formatted;
+            revision += 1;
+            lastValidRevision = revision;
+            rebuildFromSource(formatted);
+            broadcastDocChanged();
+            sendTransform({
+              ok: current.errors.length === 0,
+              newRevision: revision,
+              diagnostics: current.diagnostics,
+              outline: buildOutline(),
+              state: await buildEditState(),
+              source: currentSource,
+            }, {
+              applied: true,
+              afterHash: crypto.createHash("sha1").update(formatted).digest("hex").slice(0, 12),
+            });
+            return;
+          }
 
         let nextSource: string | null = null;
         let selectedId: string | undefined;
@@ -977,19 +1006,34 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
         rebuildFromSource(nextSource);
         broadcastDocChanged();
 
-        sendTransform({
-          ok: current.errors.length === 0,
-          newRevision: revision,
-          diagnostics: current.diagnostics,
-          outline: buildOutline(),
-          selectedId,
-          state: await buildEditState(),
-          source: currentSource,
-          writeId: typeof payload?.writeId === "string" ? payload.writeId : null,
-        }, {
-          applied: true,
-          afterHash: crypto.createHash("sha1").update(nextSource).digest("hex").slice(0, 12),
-        });
+          sendTransform({
+            ok: current.errors.length === 0,
+            newRevision: revision,
+            diagnostics: current.diagnostics,
+            outline: buildOutline(),
+            selectedId,
+            state: await buildEditState(),
+            source: currentSource,
+            writeId: typeof payload?.writeId === "string" ? payload.writeId : null,
+          }, {
+            applied: true,
+            afterHash: crypto.createHash("sha1").update(nextSource).digest("hex").slice(0, 12),
+          });
+          return;
+        } catch (err) {
+          const error = err as Error;
+          if (!res.headersSent && !res.writableEnded) {
+            const status = err instanceof ReadJsonError ? err.status : 500;
+            const message = err instanceof ReadJsonError ? err.message : "Transform request failed";
+            logEvent("handler error", { status, error: String(error?.message ?? error) });
+            res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: message }));
+          } else {
+            logEvent("handler error after headers", { error: String(error?.message ?? error) });
+          }
+        } finally {
+          clearTimeout(responseTimeout);
+        }
         return;
       }
 
@@ -1045,7 +1089,17 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
       }
 
       if (url.pathname === "/api/ticker" && req.method === "POST") {
-        const payload = await readJson(req);
+        let payload: any;
+        try {
+          payload = await readJson(req);
+        } catch (err) {
+          if (err instanceof ReadJsonError) {
+            res.writeHead(err.status, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: err.message }));
+            return;
+          }
+          throw err;
+        }
         if (typeof payload?.docstepMs === "number" && Number.isFinite(payload.docstepMs)) {
           intervalMs = Math.max(50, payload.docstepMs);
           if (running) {
@@ -1063,7 +1117,17 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
       }
 
       if (url.pathname === "/api/runtime" && req.method === "POST") {
-        const payload = await readJson(req);
+        let payload: any;
+        try {
+          payload = await readJson(req);
+        } catch (err) {
+          if (err instanceof ReadJsonError) {
+            res.writeHead(err.status, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: err.message }));
+            return;
+          }
+          throw err;
+        }
         const updated = resetRuntime({
           seed: typeof payload?.seed === "number" ? payload.seed : undefined,
           docstep: typeof payload?.docstep === "number" ? payload.docstep : undefined,
@@ -2049,13 +2113,67 @@ function sendJson(res: http.ServerResponse, payload: unknown, headers: Record<st
   res.end(JSON.stringify(payload));
 }
 
-async function readJson(req: http.IncomingMessage): Promise<any> {
+class ReadJsonError extends Error {
+  status: number;
+  code: string;
+
+  constructor(message: string, status: number, code: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+class ReadJsonTimeoutError extends ReadJsonError {
+  timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(`Request body timeout after ${timeoutMs}ms`, 408, "timeout");
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+class ReadJsonParseError extends ReadJsonError {
+  constructor(message = "Invalid JSON body") {
+    super(message, 400, "parse_error");
+  }
+}
+
+async function readJson(req: http.IncomingMessage, options: { timeoutMs?: number } = {}): Promise<any> {
+  const timeoutMs = options.timeoutMs ?? 8000;
   const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.from(chunk));
+  let timedOut = false;
+  req.resume();
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    req.destroy(new ReadJsonTimeoutError(timeoutMs));
+  }, timeoutMs);
+  try {
+    for await (const chunk of req) {
+      chunks.push(Buffer.from(chunk));
+    }
+  } catch (err) {
+    if (err instanceof ReadJsonError) {
+      throw err;
+    }
+    if (timedOut) {
+      throw new ReadJsonTimeoutError(timeoutMs);
+    }
+    if (req.aborted) {
+      throw new ReadJsonError("Request body aborted", 400, "aborted");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
   if (!chunks.length) return null;
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  const raw = Buffer.concat(chunks).toString("utf8");
+  if (!raw.trim()) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new ReadJsonParseError();
+  }
 }
 
 function resolveAssetPath(ir: RenderDocumentIR, id: string, docRoot: string): string | null {
