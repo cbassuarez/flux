@@ -29,6 +29,7 @@ import {
   createDocService,
   type AssetItem,
   type DocIndexEntry,
+  type EditTraceEvent,
   type EditorTransform,
   type DocServiceState,
 } from "./docService";
@@ -1370,6 +1371,7 @@ export default function EditorApp() {
             state={docState}
             selectedId={selectedId}
             activeEditor={activeEditor}
+            trace={docState.editTrace}
             enabled={debugEnabled || (import.meta as any)?.env?.DEV}
           />
 
@@ -1688,7 +1690,8 @@ export default function EditorApp() {
                                 onGeneratorChange={(spec) => applySlotGenerator(selectedNode.id, spec)}
                                 onPropsChange={(payload) => handleTransform({ type: "setSlotProps", id: selectedNode.id, ...payload })}
                                 onPreviewTransition={handlePreviewTransition}
-                                lockReset={docState.dirty}
+                                lockReset={docState.dirty || docState.isApplying}
+                                onDirty={() => docService.markDirtyDraft()}
                               />
                             ) : null}
 
@@ -1696,8 +1699,8 @@ export default function EditorApp() {
                               <CaptionInspector
                                 label="Caption"
                                 value={captionTarget.value}
-                                resetToken={`${captionTarget.id}-${docState.docRev}`}
-                                lockReset={docState.dirty}
+                                resetToken={`${captionTarget.id}-${doc?.docPath ?? "doc"}`}
+                                lockReset={docState.dirty || docState.isApplying}
                                 onDirty={() => docService.markDirtyDraft()}
                                 onCommit={(value) => {
                                   if (captionTarget.kind === "prop") {
@@ -2225,11 +2228,12 @@ function CaptionInspector({
   onDirty?: () => void;
 }) {
   const [draft, setDraft] = useState(value);
+  const [isFocused, setIsFocused] = useState(false);
 
   useEffect(() => {
-    if (lockReset) return;
+    if (lockReset || isFocused) return;
     setDraft(value);
-  }, [value, label, lockReset, resetToken]);
+  }, [value, lockReset, resetToken, isFocused]);
 
   return (
     <div className="inspector-section">
@@ -2240,11 +2244,15 @@ function CaptionInspector({
           className="input"
           data-testid="inspector-field:caption"
           value={draft}
+          onFocus={() => setIsFocused(true)}
           onChange={(event) => {
             setDraft(event.target.value);
             onDirty?.();
           }}
-          onBlur={() => onCommit(draft)}
+          onBlur={() => {
+            setIsFocused(false);
+            onCommit(draft);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
@@ -2267,6 +2275,7 @@ function SlotInspector({
   onPropsChange,
   onPreviewTransition,
   lockReset,
+  onDirty,
 }: {
   node: DocumentNode;
   assets: AssetItem[];
@@ -2277,6 +2286,7 @@ function SlotInspector({
   onPropsChange: (payload: { reserve?: string; fit?: string; refresh?: RefreshPolicy; transition?: SlotTransitionSpec }) => void;
   onPreviewTransition: (payload: { current: SlotValue; next: SlotValue; transition?: SlotTransitionSpec }) => void;
   lockReset?: boolean;
+  onDirty?: () => void;
 }) {
   const program = useMemo(() => readSlotProgram(node), [node]);
   const baseSpec = program.spec;
@@ -2293,9 +2303,23 @@ function SlotInspector({
   const [rateDraft, setRateDraft] = useState<number>(() => (baseSpec?.kind === "poisson" ? baseSpec.ratePerSec : 1));
   const [reserve, setReserve] = useState(getLiteralString(node.props?.reserve) ?? "fixedWidth(8, ch)");
   const [fit, setFit] = useState(getLiteralString(node.props?.fit) ?? "ellipsis");
+  const [isFocused, setIsFocused] = useState(false);
+  const focusCountRef = useRef(0);
+
+  const handleFocus = () => {
+    focusCountRef.current += 1;
+    setIsFocused(true);
+  };
+
+  const handleBlur = () => {
+    window.setTimeout(() => {
+      focusCountRef.current = Math.max(0, focusCountRef.current - 1);
+      if (focusCountRef.current === 0) setIsFocused(false);
+    }, 0);
+  };
 
   useEffect(() => {
-    if (lockReset) return;
+    if (lockReset || isFocused) return;
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
       setVariants([...baseSpec.values]);
     } else if (baseSpec?.kind === "literal") {
@@ -2303,28 +2327,28 @@ function SlotInspector({
     } else {
       setVariants([]);
     }
-  }, [node.id, baseSpec?.kind, JSON.stringify(baseSpec), lockReset]);
+  }, [node.id, baseSpec?.kind, JSON.stringify(baseSpec), lockReset, isFocused]);
 
   useEffect(() => {
-    if (lockReset) return;
+    if (lockReset || isFocused) return;
     if (baseSpec?.kind === "assetsPick") setTagsDraft(baseSpec.tags);
-  }, [baseSpec?.kind, JSON.stringify(baseSpec), lockReset]);
+  }, [baseSpec?.kind, JSON.stringify(baseSpec), lockReset, isFocused]);
 
   useEffect(() => {
-    if (lockReset) return;
+    if (lockReset || isFocused) return;
     if (baseSpec?.kind === "assetsPick") setBankDraft(baseSpec.bank ?? "");
-  }, [baseSpec?.kind, baseSpec && "bank" in baseSpec ? baseSpec.bank : "", lockReset]);
+  }, [baseSpec?.kind, baseSpec && "bank" in baseSpec ? baseSpec.bank : "", lockReset, isFocused]);
 
   useEffect(() => {
-    if (lockReset) return;
+    if (lockReset || isFocused) return;
     if (baseSpec?.kind === "poisson") setRateDraft(baseSpec.ratePerSec);
-  }, [baseSpec?.kind, baseSpec && "ratePerSec" in baseSpec ? baseSpec.ratePerSec : 0, lockReset]);
+  }, [baseSpec?.kind, baseSpec && "ratePerSec" in baseSpec ? baseSpec.ratePerSec : 0, lockReset, isFocused]);
 
   useEffect(() => {
-    if (lockReset) return;
+    if (lockReset || isFocused) return;
     setReserve(getLiteralString(node.props?.reserve) ?? "fixedWidth(8, ch)");
     setFit(getLiteralString(node.props?.fit) ?? "ellipsis");
-  }, [node.id, node.props, lockReset]);
+  }, [node.id, node.props, lockReset, isFocused]);
 
   const effectiveSpec = useMemo(() => {
     if (!baseSpec) return null;
@@ -2387,6 +2411,7 @@ function SlotInspector({
   );
 
   const handleVariantChange = (index: number, value: string) => {
+    onDirty?.();
     const next = variants.map((item, idx) => (idx === index ? value : item));
     setVariants(next);
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
@@ -2397,6 +2422,7 @@ function SlotInspector({
   };
 
   const handleAddVariant = () => {
+    onDirty?.();
     const next = [...variants, ""];
     setVariants(next);
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
@@ -2407,6 +2433,7 @@ function SlotInspector({
   };
 
   const handleRemoveVariant = (index: number) => {
+    onDirty?.();
     const next = variants.filter((_, idx) => idx !== index);
     setVariants(next);
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
@@ -2417,6 +2444,7 @@ function SlotInspector({
   };
 
   const handleMoveVariant = (index: number, delta: number) => {
+    onDirty?.();
     const next = [...variants];
     const target = index + delta;
     if (target < 0 || target >= next.length) return;
@@ -2495,6 +2523,7 @@ function SlotInspector({
                     onClick={() => {
                       const next = tagsDraft.filter((item) => item !== tag);
                       setTagsDraft(next);
+                      onDirty?.();
                       onGeneratorChange({ ...baseSpec, tags: next, bank: bankDraft || undefined });
                     }}
                   >
@@ -2505,6 +2534,7 @@ function SlotInspector({
                   className="input tag-input"
                   value={tagInput}
                   placeholder="Add tag"
+                  onFocus={handleFocus}
                   onChange={(event) => setTagInput(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === ",") {
@@ -2514,15 +2544,18 @@ function SlotInspector({
                       const next = Array.from(new Set([...tagsDraft, nextTag]));
                       setTagsDraft(next);
                       setTagInput("");
+                      onDirty?.();
                       onGeneratorChange({ ...baseSpec, tags: next, bank: bankDraft || undefined });
                     }
                   }}
                   onBlur={() => {
+                    handleBlur();
                     const nextTag = tagInput.trim();
                     if (!nextTag) return;
                     const next = Array.from(new Set([...tagsDraft, nextTag]));
                     setTagsDraft(next);
                     setTagInput("");
+                    onDirty?.();
                     onGeneratorChange({ ...baseSpec, tags: next, bank: bankDraft || undefined });
                   }}
                 />
@@ -2533,9 +2566,12 @@ function SlotInspector({
                   <select
                     className="select"
                     value={bankDraft}
+                    onFocus={handleFocus}
+                    onBlur={handleBlur}
                     onChange={(event) => {
                       const next = event.target.value;
                       setBankDraft(next);
+                      onDirty?.();
                       onGeneratorChange({ ...baseSpec, tags: tagsDraft, bank: next || undefined });
                     }}
                   >
@@ -2558,9 +2594,12 @@ function SlotInspector({
                 className="input"
                 type="number"
                 value={rateDraft}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
                 onChange={(event) => {
                   const next = Number(event.target.value);
                   setRateDraft(next);
+                  onDirty?.();
                   onGeneratorChange({ ...baseSpec, ratePerSec: next });
                 }}
               />
@@ -2577,6 +2616,8 @@ function SlotInspector({
                       className="input"
                       data-testid={`inspector-field:slot-variant-${index}`}
                       value={value}
+                      onFocus={handleFocus}
+                      onBlur={handleBlur}
                       onChange={(event) => handleVariantChange(index, event.target.value)}
                     />
                     <div className="variant-actions">
@@ -2671,8 +2712,15 @@ function SlotInspector({
               <input
                 className="input"
                 value={reserve}
-                onChange={(event) => setReserve(event.target.value)}
-                onBlur={() => onPropsChange({ reserve })}
+                onFocus={handleFocus}
+                onChange={(event) => {
+                  setReserve(event.target.value);
+                  onDirty?.();
+                }}
+                onBlur={() => {
+                  handleBlur();
+                  onPropsChange({ reserve });
+                }}
               />
             </label>
             <label className="field">
@@ -2680,8 +2728,11 @@ function SlotInspector({
               <select
                 className="select"
                 value={fit}
+                onFocus={handleFocus}
+                onBlur={handleBlur}
                 onChange={(event) => {
                   setFit(event.target.value);
+                  onDirty?.();
                   onPropsChange({ fit: event.target.value });
                 }}
               >
@@ -3341,25 +3392,55 @@ function HealthStrip({
   state,
   selectedId,
   activeEditor,
+  trace,
   enabled,
 }: {
   state: DocServiceState;
   selectedId: string | null;
   activeEditor: "tiptap" | "monaco" | "none";
+  trace: EditTraceEvent[];
   enabled: boolean;
 }) {
   if (!enabled) return null;
   return (
-    <div className="health-strip">
-      <span>docRev {state.docRev}</span>
-      <span>sourceRev {state.sourceRev}</span>
-      <span>dirty {state.dirty ? "true" : "false"}</span>
-      <span>isSaving {state.isSaving ? "true" : "false"}</span>
-      <span>isApplying {state.isApplying ? "true" : "false"}</span>
-      <span>lastWriteId {state.lastWriteId ?? "—"}</span>
-      <span>lastLoadReason {state.lastLoadReason}</span>
-      <span>selected {selectedId ?? "none"}</span>
-      <span>activeEditor {activeEditor}</span>
+    <div className="health-strip-wrap">
+      <div className="health-strip">
+        <span>docRev {state.docRev}</span>
+        <span>sourceRev {state.sourceRev}</span>
+        <span>dirty {state.dirty ? "true" : "false"}</span>
+        <span>isSaving {state.isSaving ? "true" : "false"}</span>
+        <span>isApplying {state.isApplying ? "true" : "false"}</span>
+        <span>lastWriteId {state.lastWriteId ?? "—"}</span>
+        <span>lastLoadReason {state.lastLoadReason}</span>
+        <span>selected {selectedId ?? "none"}</span>
+        <span>activeEditor {activeEditor}</span>
+      </div>
+      <EditTraceLog entries={trace} />
+    </div>
+  );
+}
+
+function EditTraceLog({ entries }: { entries: EditTraceEvent[] }) {
+  if (!entries.length) return null;
+  return (
+    <div className="edit-trace-log">
+      <div className="edit-trace-header">Edit pipeline trace</div>
+      <div className="edit-trace-rows">
+        {entries.map((entry, index) => (
+          <div key={`${entry.ts}-${index}`} className="edit-trace-row">
+            <span>{entry.ts}</span>
+            <span>{entry.eventType}</span>
+            <span>{entry.selectedId ?? "—"}</span>
+            <span>{entry.dirty ? "dirty" : "clean"}</span>
+            <span>{entry.loadReason ?? "—"}</span>
+            <span>{entry.beforeHash ?? "—"}</span>
+            <span>{entry.afterHash ?? "—"}</span>
+            <span>{entry.revision ?? "—"}</span>
+            <span>{entry.reqId ?? "—"}</span>
+            <span>{entry.writeId ?? "—"}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

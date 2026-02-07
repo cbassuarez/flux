@@ -2,6 +2,7 @@ import { parseDocument, type DocumentNode, type FluxDocument, type RefreshPolicy
 import type { JSONContent } from "@tiptap/core";
 import { fetchEditSource, fetchEditState, postTransform, type TransformRequest } from "./api";
 import { tiptapToFluxText } from "./richText";
+import { hashString } from "./slotRuntime";
 
 export type LastLoadReason =
   | "initial"
@@ -20,6 +21,32 @@ export type DocEventLog = {
   writeId?: string | null;
   tag?: string;
 };
+
+export type TraceEventType =
+  | "FIELD_CHANGE"
+  | "COMMIT_START"
+  | "COMMIT_OK"
+  | "COMMIT_FAIL"
+  | "CANON_SET"
+  | "FETCH_SOURCE_OK"
+  | "FETCH_NODE_OK"
+  | "STALE_IGNORED";
+
+export type EditTraceEvent = {
+  ts: number;
+  eventType: TraceEventType;
+  selectedId: string | null;
+  dirty: boolean;
+  loadReason?: LastLoadReason;
+  beforeHash?: string | null;
+  afterHash?: string | null;
+  revision?: number | null;
+  reqId?: number;
+  writeId?: string | null;
+};
+
+type TraceEventInput = Omit<EditTraceEvent, "ts" | "selectedId" | "dirty"> &
+  Partial<Pick<EditTraceEvent, "ts" | "selectedId" | "dirty">>;
 
 export function logDocEvent(event: DocEventLog) {
   const payload = {
@@ -113,6 +140,7 @@ export type DocServiceState = {
   lastWriteId: string | null;
   lastLoadReason: LastLoadReason;
   pendingExternalChange?: { mtime?: number; path?: string; source?: string } | null;
+  editTrace: EditTraceEvent[];
 };
 
 export type DocService = {
@@ -132,6 +160,7 @@ export type DocService = {
   markExternalChange: (payload: { path?: string; mtime?: number; source?: string; writeId?: string | null }) => void;
   acceptExternalReload: () => void;
   dismissExternalReload: () => void;
+  traceEvent: (event: TraceEventInput) => void;
 };
 
 type SourcePayload = Awaited<ReturnType<typeof fetchEditSource>>;
@@ -209,22 +238,82 @@ export function createDocService(): DocService {
     lastWriteId: null,
     lastLoadReason: "initial",
     pendingExternalChange: null,
+    editTrace: [],
   };
   const listeners = new Set<() => void>();
   let undoStack: string[] = [];
   let redoStack: string[] = [];
   let writeSeq = 0;
+  let requestSeq = 0;
+  let expectedMinRevision = 0;
+  let expectedHash: string | null = null;
 
   const setState = (next: DocServiceState | ((prev: DocServiceState) => DocServiceState)) => {
     state = typeof next === "function" ? (next as (prev: DocServiceState) => DocServiceState)(state) : next;
     listeners.forEach((listener) => listener());
   };
 
+  const hashSource = (source: string) => {
+    const hashed = hashString(source);
+    return Math.abs(hashed).toString(16).padStart(8, "0");
+  };
+
+  const appendTrace = (input: TraceEventInput) => {
+    const entry: EditTraceEvent = {
+      ts: input.ts ?? Date.now(),
+      eventType: input.eventType,
+      selectedId: input.selectedId ?? state.selection.id,
+      dirty: input.dirty ?? state.dirty,
+      loadReason: input.loadReason,
+      beforeHash: input.beforeHash,
+      afterHash: input.afterHash,
+      revision: input.revision,
+      reqId: input.reqId,
+      writeId: input.writeId ?? state.lastWriteId,
+    };
+    setState((prev) => ({ ...prev, editTrace: [...prev.editTrace, entry].slice(-30) }));
+  };
+
+  const shouldIgnoreIncoming = (reason: LastLoadReason, incomingRevision: number | null, incomingHash: string | null) => {
+    if (state.dirty && reason !== "applyTransform" && reason !== "persistAck") {
+      return "dirty";
+    }
+    if (incomingRevision !== null && incomingRevision < expectedMinRevision) {
+      return "revision";
+    }
+    if (
+      incomingRevision === null &&
+      expectedHash &&
+      incomingHash &&
+      incomingHash !== expectedHash &&
+      expectedMinRevision > 0 &&
+      !["initial", "openDoc", "externalChange"].includes(reason)
+    ) {
+      return "hash";
+    }
+    return null;
+  };
+
+  const updateExpected = (source: string, revision: number | null | undefined, reason: LastLoadReason) => {
+    const nextHash = hashSource(source);
+    if (reason === "initial" || reason === "openDoc") {
+      expectedMinRevision = revision ?? 0;
+      expectedHash = nextHash;
+      return;
+    }
+    if (["persistAck", "applyTransform", "externalChange", "viewerSync"].includes(reason)) {
+      if (typeof revision === "number") {
+        expectedMinRevision = Math.max(expectedMinRevision, revision);
+      }
+      expectedHash = nextHash;
+    }
+  };
+
   const refreshFromPayload = async (
     payload: unknown,
     overrideSource: string | undefined,
     overrideState: Record<string, unknown> | null,
-    opts: { reason: LastLoadReason; writeId?: string | null; tag?: string },
+    opts: { reason: LastLoadReason; writeId?: string | null; tag?: string; reqId?: number },
   ): Promise<EditorDoc | null> => {
     const reason = opts.reason;
     const payloadState = extractStateFromPayload(payload) ?? overrideState ?? (payload as Record<string, unknown>);
@@ -235,6 +324,7 @@ export function createDocService(): DocService {
       state.doc?.source ??
       "";
     const prevSource = state.doc?.source ?? "";
+    const prevHash = hashSource(prevSource);
     const docPath = (payloadState?.path as string | undefined) ?? state.doc?.docPath;
     const astFromState = (payloadState as any)?.doc ?? (payloadState as any)?.ast ?? null;
     const ast = astFromState && typeof astFromState === "object" ? (astFromState as FluxDocument) : parseDoc(source, docPath);
@@ -254,6 +344,13 @@ export function createDocService(): DocService {
       previewPath: (payloadState as any)?.previewPath ?? state.doc?.previewPath ?? "/preview",
       capabilities: (payloadState as any)?.capabilities ?? state.doc?.capabilities,
     };
+    const nextRevision =
+      (payloadState as any)?.revision ??
+      (payload as any)?.revision ??
+      (payloadState as any)?.lastValidRevision ??
+      (payload as any)?.lastValidRevision ??
+      null;
+    const nextHash = hashSource(source);
 
     const nextRuntime = extractRuntimeInputs(payloadState, state.runtime);
     const nextSelection = normalizeSelection(state.selection, index);
@@ -285,6 +382,16 @@ export function createDocService(): DocService {
       pendingExternalChange: null,
     };
     setState(nextState);
+    updateExpected(source, nextRevision, reason);
+    appendTrace({
+      eventType: "CANON_SET",
+      loadReason: reason,
+      beforeHash: prevHash,
+      afterHash: nextHash,
+      revision: nextRevision,
+      reqId: opts.reqId,
+      writeId: opts.writeId ?? state.lastWriteId,
+    });
     logDocEvent({
       reason,
       docRev: nextState.docRev,
@@ -301,6 +408,7 @@ export function createDocService(): DocService {
     overrideState: Record<string, unknown> | null = null,
     reason?: LastLoadReason,
   ) => {
+    const reqId = ++requestSeq;
     const [statePayloadRaw, sourcePayload] = await Promise.all([
       fetchEditState(),
       overrideSource ? Promise.resolve({ source: overrideSource } as SourcePayload) : fetchEditSource(),
@@ -308,12 +416,36 @@ export function createDocService(): DocService {
     const extractedState = extractStateFromPayload(statePayloadRaw) ?? (statePayloadRaw as Record<string, unknown>);
     const mergedState = overrideState ?? extractedState;
     const source = overrideSource ?? sourcePayload?.source ?? "";
+    const incomingRevision =
+      (sourcePayload as any)?.revision ??
+      (mergedState as any)?.revision ??
+      (statePayloadRaw as any)?.revision ??
+      null;
+    const incomingHash = source ? hashSource(source) : null;
+    appendTrace({
+      eventType: "FETCH_SOURCE_OK",
+      afterHash: incomingHash ?? undefined,
+      revision: incomingRevision,
+      reqId,
+    });
     const resolvedReason = reason ?? (state.status === "idle" ? "initial" : "openDoc");
+    const ignoreReason = shouldIgnoreIncoming(resolvedReason, incomingRevision, incomingHash);
+    if (ignoreReason) {
+      appendTrace({
+        eventType: "STALE_IGNORED",
+        loadReason: resolvedReason,
+        beforeHash: hashSource(state.doc?.source ?? ""),
+        afterHash: incomingHash ?? undefined,
+        revision: incomingRevision,
+        reqId,
+      });
+      return state.doc;
+    }
     return refreshFromPayload(
       { ...(statePayloadRaw as any), ...(mergedState as any), source },
       source,
       mergedState,
-      { reason: resolvedReason, tag: "refreshFromServer" },
+      { reason: resolvedReason, tag: "refreshFromServer", reqId },
     );
   };
 
@@ -341,7 +473,9 @@ export function createDocService(): DocService {
     const writeId = options?.writeId ?? (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `write-${Date.now()}-${Math.random().toString(16).slice(2)}`);
     const seq = ++writeSeq;
     const prevSource = state.doc?.source ?? "";
+    const beforeHash = hashSource(prevSource);
     let errorMessage: string | undefined;
+    appendTrace({ eventType: "COMMIT_START", beforeHash, writeId });
     setState({
       ...state,
       isApplying: true,
@@ -351,16 +485,18 @@ export function createDocService(): DocService {
       error: undefined,
     });
     const { request, fallback } = buildTransformRequest(transform, state.doc);
+    const requestWithWriteId = { ...request, writeId };
+    const fallbackWithWriteId = fallback ? { ...fallback, writeId } : undefined;
     let usedFallback = false;
     try {
       let payload: unknown;
       let ok = false;
       try {
-        payload = await postTransform(request);
+        payload = await postTransform(requestWithWriteId);
         ok = (payload as any)?.ok !== false;
       } catch (error) {
-        if (fallback) {
-          payload = await postTransform(fallback);
+        if (fallbackWithWriteId) {
+          payload = await postTransform(fallbackWithWriteId);
           ok = (payload as any)?.ok !== false;
           usedFallback = true;
         } else {
@@ -368,8 +504,8 @@ export function createDocService(): DocService {
         }
       }
 
-      if (!ok && fallback && !usedFallback) {
-        payload = await postTransform(fallback);
+      if (!ok && fallbackWithWriteId && !usedFallback) {
+        payload = await postTransform(fallbackWithWriteId);
         ok = (payload as any)?.ok !== false;
         usedFallback = true;
       }
@@ -379,7 +515,9 @@ export function createDocService(): DocService {
         const diagnostics = (payload as any)?.diagnostics ?? nextState?.diagnostics ?? state.doc?.diagnostics;
         const nextDoc = state.doc ? { ...state.doc, diagnostics } : state.doc;
         errorMessage = (payload as any)?.error as string | undefined;
+        appendTrace({ eventType: "COMMIT_FAIL", beforeHash, writeId });
         setState({
+          ...state,
           status: "ready",
           doc: nextDoc,
           error: errorMessage,
@@ -404,6 +542,13 @@ export function createDocService(): DocService {
       const nextSource = typeof (payload as any)?.source === "string" ? (payload as any).source : undefined;
       if (seq !== writeSeq) {
         // stale response; ignore
+        appendTrace({
+          eventType: "STALE_IGNORED",
+          loadReason: options?.reason ?? "persistAck",
+          beforeHash,
+          afterHash: nextSource ? hashSource(nextSource) : undefined,
+          writeId,
+        });
         return {
           ok: true,
           nextAst: state.doc?.ast ?? null,
@@ -412,6 +557,14 @@ export function createDocService(): DocService {
         };
       }
 
+      appendTrace({
+        eventType: "COMMIT_OK",
+        beforeHash,
+        afterHash: nextSource ? hashSource(nextSource) : undefined,
+        revision:
+          (nextState as any)?.revision ?? (payload as any)?.revision ?? (nextState as any)?.lastValidRevision ?? (payload as any)?.lastValidRevision ?? null,
+        writeId,
+      });
       const nextDoc = await refreshFromPayload(payload, nextSource, nextState ?? null, {
         reason: options?.reason ?? "persistAck",
         writeId,
@@ -426,6 +579,7 @@ export function createDocService(): DocService {
       };
     } catch (error) {
       errorMessage = (error as Error)?.message ?? String(error);
+      appendTrace({ eventType: "COMMIT_FAIL", beforeHash, writeId });
       setState({
         ...state,
         status: "error",
@@ -491,6 +645,7 @@ export function createDocService(): DocService {
   };
 
   const markDirtyDraft = () => {
+    appendTrace({ eventType: "FIELD_CHANGE" });
     if (state.dirty) return;
     setState({ ...state, dirty: true });
   };
@@ -534,6 +689,7 @@ export function createDocService(): DocService {
     markExternalChange,
     acceptExternalReload,
     dismissExternalReload,
+    traceEvent: appendTrace,
   };
 }
 
