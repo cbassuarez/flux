@@ -55,12 +55,27 @@ beforeEach(() => {
 });
 
 describe("docService transform requests", () => {
-  it("uses replaceNode as the primary request for rich text", async () => {
+  it("keeps setTextNodeContent for plain rich text and omits richText", async () => {
     const service = createDocService();
     await service.loadDoc();
     const richText: JSONContent = {
       type: "doc",
       content: [{ type: "paragraph", content: [{ type: "text", text: "Hello" }] }],
+    };
+
+    await service.applyTransform({ type: "setTextNodeContent", id: "t1", richText });
+
+    expect(postTransformMock.mock.calls[0][0]?.op).toBe("setTextNodeContent");
+    const args = postTransformMock.mock.calls[0][0]?.args as Record<string, unknown>;
+    expect("richText" in args).toBe(false);
+  });
+
+  it("uses replaceNode as the primary request for formatted rich text", async () => {
+    const service = createDocService();
+    await service.loadDoc();
+    const richText: JSONContent = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Hi", marks: [{ type: "bold" }] }] }],
     };
 
     await service.applyTransform({ type: "setTextNodeContent", id: "t1", richText });
@@ -97,6 +112,70 @@ describe("docService transform requests", () => {
     });
 
     expect(postTransformMock.mock.calls[0][0]?.op).toBe("replaceNode");
+  });
+
+  it("retries with fallback on header no-op responses", async () => {
+    const service = createDocService();
+    await service.loadDoc();
+    const richText: JSONContent = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Hi", marks: [{ type: "bold" }] }] }],
+    };
+
+    postTransformMock
+      .mockResolvedValueOnce({
+        ok: true,
+        source: baseSource,
+        doc: baseDoc,
+        revision: 2,
+        _fluxBefore: "a",
+        _fluxAfter: "a",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        source: baseSource,
+        doc: baseDoc,
+        revision: 3,
+        _fluxBefore: "a",
+        _fluxAfter: "b",
+      });
+
+    await service.applyTransform({ type: "setTextNodeContent", id: "t1", richText });
+
+    expect(postTransformMock).toHaveBeenCalledTimes(2);
+    expect(postTransformMock.mock.calls[1][0]?.op).toBe("setTextNodeContent");
+  });
+
+  it("retries setNodeProps with replaceNode fallback after no-op", async () => {
+    const service = createDocService();
+    await service.loadDoc();
+
+    postTransformMock
+      .mockResolvedValueOnce({
+        ok: true,
+        source: baseSource,
+        doc: baseDoc,
+        revision: 2,
+        _fluxBefore: "a",
+        _fluxAfter: "a",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        source: baseSource,
+        doc: baseDoc,
+        revision: 3,
+        _fluxBefore: "a",
+        _fluxAfter: "b",
+      });
+
+    await service.applyTransform({
+      type: "setNodeProps",
+      id: "s1",
+      props: { variant: { kind: "LiteralValue", value: "x" } },
+    });
+
+    expect(postTransformMock).toHaveBeenCalledTimes(2);
+    expect(postTransformMock.mock.calls[1][0]?.op).toBe("replaceNode");
   });
 
   it("adopts newRevision as doc.revision after hydration", async () => {

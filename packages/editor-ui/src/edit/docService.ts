@@ -513,9 +513,40 @@ export function createDocService(): DocService {
     try {
       let payload: unknown;
       let ok = false;
+      let nextState: Record<string, unknown> | null = null;
       try {
         payload = await postTransform(requestWithWriteId);
         ok = (payload as any)?.ok !== false;
+        if (ok && fallbackWithWriteId && !usedFallback) {
+          nextState = extractStateFromPayload(payload) ?? null;
+          const before = (payload as any)?._fluxBefore;
+          const after = (payload as any)?._fluxAfter;
+          const isHeaderNoop = before && after && before === after;
+          const nextSourceStr = typeof (payload as any)?.source === "string" ? (payload as any).source : undefined;
+          const rev =
+            (nextState as any)?.revision ??
+            (payload as any)?.revision ??
+            (nextState as any)?.newRevision ??
+            (payload as any)?.newRevision ??
+            (nextState as any)?.lastValidRevision ??
+            (payload as any)?.lastValidRevision ??
+            null;
+          const sameSource = nextSourceStr !== undefined && nextSourceStr === prevSource;
+          const isHeuristicNoop =
+            !isHeaderNoop &&
+            before == null &&
+            after == null &&
+            sameSource &&
+            rev != null &&
+            state.doc?.revision != null &&
+            rev <= state.doc.revision;
+          if (isHeaderNoop || isHeuristicNoop) {
+            payload = await postTransform(fallbackWithWriteId);
+            ok = (payload as any)?.ok !== false;
+            usedFallback = true;
+            nextState = null;
+          }
+        }
       } catch (error) {
         if (fallbackWithWriteId) {
           payload = await postTransform(fallbackWithWriteId);
@@ -532,7 +563,9 @@ export function createDocService(): DocService {
         usedFallback = true;
       }
 
-      const nextState = extractStateFromPayload(payload) ?? null;
+      if (!nextState) {
+        nextState = extractStateFromPayload(payload) ?? null;
+      }
       if (!ok) {
         const diagnostics = (payload as any)?.diagnostics ?? nextState?.diagnostics ?? state.doc?.diagnostics;
         const nextDoc = state.doc ? { ...state.doc, diagnostics } : state.doc;
@@ -769,28 +802,42 @@ function buildTransformRequest(transform: EditorTransform | TransformRequest, do
   }
   if (transform.type === "setTextNodeContent") {
     const plainTextFromRich = transform.richText ? extractTextFromRich(transform.richText) : undefined;
+    const isRichTextComplex = transform.richText ? isComplexRichText(transform.richText) : false;
+    const args: Record<string, unknown> = {
+      id: transform.id,
+      nodeId: transform.id,
+      text: transform.text ?? plainTextFromRich,
+    };
+    if (transform.richText && isRichTextComplex) {
+      args.richText = transform.richText;
+    }
     const request: TransformRequest = {
       op: "setTextNodeContent",
-      args: {
-        id: transform.id,
-        nodeId: transform.id,
-        text: transform.text ?? plainTextFromRich,
-        richText: transform.richText,
-      },
+      args,
     };
     const fallback = buildTextReplaceNodeFallback(transform, doc);
-    if (transform.richText && fallback) {
+    if (transform.richText && isRichTextComplex && fallback) {
       return { request: fallback, fallback: request };
     }
     return { request, fallback };
   }
   if (transform.type === "setNodeProps") {
-    return {
-      request: {
-        op: "setNodeProps",
-        args: { id: transform.id, nodeId: transform.id, props: transform.props },
-      },
+    const request = {
+      op: "setNodeProps",
+      args: { id: transform.id, nodeId: transform.id, props: transform.props },
     };
+    let fallback: TransformRequest | undefined;
+    if (doc?.index) {
+      const entry = doc.index.get(transform.id);
+      if (entry) {
+        const nextNode: DocumentNode = {
+          ...entry.node,
+          props: { ...(entry.node.props ?? {}), ...transform.props },
+        };
+        fallback = { op: "replaceNode", args: { id: transform.id, node: nextNode } };
+      }
+    }
+    return { request, fallback };
   }
   if (transform.type === "setSlotProps") {
     const request: TransformRequest = {
@@ -874,12 +921,21 @@ function buildSlotPropsFallback(
   const nextProps: Record<string, any> = { ...(entry.node.props ?? {}) };
   if (transform.reserve !== undefined) nextProps.reserve = { kind: "LiteralValue", value: transform.reserve };
   if (transform.fit !== undefined) nextProps.fit = { kind: "LiteralValue", value: transform.fit };
-  const nextNode: DocumentNode = {
+  const nextNode: DocumentNode & Record<string, any> = {
     ...entry.node,
     props: nextProps,
     refresh: transform.refresh ?? entry.node.refresh,
     transition: transform.transition ?? (entry.node as any).transition,
   };
+  if (transform.reserve !== undefined && "reserve" in (entry.node as any)) (nextNode as any).reserve = transform.reserve;
+  if (transform.fit !== undefined && "fit" in (entry.node as any)) (nextNode as any).fit = transform.fit;
+  if (transform.refresh !== undefined && "refresh" in (entry.node as any)) (nextNode as any).refresh = transform.refresh;
+  if (
+    transform.transition !== undefined &&
+    ("transition" in (entry.node as any) || (entry.node as any).transition !== undefined)
+  ) {
+    (nextNode as any).transition = transform.transition;
+  }
   return { op: "replaceNode", args: { id: transform.id, node: nextNode } };
 }
 
@@ -893,10 +949,13 @@ function buildSlotGeneratorFallback(
   if (entry.node.kind !== "inline_slot" && entry.node.kind !== "slot") return undefined;
   const nextProps: Record<string, any> = { ...(entry.node.props ?? {}) };
   nextProps.generator = transform.generator as any;
-  const nextNode: DocumentNode = {
+  const nextNode: DocumentNode & Record<string, any> = {
     ...entry.node,
     props: nextProps,
   };
+  if ("generator" in (entry.node as any)) {
+    (nextNode as any).generator = transform.generator;
+  }
   return { op: "replaceNode", args: { id: transform.id, node: nextNode } };
 }
 
@@ -906,6 +965,23 @@ function extractTextFromRich(json: JSONContent): string {
     if (typeof node.text === "string") return node.text;
     if (Array.isArray(node.content)) return node.content.map(visit).join("");
     return "";
+  };
+  return visit(json);
+}
+
+function isComplexRichText(json: JSONContent): boolean {
+  const visit = (node: any): boolean => {
+    if (!node || typeof node !== "object") return false;
+    if (Array.isArray(node.marks) && node.marks.length > 0) return true;
+    if (node.type === "inlineSlot") return true;
+    const attrs = node.attrs;
+    if (attrs && typeof attrs === "object") {
+      const idValue = (attrs as any).id ?? (attrs as any).textId;
+      if (typeof idValue === "string" || typeof idValue === "number") return true;
+    }
+    if (typeof node.type === "string" && !["doc", "paragraph", "text"].includes(node.type)) return true;
+    if (Array.isArray(node.content)) return node.content.some(visit);
+    return false;
   };
   return visit(json);
 }
