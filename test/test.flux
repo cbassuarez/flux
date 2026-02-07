@@ -3,10 +3,10 @@
 document {
   meta {
     /// Human-readable title for exports and viewer tabs.
-    title = "Flux Document";
+    title = "test";
     version = "0.3.0";
     /// Screen is the base target; print theme is optional.
-    target = "screen";
+    target = "print";
   }
 
   /// Page size and units for layout.
@@ -122,17 +122,15 @@ document {
       border.radius = 6;
     }
   }
-
-  /// Asset banks let you reference local media by id.
-  assets {
-    // Asset bank for local images. Drop files into ./assets.
-    bank media {
-      kind = image;
-      root = "assets";
-      include = "*.{png,jpg,jpeg,svg}";
-      strategy = uniform;
+  /// Optional print theme overrides for exports.
+  theme "print" {
+    tokens {
+      color.text = "#1b1a17";
+      color.muted = "#6a6258";
+      color.accent = "#0c7f7a";
     }
   }
+
 
 
   /// Pages, sections, and content blocks.

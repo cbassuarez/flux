@@ -123,23 +123,18 @@ document {
     }
   }
 
-  /// Asset banks let you reference local media by id.
-  assets {
-    // Asset bank for local images. Drop files into ./assets.
-    bank media {
-      kind = image;
-      root = "assets";
-      include = "*.{png,jpg,jpeg,svg}";
-      strategy = uniform;
-    }
-  }
+
 
 
   /// Pages, sections, and content blocks.
   body {
     page cover {
       section hero {
-        text title { role = "title"; style = "Title"; content = "Flux Ar"; }
+                                                                text title {
+                                  content = "Flux Article";
+                                  style = "Title";
+                                  role = "title";
+                                }
         text subtitle { role = "subtitle"; style = "Subtitle"; content = "A narrative article starter"; }
         text byline { role = "byline"; content = "By Your Name"; }
         text deck { style = "Lead"; content = "Write a crisp, curiosity-driven lead that frames the story."; }
@@ -169,14 +164,107 @@ document {
         tone = "info";
         text sidebarText { content = "Use callouts for sidebars, stats, or editor notes."; }
       }
-    }
 
-    /// Chapter pages (includes fragments from ./chapters)
-    page chapter1 {
-      include chapter1 { path = "chapters/chapter-1.flux"; }
-    }
-    page chapter2 {
-      include chapter2 { path = "chapters/chapter-2.flux"; }
+            section section1 {
+        text section1Heading {
+          content = "Section Heading";
+          style = "H2";
+        }
+        text paragraph1 {
+          content = "New paragraph.";
+        }
+        text section1Body {
+          content = "Start writing here.";
+        }
+        text paragraph2 {
+          content = "New paragraph.";
+        }
+        text paragraph3 {
+          content = "New paragraph.";
+        }
+
+        text paragraph4 { content = "New paragraph."; }
+
+        text paragraph5 { content = "New paragraph."; }
+      }
+
+      figure figure1 {
+        label = "figure1";
+        slot figure1Slot {
+          reserve = fixed(240, 160, px);
+          fit = scaleDown;
+          text figure1Placeholder { content = "Figure placeholder"; }
+        }
+        text figure1Caption { role = "caption"; content = "Figure caption."; }
+      }
+
+      slot slot1 {
+        reserve = fixed(200, 80, px);
+        fit = shrink;
+        refresh = docstep;
+        text slot1Text { content = @docstep; }
+      }
+
+      callout callout1 {
+        tone = "info";
+        text callout1Body { content = "Callout text."; }
+      }
+
+      figure figure2 {
+        label = "figure2";
+        slot figure2Slot {
+          reserve = fixed(240, 160, px);
+          fit = scaleDown;
+          text figure2Placeholder { content = "Figure placeholder"; }
+        }
+        text figure2Caption { role = "caption"; content = "Figure caption."; }
+      }
+
+      section section2 {
+        text section2Body { content = "Start writing here."; }
+      }
+
+      section section3 {
+        text section3Heading { style = "H2"; content = "Section Heading"; }
+        text section3Body { content = "Start writing here."; }
+
+        text paragraph6 { content = "New paragraph."; }
+      }
+
+      section section4 {
+        text section4Body { content = "Start writing here."; }
+      }
+
+      section section5 {
+        text section5Heading { style = "H2"; content = "Section Heading"; }
+        text section5Body { content = "Start writing here."; }
+
+        text paragraph7 { content = "New paragraph."; }
+      }
+
+      figure figure3 {
+        label = "figure3";
+        slot figure3Slot {
+          reserve = fixed(240, 160, px);
+          fit = scaleDown;
+          text figure3Placeholder { content = "Figure placeholder"; }
+        }
+        text figure3Caption { role = "caption"; content = "Figure caption."; }
+      }
+
+      callout callout2 {
+        tone = "info";
+        text callout2Body { content = "Callout text. test"; }
+      }
+slot slot2 {
+  refresh = docstep;
+  reserve = "fixed";
+  fit = "shrink";
+  generator = null;
+  text slot2Text {
+    content = "test";
+  }
+}
     }
   }
 }
