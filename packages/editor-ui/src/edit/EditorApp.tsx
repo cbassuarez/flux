@@ -4,7 +4,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-runRichCommand,
   useRef,
   useState,
   useSyncExternalStore,
@@ -19,12 +18,12 @@ import "./editor.css";
 import {
   DividerHairline,
   EditorFrame,
-  EditorToolbar,
   InspectorPane,
   OutlinePane,
   PageStage,
-  StatusBar,
 } from "./components/EditorShell";
+import { MenuBar } from "./components/MenuBar";
+import { StatusBar } from "./components/StatusBar";
 import { monaco } from "./monaco";
 import {
   createDocService,
@@ -76,6 +75,7 @@ import {
 } from "./slotRuntime";
 import { EditorRuntimeProvider, useEditorRuntimeState } from "./runtimeContext";
 import { buildGeneratorExpr, hasEmptyValue, isChooseCycleSpec, promoteVariants, wrapExpressionValue } from "./generatorUtils";
+import { buildEditorCommands, type EditorCommand } from "./commands/editorCommands";
 
 loader.config({ monaco });
 
@@ -109,8 +109,13 @@ export default function EditorApp() {
   const [findQuery, setFindQuery] = useState("");
   const [findIndex, setFindIndex] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [overflowOpen, setOverflowOpen] = useState(false);
   const [assetPanelOpen, setAssetPanelOpen] = useState(true);
+  const [outlineVisible, setOutlineVisible] = useState(true);
+  const [showStatusBar, setShowStatusBar] = useState(() => getStoredStatusBar());
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [docSettingsOpen, setDocSettingsOpen] = useState(false);
+  const [buildInfoOpen, setBuildInfoOpen] = useState(false);
   const [outlineQuery, setOutlineQuery] = useState("");
   const [debugSlots, setDebugSlots] = useState(false);
   const [showIds, setShowIds] = useState(false);
@@ -190,7 +195,7 @@ export default function EditorApp() {
       }
     };
     void fetchBuildId();
-  }, []);
+  }, [handleSave]);
 
   useEffect(() => {
     if (!doc?.source) return;
@@ -215,6 +220,11 @@ export default function EditorApp() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("flux-editor-inspector-width", String(inspectorWidth));
   }, [inspectorWidth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("flux.editor.showStatusBar", showStatusBar ? "1" : "0");
+  }, [showStatusBar]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -333,7 +343,6 @@ export default function EditorApp() {
   }, [doc?.index, selectedId]);
 
   const selectedNode = selectedEntry?.node ?? null;
-  const existingIds = useMemo(() => new Set(doc?.index?.keys() ?? []), [doc?.index]);
   const frameEntry = useMemo(() => resolveFrameEntry(selectedEntry, doc?.index), [doc?.index, selectedEntry]);
   const illegalSlotProps = useMemo(() => {
     if (!selectedNode) return false;
@@ -698,9 +707,13 @@ export default function EditorApp() {
         event.preventDefault();
         setFindOpen(true);
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !isTypingTarget) {
         event.preventDefault();
         setPaletteOpen(true);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void handleSave();
       }
       if (!isTypingTarget && event.key === "]") {
         event.preventDefault();
@@ -709,7 +722,10 @@ export default function EditorApp() {
       if (event.key === "Escape") {
         setFindOpen(false);
         setPaletteOpen(false);
-        setOverflowOpen(false);
+        setDiagnosticsOpen(false);
+        setAboutOpen(false);
+        setDocSettingsOpen(false);
+        setBuildInfoOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
@@ -842,10 +858,6 @@ export default function EditorApp() {
     void handleTransform(buildAddSectionTransform(), "Section added");
   }, [handleTransform]);
 
-  const handleInsertTextSection = useCallback(() => {
-    void handleTransform(buildAddSectionTransform({ noHeading: true }), "Text section added");
-  }, [handleTransform]);
-
   const handleInsertParagraph = useCallback(() => {
     void handleTransform(buildAddParagraphTransform(), "Paragraph added");
   }, [handleTransform]);
@@ -869,29 +881,6 @@ export default function EditorApp() {
     void handleTransform(buildAddSlotTransform(), "Slot inserted");
   }, [handleTransform]);
 
-  const handleInsertInlineSlot = useCallback(() => {
-    const editor = richEditorRef.current;
-    if (!editor) return;
-    const ids = new Set(existingIds);
-    const inlineId = nextId("inlineSlot", ids);
-    const textId = nextId("slotText", ids);
-    editor
-      .chain()
-      .focus()
-      .insertContent({
-        type: "inlineSlot",
-        attrs: {
-          id: inlineId,
-          textId,
-          text: "slot",
-          reserve: "fixedWidth(9, ch)",
-          fit: "ellipsis",
-          refresh: "docstep",
-        },
-      })
-      .run();
-  }, [existingIds]);
-
   const handleApplySource = useCallback(async () => {
     if (!sourceDirty) return;
     setSaveStatus("saving");
@@ -905,6 +894,53 @@ export default function EditorApp() {
     }
   }, [docService, sourceDraft, sourceDirty]);
 
+  const handleSetActiveMode = useCallback(
+    (mode: "preview" | "edit" | "source") => {
+      setActiveMode(mode);
+      if (mode === "edit" && runtimeState.mode === "playback") {
+        runtimeActions.setMode("edit");
+      }
+    },
+    [runtimeActions, runtimeState.mode],
+  );
+
+  const handleSave = useCallback(async () => {
+    if (!sourceDirty && !docState.dirty) {
+      setToast({ kind: "info", message: "No changes to save." });
+      return;
+    }
+    if (sourceDirty) {
+      await handleApplySource();
+      return;
+    }
+    if (!doc?.source) return;
+    setSaveStatus("saving");
+    await docService.saveDoc(doc.source);
+    setSaveStatus("saved");
+  }, [doc?.source, docService, docState.dirty, handleApplySource, sourceDirty]);
+
+  const handleResetLayout = useCallback(() => {
+    setOutlineWidth(300);
+    setInspectorWidth(320);
+    setInspectorVisible(true);
+    setAssetPanelOpen(true);
+    setOutlineVisible(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("flux-editor-outline-width");
+      window.localStorage.removeItem("flux-editor-inspector-width");
+    }
+  }, []);
+
+  const toggleOutline = useCallback(() => setOutlineVisible((prev) => !prev), []);
+  const toggleInspector = useCallback(() => setInspectorVisible((prev) => !prev), []);
+  const toggleAssets = useCallback(() => setAssetPanelOpen((prev) => !prev), []);
+  const toggleDiagnostics = useCallback(() => setDiagnosticsOpen((prev) => !prev), []);
+  const toggleStatusBar = useCallback(() => setShowStatusBar((prev) => !prev), []);
+  const enterFocusMode = useCallback(() => {
+    setOutlineVisible(false);
+    setInspectorVisible(false);
+  }, []);
+
   const handleExportPdf = useCallback(() => {
     setToast({ kind: "info", message: "PDF export is not available yet." });
   }, []);
@@ -917,6 +953,30 @@ export default function EditorApp() {
       setToast({ kind: "error", message: "Unable to copy ID." });
     }
   }, []);
+
+  const handleCopyDiagnosticsSummary = useCallback(async () => {
+    const summary = `Diagnostics: pass ${diagnosticsSummary.pass}, warn ${diagnosticsSummary.warn}, fail ${diagnosticsSummary.fail}`;
+    try {
+      await navigator.clipboard.writeText(summary);
+      setToast({ kind: "success", message: "Diagnostics summary copied." });
+    } catch {
+      setToast({ kind: "error", message: "Unable to copy diagnostics summary." });
+    }
+  }, [diagnosticsSummary.fail, diagnosticsSummary.pass, diagnosticsSummary.warn]);
+
+  const buildInfoLabel = useMemo(() => {
+    const parts = [buildInfo.id ? `build ${buildInfo.id}` : null, buildInfo.dist ? buildInfo.dist : null].filter(Boolean);
+    return parts.length ? parts.join(" • ") : "Build info unavailable";
+  }, [buildInfo.dist, buildInfo.id]);
+
+  const handleCopyBuildInfo = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(buildInfoLabel);
+      setToast({ kind: "success", message: "Build info copied." });
+    } catch {
+      setToast({ kind: "error", message: "Unable to copy build info." });
+    }
+  }, [buildInfoLabel]);
 
   const startResize = useCallback(
     (side: "left" | "right") => (event: any) => {
@@ -1029,81 +1089,73 @@ export default function EditorApp() {
     if (asset) setDraggingAsset(asset);
   }, []);
 
-    const runRichCommand = useCallback(
-      (fn: (editor: any) => void) => {
-        const editor = richEditorRef.current;
-        if (!editor?.chain) {
-          setToast({ kind: "info", message: "Select a text node and focus the editor first." });
-          return;
-        }
-        try {
-          fn(editor);
-        } catch (err) {
-          console.error("[editor-command]", err);
-          setToast({ kind: "error", message: "Command failed." });
-        }
-      },
-      [setToast],
-    );
+  const editorCommands = useMemo(
+    () =>
+      buildEditorCommands({
+        docState,
+        undo: () => void docService.undo(),
+        redo: () => void docService.redo(),
+        sourceDirty,
+        runtimeState,
+        runtimeActions,
+        selectionId: selectedId,
+        handleSave,
+        handleExportPdf,
+        handleResetLayout,
+        handleInsertSection,
+        handleInsertParagraph,
+        handleInsertFigure,
+        handleInsertSlot,
+        handleInsertCallout,
+        handleInsertTable,
+        setFindOpen,
+        setPaletteOpen,
+        setActiveMode: handleSetActiveMode,
+        toggleOutline,
+        toggleInspector,
+        toggleAssets,
+        toggleDiagnostics,
+        toggleStatusBar,
+        enterFocusMode,
+        openAbout: () => setAboutOpen(true),
+        openDocSettings: () => setDocSettingsOpen(true),
+        openBuildInfo: () => setBuildInfoOpen(true),
+        copyDiagnostics: handleCopyDiagnosticsSummary,
+      }),
+    [
+      docState,
+      docService,
+      sourceDirty,
+      runtimeActions,
+      runtimeState,
+      selectedId,
+      handleSave,
+      handleExportPdf,
+      handleResetLayout,
+      handleInsertSection,
+      handleInsertParagraph,
+      handleInsertFigure,
+      handleInsertSlot,
+      handleInsertCallout,
+      handleInsertTable,
+      setFindOpen,
+      setPaletteOpen,
+      handleSetActiveMode,
+      toggleOutline,
+      toggleInspector,
+      toggleAssets,
+      toggleDiagnostics,
+      toggleStatusBar,
+      enterFocusMode,
+      handleCopyDiagnosticsSummary,
+    ],
+  );
 
-  const commandItems = useMemo(() => {
-    const insertItems = [
-      { id: "insert-section", label: "Section", action: handleInsertSection },
-      { id: "insert-text-section", label: "Text Section", action: handleInsertTextSection },
-      { id: "insert-paragraph", label: "Paragraph", action: handleInsertParagraph },
-      { id: "insert-figure", label: "Figure", action: handleInsertFigure },
-      { id: "insert-callout", label: "Callout", action: handleInsertCallout },
-      { id: "insert-table", label: "Table", action: handleInsertTable },
-      { id: "insert-slot", label: "Slot", action: handleInsertSlot },
-      { id: "insert-inline-slot", label: "Inline Slot", action: handleInsertInlineSlot },
-    ];
-
-    const wrapItems = [
-        { id: "wrap-bold",   label: "Wrap selection in Bold",   action: () => runRichCommand((ed) => ed.chain().focus().toggleBold().run()) },
-        { id: "wrap-italic", label: "Wrap selection in Italic", action: () => runRichCommand((ed) => ed.chain().focus().toggleItalic().run()) },
-        { id: "wrap-code",   label: "Wrap selection in Code",   action: () => runRichCommand((ed) => ed.chain().focus().toggleCode().run()) },
-        { id: "wrap-link",   label: "Wrap selection in Link",   action: () =>
-          runRichCommand((ed) => {
-            const chain = ed.chain().focus();
-            if (!chain.toggleLink) {
-              setToast({ kind: "info", message: "Link command not available in this editor." });
-              return;
-            }
-            chain.toggleLink({ href: "" }).run();
-          })
-        },
-    ];
-
-    const headingItems = searchItems
-      .filter((item) => item.kind === "text" && item.breadcrumbs.length)
-      .slice(0, 12)
-      .map((item) => ({
-        id: `goto-${item.id}`,
-        label: `Go to ${item.breadcrumbs[item.breadcrumbs.length - 1]}`,
-        action: () => selectNode(item.id),
-      }));
-
-    const utilityItems = [
-      { id: "open-assets", label: "Open Asset Browser", action: () => setAssetPanelOpen(true) },
-      { id: "toggle-show-ids", label: showIds ? "Hide IDs" : "Show IDs", action: () => setShowIds((prev) => !prev) },
-      { id: "toggle-debug", label: debugSlots ? "Disable Debug Outlines" : "Enable Debug Outlines", action: () => setDebugSlots((prev) => !prev) },
-    ];
-
-    return { insertItems, wrapItems, headingItems, utilityItems };
-  }, [
-    handleInsertSection,
-    handleInsertTextSection,
-    handleInsertParagraph,
-    handleInsertFigure,
-    handleInsertCallout,
-    handleInsertTable,
-    handleInsertSlot,
-    handleInsertInlineSlot,
-    searchItems,
-    showIds,
-    debugSlots,
-    selectNode,
-  ]);
+  const paletteCommands = useMemo(() => {
+    return Object.values(editorCommands)
+      .filter((command) => command.enabled && command.palette !== false)
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [editorCommands]);
 
   useEffect(() => {
     if (!draggingAsset) return;
@@ -1272,9 +1324,6 @@ export default function EditorApp() {
     );
   }
 
-  const timeMax = Math.max(10, Math.ceil(runtimeState.timeSec / 5) * 5 + 5);
-  const timeDisplay = `${runtimeState.timeSec.toFixed(1)}s`;
-
   return (
     <div className="editor-root" ref={editorRootRef}>
       <DndContext
@@ -1301,265 +1350,92 @@ export default function EditorApp() {
             </div>
           </div>
         ) : null}
-        <EditorToolbar>
-            <div className="toolbar-left">
-              <div className="doc-identity">
-                <div className="doc-title">{doc?.title ?? "Flux Document"}</div>
-                {doc?.docPath ? <div className="doc-path">{doc.docPath}</div> : null}
-              </div>
-              <div className={`save-state save-${saveStatus} ${sourceDirty ? "is-dirty" : ""}`}>
-                <span className="save-dot" />
-                <span>{renderSaveStatus(saveStatus, sourceDirty)}</span>
-              </div>
-              {debugEnabled ? (
-                <div className="debug-line">
-                  <span>doc: {docState.status}</span>
-                  <span>busy: {docState.isApplying ? "true" : "false"}</span>
-                  <span>overlay: {paletteOpen || findOpen || overflowOpen ? "true" : "false"}</span>
-                  <span>focus: {focusedPane}</span>
-                  <span>selected: {selectedId ?? "none"}</span>
-                  <span>mode: {runtimeState.mode}</span>
-                </div>
-              ) : null}
-            </div>
-            <div className="toolbar-center">
-              <div className="toolbar-group">
-                <button className="btn btn-ghost btn-xs" disabled>
-                  Fit Width
-                </button>
-                <button className="btn btn-ghost btn-xs" disabled>
-                  100%
-                </button>
-                <button className="btn btn-ghost btn-xs" disabled>
-                  −
-                </button>
-                <button className="btn btn-ghost btn-xs" disabled>
-                  +
-                </button>
-              </div>
-              <div className="toolbar-separator" />
-              <div className="toolbar-group">
-                <button className="btn btn-ghost btn-xs" disabled>
-                  ◀
-                </button>
-                <span className="toolbar-page">12 / 42</span>
-                <button className="btn btn-ghost btn-xs" disabled>
-                  ▶
-                </button>
-              </div>
-              <div className="toolbar-separator" />
-              <div className="mode-tabs">
-                <button
-                  className={`mode-tab ${activeMode === "preview" ? "is-active" : ""}`}
-                  onClick={() => setActiveMode("preview")}
-                >
-                  Preview
-                </button>
-                <button
-                  className={`mode-tab ${activeMode === "edit" ? "is-active" : ""}`}
-                  onClick={() => {
-                    setActiveMode("edit");
-                    if (runtimeState.mode === "playback") runtimeActions.setMode("edit");
-                  }}
-                >
-                  Edit Text
-                </button>
-                <button
-                  className={`mode-tab ${activeMode === "source" ? "is-active" : ""}`}
-                  onClick={() => setActiveMode("source")}
-                >
-                  Source
-                </button>
-              </div>
-            </div>
-            <div className="toolbar-right">
-              <div className="build-stamp" title={buildInfo.dist ?? undefined}>
-                <span className="build-stamp__label">Editor</span>
-                <span className="build-stamp__value">{buildInfo.id ?? "…"}</span>
-              </div>
-              <button className="btn btn-ghost" onClick={() => setFindOpen(true)}>
-                Find
-              </button>
-              <button className="btn btn-ghost" onClick={() => setPaletteOpen(true)}>
-                Commands
-              </button>
-              <button className={`btn btn-ghost ${showIds ? "is-active" : ""}`} onClick={() => setShowIds((prev) => !prev)}>
-                Show IDs
-              </button>
-              <button className="btn btn-primary" onClick={handleExportPdf}>
-                Export PDF
-              </button>
-              <button className="btn btn-ghost btn-icon" onClick={() => setOverflowOpen(true)}>
-                ⋯
-              </button>
-            </div>
-          </EditorToolbar>
-
-          <HealthStrip
-            state={docState}
-            selectedId={selectedId}
-            activeEditor={activeEditor}
-            trace={docState.editTrace}
-            enabled={debugEnabled || (import.meta as any)?.env?.DEV}
+        <MenuBar
+          commands={editorCommands}
+          checked={{
+            "view.toggleOutline": outlineVisible,
+            "view.toggleInspector": inspectorVisible,
+            "view.toggleAssets": assetPanelOpen,
+            "view.toggleDiagnostics": diagnosticsOpen,
+            "view.showStatusBar": showStatusBar,
+          }}
+        />
+        {showStatusBar ? (
+          <StatusBar
+            canSave={sourceDirty || docState.dirty}
+            onSave={handleSave}
+            onUndo={() => void docService.undo()}
+            onRedo={() => void docService.redo()}
+            saveLabel={renderSaveStatus(saveStatus, sourceDirty)}
+            fileName={getFileName(doc?.docPath)}
+            docTitle={doc?.title ?? "Flux Document"}
+            revisionLabel={doc?.revision != null ? `rev ${doc.revision}` : "rev —"}
+            dirty={sourceDirty || docState.dirty}
+            onOpenDocSettings={() => setDocSettingsOpen(true)}
+            diagnosticsCount={diagnosticsSummary.warn + diagnosticsSummary.fail}
+            onOpenDiagnostics={() => setDiagnosticsOpen(true)}
+            connectionLabel={getConnectionLabel()}
+            runtime={{ docstep: runtimeState.docstep, seed: runtimeState.seed, timeSec: runtimeState.timeSec }}
           />
-
-        <div className="editor-transport">
-          <div className="transport-group">
-            <div className="transport-label">Mode</div>
-            <div className="transport-toggle">
-              <button
-                className={`transport-tab ${runtimeState.mode === "edit" ? "is-active" : ""}`}
-                onClick={() => runtimeActions.setMode("edit")}
-              >
-                Edit
-              </button>
-              <button
-                className={`transport-tab ${runtimeState.mode === "playback" ? "is-active" : ""}`}
-                onClick={() => runtimeActions.setMode("playback")}
-              >
-                Playback
-              </button>
-            </div>
-          </div>
-          <div className="transport-group">
-            <div className="transport-label">Seed</div>
-            <input
-              className="input input-compact"
-              type="number"
-              value={runtimeState.seed}
-              onChange={(event) => runtimeActions.setSeed(Number(event.target.value))}
-            />
-          </div>
-          <div className="transport-group transport-time">
-            <button
-              type="button"
-              className={`btn btn-ghost btn-xs ${runtimeState.isPlaying ? "is-active" : ""}`}
-              onClick={() => runtimeActions.togglePlay()}
-              disabled={runtimeState.mode !== "playback"}
-            >
-              {runtimeState.isPlaying ? "Pause" : "Play"}
-            </button>
-            <input
-              className="transport-scrub"
-              type="range"
-              min={0}
-              max={timeMax}
-              step={0.1}
-              value={runtimeState.timeSec}
-              onChange={(event) => runtimeActions.setTimeSec(Number(event.target.value))}
-            />
-            <div className="transport-time-readout">{timeDisplay}</div>
-            <select
-              className="select select-compact"
-              value={runtimeState.timeRate}
-              onChange={(event) => runtimeActions.setTimeRate(Number(event.target.value) as any)}
-              disabled={runtimeState.mode !== "playback"}
-            >
-              {[0.25, 0.5, 1, 2].map((rate) => (
-                <option key={rate} value={rate}>
-                  {rate}×
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="transport-group">
-            <div className="transport-label">Docstep</div>
-            <div className="transport-stepper">
-              <button
-                type="button"
-                className="btn btn-ghost btn-xs"
-                onClick={() => runtimeActions.setDocstep(runtimeState.docstep - 1)}
-              >
-                −
-              </button>
-              <input
-                className="input input-compact"
-                type="number"
-                value={runtimeState.docstep}
-                onChange={(event) => runtimeActions.setDocstep(Number(event.target.value))}
-              />
-              <button
-                type="button"
-                className="btn btn-ghost btn-xs"
-                onClick={() => runtimeActions.setDocstep(runtimeState.docstep + 1)}
-              >
-                +
-              </button>
-            </div>
-            <label className="transport-toggle-inline">
-              <input
-                type="checkbox"
-                checked={runtimeState.autoDocstep}
-                onChange={(event) => runtimeActions.setAutoDocstep(event.target.checked)}
-              />
-              Auto
-            </label>
-          </div>
-          <div className="transport-group">
-            <label className="transport-toggle-inline">
-              <input
-                type="checkbox"
-                checked={runtimeState.reducedMotion}
-                onChange={(event) => runtimeActions.setReducedMotion(event.target.checked)}
-              />
-              Reduced motion
-            </label>
-          </div>
-        </div>
+        ) : null}
 
         <main className="editor-body">
-            <OutlinePane className="editor-pane outline-pane" style={{ width: outlineWidth }}>
-              <div className="pane-header">
-                <div className="pane-heading">
-                  <div className="pane-title">Outline</div>
-                  <div className="pane-breadcrumb">{breadcrumbLabel}</div>
-                </div>
-                <div className="pane-actions">
-                  <button className="btn btn-ghost btn-xs" onClick={() => setAssetPanelOpen((open) => !open)}>
-                    {assetPanelOpen ? "Hide Assets" : "Assets"}
-                  </button>
-                </div>
-              </div>
-              <div className="pane-search">
-                <input
-                  className="input input-quiet"
-                  value={outlineQuery}
-                  onChange={(event) => setOutlineQuery(event.target.value)}
-                  placeholder="Filter outline…"
-                />
-              </div>
-              <div className="pane-body scroll">
-                {filteredOutline.length ? (
-                  <OutlineTree
-                    nodes={filteredOutline}
-                    selectedId={selectedId}
-                    draggingAsset={draggingAsset}
-                    draggingOutlineId={draggingOutlineId}
-                    onSelect={selectNode}
-                  />
-                ) : (
-                  <div className="empty">{outlineQuery ? "No matches." : "No outline data."}</div>
-                )}
-              </div>
-              {assetPanelOpen ? (
-                <>
-                  <DividerHairline />
-                  <div className="pane-header pane-header-sub">
-                    <div className="pane-title">Asset Bank</div>
+            {outlineVisible ? (
+              <>
+                <OutlinePane className="editor-pane outline-pane" style={{ width: outlineWidth }}>
+                  <div className="pane-header">
+                    <div className="pane-heading">
+                      <div className="pane-title">Outline</div>
+                      <div className="pane-breadcrumb">{breadcrumbLabel}</div>
+                    </div>
+                    <div className="pane-actions">
+                      <button className="btn btn-ghost btn-xs" onClick={() => setAssetPanelOpen((open) => !open)}>
+                        {assetPanelOpen ? "Hide Assets" : "Assets"}
+                      </button>
+                    </div>
                   </div>
-                  <div className="pane-body scroll asset-body">
-                    <AssetBrowser assets={doc?.assetsIndex ?? []} />
+                  <div className="pane-search">
+                    <input
+                      className="input input-quiet"
+                      value={outlineQuery}
+                      onChange={(event) => setOutlineQuery(event.target.value)}
+                      placeholder="Filter outline…"
+                    />
                   </div>
-                </>
-              ) : null}
-            </OutlinePane>
+                  <div className="pane-body scroll">
+                    {filteredOutline.length ? (
+                      <OutlineTree
+                        nodes={filteredOutline}
+                        selectedId={selectedId}
+                        draggingAsset={draggingAsset}
+                        draggingOutlineId={draggingOutlineId}
+                        onSelect={selectNode}
+                      />
+                    ) : (
+                      <div className="empty">{outlineQuery ? "No matches." : "No outline data."}</div>
+                    )}
+                  </div>
+                  {assetPanelOpen ? (
+                    <>
+                      <DividerHairline />
+                      <div className="pane-header pane-header-sub">
+                        <div className="pane-title">Asset Bank</div>
+                      </div>
+                      <div className="pane-body scroll asset-body">
+                        <AssetBrowser assets={doc?.assetsIndex ?? []} />
+                      </div>
+                    </>
+                  ) : null}
+                </OutlinePane>
 
-            <div
-              className="pane-resizer"
-              role="separator"
-              aria-orientation="vertical"
-              onPointerDown={startResize("left")}
-            />
+                <div
+                  className="pane-resizer"
+                  role="separator"
+                  aria-orientation="vertical"
+                  onPointerDown={startResize("left")}
+                />
+              </>
+            ) : null}
 
             <PageStage>
               <div className="page-stage-inner">
@@ -1787,18 +1663,72 @@ export default function EditorApp() {
             ) : null}
           </main>
 
-          <StatusBar>
-            <div className="status-left">
-              <span className={`status-pill status-${saveStatus}`}>{renderSaveStatus(saveStatus, sourceDirty)}</span>
-              {doc?.docPath ? <span className="status-path">{doc.docPath}</span> : null}
-            </div>
-            <div className="status-right">
-              <span>Diagnostics</span>
-              <span className="diag pass">Pass {diagnosticsSummary.pass}</span>
-              <span className="diag warn">Warn {diagnosticsSummary.warn}</span>
-              <span className="diag fail">Fail {diagnosticsSummary.fail}</span>
-            </div>
-          </StatusBar>
+          {diagnosticsOpen ? (
+            <ModalShell title="Diagnostics" onClose={() => setDiagnosticsOpen(false)}>
+              {diagnosticsItems.length ? (
+                <div className="diagnostics-list">
+                  {diagnosticsItems.map((item, index) => (
+                    <div key={`${item.level}-${index}`} className={`diagnostics-item diagnostics-${item.level}`}>
+                      <div className="diagnostics-kind">{item.level.toUpperCase()}</div>
+                      <div className="diagnostics-message">{item.message}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="diagnostics-empty">No diagnostics reported.</div>
+              )}
+            </ModalShell>
+          ) : null}
+
+          {aboutOpen ? (
+            <ModalShell title="About Flux Editor" onClose={() => setAboutOpen(false)}>
+              <div className="modal-body">
+                <p>Flux Editor for authoring Flux documents.</p>
+                <div className="modal-meta">{buildInfoLabel}</div>
+              </div>
+            </ModalShell>
+          ) : null}
+
+          {docSettingsOpen ? (
+            <ModalShell title="Document Settings" onClose={() => setDocSettingsOpen(false)}>
+              <div className="modal-body">
+                <div className="settings-row">
+                  <span>Filename</span>
+                  <span>{getFileName(doc?.docPath)}</span>
+                </div>
+                <div className="settings-row">
+                  <span>Title</span>
+                  <span>{doc?.title ?? "Flux Document"}</span>
+                </div>
+                <div className="settings-row">
+                  <span>Revision</span>
+                  <span>{doc?.revision != null ? `rev ${doc.revision}` : "—"}</span>
+                </div>
+                <div className="settings-row">
+                  <span>Preview Path</span>
+                  <span>{doc?.previewPath ?? "—"}</span>
+                </div>
+              </div>
+            </ModalShell>
+          ) : null}
+
+          {buildInfoOpen ? (
+            <ModalShell title="Version / Build Info" onClose={() => setBuildInfoOpen(false)}>
+              <div className="modal-body">
+                <div className="settings-row">
+                  <span>Build</span>
+                  <span>{buildInfo.id ?? "—"}</span>
+                </div>
+                <div className="settings-row">
+                  <span>Distribution</span>
+                  <span>{buildInfo.dist ?? "—"}</span>
+                </div>
+                <button type="button" className="btn btn-ghost btn-xs" onClick={handleCopyBuildInfo}>
+                  Copy Build Info
+                </button>
+              </div>
+            </ModalShell>
+          ) : null}
 
           {toast ? <div className={`toast toast-${toast.kind}`}>{toast.message}</div> : null}
 
@@ -1864,55 +1794,11 @@ export default function EditorApp() {
             </div>
           ) : null}
 
-          {overflowOpen ? (
-            <div className="modal-layer" aria-hidden={!overflowOpen}>
-              <div className="modal-scrim" onClick={() => setOverflowOpen(false)} />
-              <div className="modal-panel overflow-panel" role="dialog" aria-modal="true">
-                <div className="modal-header">
-                  <span className="modal-title">Display</span>
-                  <button className="btn btn-ghost btn-icon" onClick={() => setOverflowOpen(false)}>
-                    ✕
-                  </button>
-                </div>
-                <div className="overflow-list">
-                  <button
-                    className={`overflow-item ${debugSlots ? "is-active" : ""}`}
-                    onClick={() => setDebugSlots((prev) => !prev)}
-                  >
-                    Slot outlines
-                    <span>{debugSlots ? "On" : "Off"}</span>
-                  </button>
-                  <button
-                    className={`overflow-item ${inspectorVisible ? "is-active" : ""}`}
-                    onClick={() => setInspectorVisible((prev) => !prev)}
-                  >
-                    Inspector pane
-                    <span>{inspectorVisible ? "On" : "Off"}</span>
-                  </button>
-                  <button
-                    className={`overflow-item ${showIds ? "is-active" : ""}`}
-                    onClick={() => setShowIds((prev) => !prev)}
-                  >
-                    Show IDs
-                    <span>{showIds ? "On" : "Off"}</span>
-                  </button>
-                  <div className="overflow-item is-disabled" aria-disabled="true">
-                    Patch log
-                    <span>Coming soon</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
           {paletteOpen ? (
             <CommandPalette
               open={paletteOpen}
               onOpenChange={setPaletteOpen}
-              insertItems={commandItems.insertItems}
-              wrapItems={commandItems.wrapItems}
-              headingItems={commandItems.headingItems}
-              utilityItems={commandItems.utilityItems}
+              commands={paletteCommands}
             />
           ) : null}
       </EditorFrame>
@@ -3309,18 +3195,19 @@ function ImageFrameInspector({
 function CommandPalette({
   open,
   onOpenChange,
-  insertItems,
-  wrapItems,
-  headingItems,
-  utilityItems,
+  commands,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  insertItems: { id: string; label: string; action: () => void }[];
-  wrapItems: { id: string; label: string; action: () => void }[];
-  headingItems: { id: string; label: string; action: () => void }[];
-  utilityItems: { id: string; label: string; action: () => void }[];
+  commands: EditorCommand[];
 }) {
+  const groups = commands.reduce<Record<string, EditorCommand[]>>((acc, command) => {
+    const group = command.group ?? "Commands";
+    if (!acc[group]) acc[group] = [];
+    acc[group].push(command);
+    return acc;
+  }, {});
+
   return (
     <Command.Dialog
       className="command-root"
@@ -3331,62 +3218,50 @@ function CommandPalette({
     >
       <Command.Input className="command-input" placeholder="Type a command…" />
       <Command.List className="command-list">
-        <Command.Group heading="Insert">
-          {insertItems.map((item) => (
-            <Command.Item
-              key={item.id}
-              onSelect={() => {
-                item.action();
-                onOpenChange(false);
-              }}
-            >
-              {item.label}
-            </Command.Item>
-          ))}
-        </Command.Group>
-        <Command.Group heading="Wrap">
-          {wrapItems.map((item) => (
-            <Command.Item
-              key={item.id}
-              onSelect={() => {
-                item.action();
-                onOpenChange(false);
-              }}
-            >
-              {item.label}
-            </Command.Item>
-          ))}
-        </Command.Group>
-        {headingItems.length ? (
-          <Command.Group heading="Go to">
-            {headingItems.map((item) => (
+        {Object.entries(groups).map(([group, items]) => (
+          <Command.Group key={group} heading={group}>
+            {items.map((item) => (
               <Command.Item
                 key={item.id}
+                value={`${item.label} ${item.shortcut ?? ""}`}
                 onSelect={() => {
-                  item.action();
+                  item.run();
                   onOpenChange(false);
                 }}
               >
-                {item.label}
+                <span>{item.label}</span>
+                {item.shortcut ? <span className="command-shortcut">{item.shortcut}</span> : null}
               </Command.Item>
             ))}
           </Command.Group>
-        ) : null}
-        <Command.Group heading="Utilities">
-          {utilityItems.map((item) => (
-            <Command.Item
-              key={item.id}
-              onSelect={() => {
-                item.action();
-                onOpenChange(false);
-              }}
-            >
-              {item.label}
-            </Command.Item>
-          ))}
-        </Command.Group>
+        ))}
       </Command.List>
     </Command.Dialog>
+  );
+}
+
+function ModalShell({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="modal-layer" aria-hidden={false}>
+      <div className="modal-scrim" onClick={onClose} />
+      <div className="modal-panel" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-header">
+          <span className="modal-title">{title}</span>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -3991,6 +3866,26 @@ function getStoredWidth(key: "outline" | "inspector", fallback: number) {
   const raw = window.localStorage.getItem(`flux-editor-${key}-width`);
   const value = raw ? Number(raw) : NaN;
   return Number.isFinite(value) ? value : fallback;
+}
+
+function getStoredStatusBar() {
+  if (typeof window === "undefined") return true;
+  const raw = window.localStorage.getItem("flux.editor.showStatusBar");
+  if (raw === null) return true;
+  return raw === "1";
+}
+
+function getFileName(path?: string | null) {
+  if (!path) return "doc.flux";
+  const parts = path.split("/");
+  return parts[parts.length - 1] || "doc.flux";
+}
+
+function getConnectionLabel() {
+  if (typeof window === "undefined") return "Local";
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1") return "Local";
+  return "Remote";
 }
 
 function clamp(value: number, min: number, max: number) {
