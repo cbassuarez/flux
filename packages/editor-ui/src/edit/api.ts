@@ -15,6 +15,7 @@ export type TransformRequest = {
   args: Record<string, unknown>;
   file?: string;
   clientRevision?: number;
+  writeId?: string;
 };
 
 export class ApiError extends Error {
@@ -91,7 +92,7 @@ export async function fetchEditNode(id: string): Promise<unknown> {
 }
 
 export async function postTransform(request: TransformRequest): Promise<unknown> {
-  return fetchJson<unknown>("/api/edit/transform", {
+  return fetchJson<unknown>(withFileParam("/api/edit/transform"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
