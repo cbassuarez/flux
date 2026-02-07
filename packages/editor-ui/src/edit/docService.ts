@@ -805,6 +805,25 @@ function stripLocDeep(node: unknown): unknown {
   return next;
 }
 
+function normalizeVariantChooseNull(generator: unknown): unknown {
+  if (!generator || typeof generator !== "object") return generator;
+  const record = generator as Record<string, any>;
+  if (record.kind !== "ExpressionValue") return generator;
+  const expr = record.expr;
+  if (!expr || typeof expr !== "object" || expr.kind !== "CallExpression") return generator;
+  const callee = expr.callee;
+  if (!callee || typeof callee !== "object") return generator;
+  if (callee.kind !== "Identifier" || callee.name !== "choose") return generator;
+  const args = Array.isArray(expr.args) ? expr.args : null;
+  if (!args || args.length < 1) return generator;
+  const firstArg = args[0];
+  if (!firstArg || typeof firstArg !== "object") return generator;
+  if (firstArg.kind !== "Literal" || firstArg.value !== "null") return generator;
+  const nextArgs = [...args];
+  nextArgs[0] = { ...firstArg, value: null };
+  return { ...record, expr: { ...expr, args: nextArgs } };
+}
+
 function makeReplaceNodeRequest(id: string, node: DocumentNode): TransformRequest {
   return { op: "replaceNode", args: { id, node: stripLocDeep(node) as DocumentNode } };
 }
@@ -879,15 +898,16 @@ function buildTransformRequest(transform: EditorTransform | TransformRequest, do
     return { request, fallback };
   }
   if (transform.type === "setSlotGenerator") {
+    const normalizedGenerator = normalizeVariantChooseNull(transform.generator) as Record<string, unknown>;
     const request: TransformRequest = {
       op: "setSlotGenerator",
       args: {
         id: transform.id,
         slotId: transform.id,
-        generator: transform.generator,
+        generator: normalizedGenerator,
       },
     };
-    const fallback = buildSlotGeneratorFallback(transform, doc);
+    const fallback = buildSlotGeneratorFallback({ ...transform, generator: normalizedGenerator }, doc);
     if (fallback) {
       return { request: fallback, fallback: request };
     }
@@ -968,14 +988,15 @@ function buildSlotGeneratorFallback(
   const entry = doc.index.get(transform.id);
   if (!entry) return undefined;
   if (entry.node.kind !== "inline_slot" && entry.node.kind !== "slot") return undefined;
+  const normalizedGenerator = normalizeVariantChooseNull(transform.generator);
   const nextProps: Record<string, any> = { ...(entry.node.props ?? {}) };
-  nextProps.generator = transform.generator as any;
+  nextProps.generator = normalizedGenerator as any;
   const nextNode: DocumentNode & Record<string, any> = {
     ...entry.node,
     props: nextProps,
   };
   if ("generator" in (entry.node as any)) {
-    (nextNode as any).generator = transform.generator;
+    (nextNode as any).generator = normalizedGenerator;
   }
   return makeReplaceNodeRequest(transform.id, nextNode);
 }

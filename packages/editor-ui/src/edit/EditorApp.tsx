@@ -3722,15 +3722,20 @@ function coerceVariantValue(value: any): string | null {
   return String(value ?? "");
 }
 
+function normalizeVariantLiteralValue(value: string | null): string | null {
+  if (value === "null") return null;
+  return value;
+}
+
 function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
   if (spec.kind === "literal") {
-    return { kind: "Literal", value: spec.value };
+    return { kind: "Literal", value: normalizeVariantLiteralValue(spec.value) };
   }
   if (spec.kind === "choose" || spec.kind === "cycle") {
     return {
       kind: "CallExpression",
       callee: { kind: "Identifier", name: spec.kind },
-      args: spec.values.map((value) => ({ kind: "Literal", value })),
+      args: spec.values.map((value) => ({ kind: "Literal", value: normalizeVariantLiteralValue(value) })),
     };
   }
   if (spec.kind === "assetsPick") {
@@ -3757,7 +3762,7 @@ function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
       callee: { kind: "Identifier", name: "at" },
       args: [
         ...spec.times.map((time) => ({ kind: "Literal", value: time })),
-        ...spec.values.map((value) => ({ kind: "Literal", value })),
+        ...spec.values.map((value) => ({ kind: "Literal", value: normalizeVariantLiteralValue(value) })),
       ],
     };
   }
@@ -3767,7 +3772,7 @@ function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
       callee: { kind: "Identifier", name: "every" },
       args: [
         { kind: "Literal", value: spec.amount },
-        ...(spec.values ?? []).map((value) => ({ kind: "Literal", value })),
+        ...(spec.values ?? []).map((value) => ({ kind: "Literal", value: normalizeVariantLiteralValue(value) })),
       ],
     };
   }
