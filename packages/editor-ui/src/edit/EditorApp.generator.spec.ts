@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGeneratorExpr, wrapExpressionValue } from "./EditorApp";
+import { buildGeneratorExpr, wrapExpressionValue } from "./generatorUtils";
 import type { SlotGeneratorSpec } from "./slotRuntime";
 
 describe("slot generator expression", () => {
