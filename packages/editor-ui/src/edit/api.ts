@@ -131,7 +131,7 @@ export async function postTransform(request: TransformRequest): Promise<unknown>
   const file = getFileParam();
   const body = file && !request.file ? { ...request, file } : request;
   try {
-    return await fetchJson<unknown>(withFileParam("/api/edit/transform"), {
+    const response = await fetch(withFileParam("/api/edit/transform"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -139,6 +139,28 @@ export async function postTransform(request: TransformRequest): Promise<unknown>
       body: JSON.stringify(body),
       signal: controller.signal
     });
+    const payload = await parseBody(response);
+    if (response.ok) {
+      if (response.status !== 204) {
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.includes("application/json")) {
+          throw new ApiError(502, `Expected JSON but got ${contentType || "unknown content-type"}`, payload);
+        }
+      }
+      if (payload && typeof payload === "object") {
+        (payload as Record<string, unknown>)._fluxBefore = response.headers.get("x-flux-edit-before");
+        (payload as Record<string, unknown>)._fluxAfter = response.headers.get("x-flux-edit-after");
+        (payload as Record<string, unknown>)._status = response.status;
+      }
+      return payload as unknown;
+    }
+    const message =
+      (typeof payload === "object" && payload && "message" in payload && typeof (payload as any).message === "string"
+        ? (payload as any).message
+        : typeof payload === "string" && payload
+          ? payload
+          : `Request failed (${response.status})`);
+    throw new ApiError(response.status, message, payload);
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new RequestTimeoutError("Transform request timed out");
