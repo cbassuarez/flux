@@ -5,6 +5,35 @@ export function normalizeVariantLiteralValue(value: string | null): string | nul
   return value;
 }
 
+export function makeVariantPlaceholder(values: Array<string | null>, nextIndex: number): string {
+  const base = `variant_${nextIndex + 1}`;
+  let candidate = base;
+  let suffix = 2;
+  while (values.includes(candidate)) {
+    candidate = `${base}_${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+export function promoteVariants(
+  baseSpec: SlotGeneratorSpec | null | undefined,
+  variants: Array<string | null>,
+): { nextSpec: SlotGeneratorSpec; nextVariants: Array<string | null> } | null {
+  if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
+    const placeholder = makeVariantPlaceholder(variants, variants.length);
+    const nextVariants = [...variants, placeholder];
+    return { nextSpec: { ...baseSpec, values: nextVariants }, nextVariants };
+  }
+  if (!baseSpec || baseSpec.kind === "literal") {
+    const literalValue = baseSpec?.kind === "literal" ? (baseSpec.value ?? null) : null;
+    const placeholder = makeVariantPlaceholder([literalValue], 1);
+    const nextVariants = [literalValue, placeholder];
+    return { nextSpec: { kind: "choose", values: nextVariants }, nextVariants };
+  }
+  return null;
+}
+
 export function isChooseCycleSpec(
   spec: SlotGeneratorSpec | null | undefined,
 ): spec is Extract<SlotGeneratorSpec, { kind: "choose" | "cycle" }> {
