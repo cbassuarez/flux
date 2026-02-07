@@ -178,6 +178,58 @@ describe("docService transform requests", () => {
     expect(postTransformMock.mock.calls[1][0]?.op).toBe("replaceNode");
   });
 
+  it("preserves null literals in slot generator retries", async () => {
+    const service = createDocService();
+    await service.loadDoc();
+
+    postTransformMock
+      .mockResolvedValueOnce({
+        ok: true,
+        source: baseSource,
+        doc: baseDoc,
+        revision: 2,
+        _fluxBefore: "a",
+        _fluxAfter: "a",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        source: baseSource,
+        doc: baseDoc,
+        revision: 3,
+        _fluxBefore: "a",
+        _fluxAfter: "b",
+      });
+
+    const generator = {
+      kind: "ExpressionValue",
+      expr: {
+        kind: "CallExpression",
+        callee: { kind: "Identifier", name: "choose" },
+        args: [
+          { kind: "Literal", value: null },
+          { kind: "Literal", value: "" },
+        ],
+      },
+    };
+
+    await service.applyTransform({
+      type: "setSlotGenerator",
+      id: "s1",
+      generator,
+    });
+
+    expect(postTransformMock).toHaveBeenCalledTimes(2);
+    const retryRequest = postTransformMock.mock.calls[1][0] as any;
+    const retryArgs = retryRequest?.args ?? {};
+    const retryGenerator =
+      retryArgs.generator ?? retryArgs.node?.props?.generator ?? retryArgs.node?.generator ?? retryArgs.node?.props?.source;
+    const expr = retryGenerator?.expr ?? retryGenerator?.expression ?? retryGenerator?.value ?? retryGenerator;
+    expect(expr.kind).toBe("CallExpression");
+    expect(expr.callee?.name).toBe("choose");
+    expect(expr.args?.[0]).toMatchObject({ kind: "Literal", value: null });
+    expect(expr.args?.[1]).toMatchObject({ kind: "Literal", value: "" });
+  });
+
   it("adopts newRevision as doc.revision after hydration", async () => {
     const service = createDocService();
     await service.loadDoc();

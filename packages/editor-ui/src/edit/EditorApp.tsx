@@ -2319,7 +2319,7 @@ function SlotInspector({
   const baseSpec = program.spec;
   const refreshPolicy = (node as any).refresh as RefreshPolicy | undefined;
   const transitionPolicy = (node as any).transition as SlotTransitionSpec | undefined;
-  const [variants, setVariants] = useState<string[]>(() => {
+  const [variants, setVariants] = useState<Array<string | null>>(() => {
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") return [...baseSpec.values];
     if (baseSpec?.kind === "literal") return [baseSpec.value];
     return [];
@@ -2642,7 +2642,7 @@ function SlotInspector({
                     <input
                       className="input"
                       data-testid={`inspector-field:slot-variant-${index}`}
-                      value={value}
+                      value={value ?? ""}
                       onFocus={handleFocus}
                       onBlur={handleBlur}
                       onChange={(event) => handleVariantChange(index, event.target.value)}
@@ -3590,10 +3590,10 @@ function unwrapExpression(value: any): any {
 function parseGeneratorSpec(expr: any): SlotGeneratorSpec | null {
   if (!expr) return null;
   if (expr.kind === "choose" && Array.isArray(expr.values)) {
-    return { kind: "choose", values: expr.values.map((value: any) => String(value)) };
+    return { kind: "choose", values: expr.values.map((value: any) => coerceVariantValue(value)) };
   }
   if (expr.kind === "cycle" && Array.isArray(expr.values)) {
-    return { kind: "cycle", values: expr.values.map((value: any) => String(value)) };
+    return { kind: "cycle", values: expr.values.map((value: any) => coerceVariantValue(value)) };
   }
   if (expr.kind === "assetsPick" && Array.isArray(expr.tags)) {
     return { kind: "assetsPick", tags: expr.tags.map((tag: any) => String(tag)), bank: expr.bank };
@@ -3602,17 +3602,17 @@ function parseGeneratorSpec(expr: any): SlotGeneratorSpec | null {
     return { kind: "poisson", ratePerSec: expr.ratePerSec };
   }
   if (expr.kind === "literal" && "value" in expr) {
-    return { kind: "literal", value: String(expr.value ?? "") };
+    return { kind: "literal", value: coerceVariantValue(expr.value) };
   }
   if (expr.kind === "Literal") {
-    return { kind: "literal", value: String(expr.value ?? "") };
+    return { kind: "literal", value: coerceVariantValue(expr.value) };
   }
   if (expr.kind === "CallExpression") {
     const callee = getCalleeName(expr.callee);
     const args = Array.isArray(expr.args) ? expr.args : [];
     if (!callee) return { kind: "unknown", summary: "call" };
     if (callee === "choose" || callee === "cycle") {
-      const values = extractStringList(args);
+      const values = extractVariantList(args);
       return { kind: callee, values };
     }
     if (callee === "poisson") {
@@ -3662,6 +3662,17 @@ function extractStringList(args: any[]): string[] {
   return args.map((arg) => readStringLiteral(arg)).filter((value): value is string => typeof value === "string");
 }
 
+function extractVariantList(args: any[]): Array<string | null> {
+  if (!args.length) return [];
+  if (args.length === 1) {
+    const literalArray = readVariantArrayLiteral(args[0]);
+    if (literalArray.length) return literalArray;
+  }
+  return args
+    .map((arg) => readVariantLiteral(arg))
+    .filter((value): value is string | null => value !== undefined);
+}
+
 function extractNumberList(args: any[]): number[] {
   return args.map((arg) => readNumberLiteral(arg)).filter((value): value is number => typeof value === "number");
 }
@@ -3674,12 +3685,26 @@ function readArrayLiteral(expr: any): string[] {
   return [];
 }
 
+function readVariantArrayLiteral(expr: any): Array<string | null> {
+  if (!expr) return [];
+  if (expr.kind === "Literal" && Array.isArray(expr.value)) {
+    return expr.value.map((value: any) => coerceVariantValue(value));
+  }
+  return [];
+}
+
 function readStringLiteral(expr: any): string | null {
   if (!expr) return null;
   if (expr.kind === "Literal" && (typeof expr.value === "string" || typeof expr.value === "number")) {
     return String(expr.value);
   }
   return null;
+}
+
+function readVariantLiteral(expr: any): string | null | undefined {
+  if (!expr) return undefined;
+  if (expr.kind === "Literal") return coerceVariantValue(expr.value);
+  return undefined;
 }
 
 function readNumberLiteral(expr: any): number | null {
@@ -3690,6 +3715,11 @@ function readNumberLiteral(expr: any): number | null {
     return Number.isNaN(parsed) ? null : parsed;
   }
   return null;
+}
+
+function coerceVariantValue(value: any): string | null {
+  if (value === null) return null;
+  return String(value ?? "");
 }
 
 function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
