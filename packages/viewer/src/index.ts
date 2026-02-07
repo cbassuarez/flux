@@ -724,27 +724,34 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
         const responseTimeout = setTimeout(() => {
           if (res.headersSent || res.writableEnded) return;
           logEvent("response timeout");
-          res.writeHead(504, { "Content-Type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ ok: false, error: "Transform response timed out" }));
+          sendJson(
+            res,
+            {
+              ok: false,
+              error: "Transform response timed out",
+              diagnostics: buildDiagnosticsBundle([
+                buildDiagnosticFromMessage("Transform response timed out", currentSource, docPath, "fail"),
+              ]),
+            },
+            buildHeaders,
+          );
         }, 10000);
         try {
           logEvent("before body parse");
-          const payload = normalizeEditTransformPayload(await readJson(req, { timeoutMs: 9000 })) as
+          const rawPayload = (await readJson(req, { timeoutMs: 9000 })) as
             | Record<string, any>
             | null;
           logEvent("after body parse");
-          const op = payload?.op;
-          const args = payload?.args ?? {};
 
-        const source = await fs.readFile(docPath, "utf8");
-        const beforeHash = crypto.createHash("sha1").update(source).digest("hex").slice(0, 12);
-        const buildEditHeaders = (applied: boolean, afterHash: string, error?: string) => ({
-          ...buildHeaders,
-          "X-Flux-Edit-Applied": applied ? "1" : "0",
-          "X-Flux-Edit-Before": beforeHash,
-          "X-Flux-Edit-After": afterHash,
-          ...(error ? { "X-Flux-Edit-Error": error } : {}),
-        });
+          const source = await fs.readFile(docPath, "utf8");
+          const beforeHash = crypto.createHash("sha1").update(source).digest("hex").slice(0, 12);
+          const buildEditHeaders = (applied: boolean, afterHash: string, error?: string) => ({
+            ...buildHeaders,
+            "X-Flux-Edit-Applied": applied ? "1" : "0",
+            "X-Flux-Edit-Before": beforeHash,
+            "X-Flux-Edit-After": afterHash,
+            ...(error ? { "X-Flux-Edit-Error": error } : {}),
+          });
           const sendTransform = (payload: unknown, options: { applied: boolean; afterHash?: string; error?: string }) => {
             if (res.writableEnded) {
               logEvent("response already ended");
@@ -754,6 +761,18 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
             logEvent("sending response", { applied: options.applied, error: options.error });
             sendJson(res, payload, buildEditHeaders(options.applied, afterHash, options.error));
           };
+          const normalized = normalizeEditTransformPayload(rawPayload, source, docPath);
+          if (normalized.diagnostics.length) {
+            const primary = normalized.diagnostics[0]?.message ?? "Invalid transform payload";
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle(normalized.diagnostics), error: primary },
+              { applied: false, error: primary },
+            );
+            return;
+          }
+          const payload = normalized.payload;
+          const op = payload?.op;
+          const args = payload?.args ?? {};
           const parsed = parseSource(source);
           if (!parsed.doc || parsed.errors.length) {
             sendTransform({
@@ -873,7 +892,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           nextSource = formatFluxSource(result.source);
           selectedId = id;
         } else if (op === "setSlotGenerator") {
-          const id = typeof args.id === "string" ? args.id : "";
+          const id = typeof args.id === "string" ? args.id : typeof args.slotId === "string" ? args.slotId : "";
           const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
           if (!node) {
             sendTransform(
@@ -883,7 +902,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
             return;
           }
           const nextProps: Record<string, any> = { ...(node.props ?? {}) };
-          nextProps.generator = args.generator;
+          nextProps.generator = args.generator === null ? wrapLiteral(null) : args.generator;
           const merged: DocumentNode = { ...node, props: nextProps };
           const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
           if (!result.ok) {
@@ -1025,11 +1044,17 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
         } catch (err) {
           const error = err as Error;
           if (!res.headersSent && !res.writableEnded) {
-            const status = err instanceof ReadJsonError ? err.status : 500;
             const message = err instanceof ReadJsonError ? err.message : "Transform request failed";
-            logEvent("handler error", { status, error: String(error?.message ?? error) });
-            res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-            res.end(JSON.stringify({ ok: false, error: message }));
+            logEvent("handler error", { error: String(error?.message ?? error) });
+            sendJson(
+              res,
+              {
+                ok: false,
+                error: message,
+                diagnostics: buildDiagnosticsBundle([buildDiagnosticFromMessage(message, currentSource, docPath, "fail")]),
+              },
+              buildHeaders,
+            );
           } else {
             logEvent("handler error after headers", { error: String(error?.message ?? error) });
           }
@@ -2668,67 +2693,225 @@ function findNodeById(nodes: DocumentNode[], id: string): DocumentNode | null {
   return null;
 }
 
-function normalizeEditTransformPayload(payload: unknown): unknown {
-  if (!payload || typeof payload !== "object") return payload;
-  const record = payload as Record<string, unknown>;
-  if (typeof record.op !== "string" || !record.args || typeof record.args !== "object") return payload;
-  const args = { ...(record.args as Record<string, unknown>) };
+type CanonicalDynamicValue = Extract<NodePropValue, { kind: "DynamicValue" }>;
 
+function normalizeEditTransformPayload(
+  payload: unknown,
+  source: string,
+  docPath: string,
+): { payload: Record<string, any> | null; diagnostics: EditDiagnostic[] } {
+  if (!payload || typeof payload !== "object") {
+    return {
+      payload: null,
+      diagnostics: [buildDiagnosticFromMessage("Invalid transform payload", source, docPath, "fail")],
+    };
+  }
+
+  const record = payload as Record<string, unknown>;
+  if (typeof record.op !== "string") {
+    return {
+      payload: null,
+      diagnostics: [buildDiagnosticFromMessage("Transform payload missing operation", source, docPath, "fail")],
+    };
+  }
+
+  const diagnostics: EditDiagnostic[] = [];
+  const args = record.args && typeof record.args === "object" ? { ...(record.args as Record<string, unknown>) } : {};
+  const normalizedRecord: Record<string, unknown> = { ...record, args };
+
+  // Canonical edit payload keys at the server boundary:
+  // - Generator wrapper kind: "DynamicValue"
+  // - Generator expression field: "expr"
+  // - Slot identity key: args.id (legacy args.slotId is accepted and copied to args.id)
   if (record.op === "setSlotGenerator") {
-    args.generator = normalizeSlotGeneratorValue(args.generator);
-    return { ...record, args };
+    const id = typeof args.id === "string" ? args.id : typeof args.slotId === "string" ? args.slotId : "";
+    if (id) {
+      args.id = id;
+      if (typeof args.slotId !== "string") args.slotId = id;
+    }
+    const coercion = coerceDynamicValue(args.generator, source, docPath, "setSlotGenerator.args.generator");
+    if (coercion.diagnostic) {
+      diagnostics.push(coercion.diagnostic);
+    } else {
+      args.generator = coercion.value;
+    }
+    return { payload: normalizedRecord as Record<string, any>, diagnostics };
   }
 
   if (record.op === "replaceNode") {
     const node = args.node;
     if (node && typeof node === "object") {
-      args.node = normalizeSlotGeneratorNode(node as DocumentNode);
-      return { ...record, args };
+      args.node = normalizeSlotGeneratorNode(node as DocumentNode, source, docPath, diagnostics);
     }
+    return { payload: normalizedRecord as Record<string, any>, diagnostics };
   }
 
-  return payload;
+  return { payload: normalizedRecord as Record<string, any>, diagnostics };
 }
 
-function normalizeSlotGeneratorNode(node: DocumentNode): DocumentNode {
+function normalizeSlotGeneratorNode(
+  node: DocumentNode,
+  source: string,
+  docPath: string,
+  diagnostics: EditDiagnostic[],
+): DocumentNode {
   const nodeRecord = node as unknown as Record<string, unknown>;
-  const nextNode: DocumentNode & Record<string, unknown> = {
-    ...(nodeRecord as DocumentNode & Record<string, unknown>),
-    props: normalizeSlotGeneratorProps(node.props ?? {}),
-    children: (node.children ?? []).map((child) => normalizeSlotGeneratorNode(child)),
+  let nextNode: (DocumentNode & Record<string, unknown>) | null = null;
+  const ensureNode = (): DocumentNode & Record<string, unknown> => {
+    if (!nextNode) nextNode = { ...(nodeRecord as DocumentNode & Record<string, unknown>) };
+    return nextNode;
   };
-  if ("generator" in nodeRecord) {
-    nextNode.generator = normalizeSlotGeneratorValue(nodeRecord.generator);
-  }
-  if ("source" in nodeRecord) {
-    nextNode.source = normalizeSlotGeneratorValue(nodeRecord.source);
-  }
-  return nextNode;
-}
+  const setPropsGenerator = (value: CanonicalDynamicValue | null): void => {
+    const target = ensureNode();
+    const baseProps =
+      target.props && typeof target.props === "object"
+        ? { ...(target.props as Record<string, unknown>) }
+        : nodeRecord.props && typeof nodeRecord.props === "object"
+          ? { ...(nodeRecord.props as Record<string, unknown>) }
+          : {};
+    baseProps.generator = value === null ? wrapLiteral(null) : value;
+    target.props = baseProps as Record<string, NodePropValue>;
+  };
 
-function normalizeSlotGeneratorProps(props: Record<string, NodePropValue>): Record<string, NodePropValue> {
-  const nextProps: Record<string, NodePropValue> = { ...props };
-  for (const key of ["generator", "source"]) {
-    if (!(key in nextProps)) continue;
-    nextProps[key] = normalizeSlotGeneratorValue(nextProps[key]) as NodePropValue;
-  }
-  return nextProps;
-}
-
-function normalizeSlotGeneratorValue(value: unknown): unknown {
-  if (!value || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
-  if (record.kind === "DynamicValue") {
-    if (record.expr !== undefined) return value;
-    if (record.expression !== undefined) {
-      return { ...record, expr: record.expression };
+  const propsRecord =
+    nodeRecord.props && typeof nodeRecord.props === "object" ? (nodeRecord.props as Record<string, unknown>) : null;
+  const hasPropsGenerator = Boolean(propsRecord && "generator" in propsRecord);
+  if (propsRecord && "generator" in propsRecord) {
+    const coercion = coerceDynamicValue(propsRecord.generator, source, docPath, "replaceNode.args.node.props.generator");
+    if (coercion.diagnostic) {
+      diagnostics.push(coercion.diagnostic);
+    } else {
+      setPropsGenerator(coercion.value);
     }
-    return value;
   }
-  if (record.kind !== "ExpressionValue" && record.kind !== "ExprValue") return value;
-  const expr = record.expr ?? record.expression ?? record.value;
-  if (!expr || typeof expr !== "object") return value;
-  return { kind: "DynamicValue", expr };
+
+  if ("generator" in nodeRecord && !hasPropsGenerator) {
+    const coercion = coerceDynamicValue(nodeRecord.generator, source, docPath, "replaceNode.args.node.generator");
+    if (coercion.diagnostic) {
+      diagnostics.push(coercion.diagnostic);
+    } else {
+      setPropsGenerator(coercion.value);
+      delete ensureNode().generator;
+    }
+  }
+
+  const children = node.children ?? [];
+  let nextChildren: DocumentNode[] | null = null;
+  for (let i = 0; i < children.length; i += 1) {
+    const child = children[i];
+    if (!child || typeof child !== "object") continue;
+    const normalizedChild = normalizeSlotGeneratorNode(child, source, docPath, diagnostics);
+    if (normalizedChild === child) continue;
+    if (!nextChildren) nextChildren = [...children];
+    nextChildren[i] = normalizedChild;
+  }
+  if (nextChildren) {
+    ensureNode().children = nextChildren;
+  }
+
+  return (nextNode ?? node) as DocumentNode;
+}
+
+function coerceDynamicValue(
+  input: unknown,
+  source: string,
+  docPath: string,
+  context: string,
+): { value: CanonicalDynamicValue | null; diagnostic: EditDiagnostic | null } {
+  if (input === null) return { value: null, diagnostic: null };
+
+  if (input === undefined) {
+    return {
+      value: null,
+      diagnostic: buildDiagnosticFromMessage(
+        `${context} is missing (expected DynamicValue or null).`,
+        source,
+        docPath,
+        "fail",
+      ),
+    };
+  }
+
+  const directExpr = asFluxExpr(input);
+  if (directExpr) {
+    return { value: { kind: "DynamicValue", expr: directExpr }, diagnostic: null };
+  }
+
+  if (!input || typeof input !== "object") {
+    return {
+      value: null,
+      diagnostic: buildDiagnosticFromMessage(
+        `${context} must be a dynamic expression payload.`,
+        source,
+        docPath,
+        "fail",
+      ),
+    };
+  }
+
+  const record = input as Record<string, unknown>;
+  const kind = typeof record.kind === "string" ? record.kind : "";
+  if (kind === "LiteralValue" && record.value === null) {
+    return { value: null, diagnostic: null };
+  }
+
+  if (kind === "DynamicValue" || kind === "ExpressionValue" || kind === "ExprValue") {
+    const exprCandidate = record.expr ?? record.expression ?? record.value;
+    const expr = asFluxExpr(exprCandidate);
+    if (!expr) {
+      return {
+        value: null,
+        diagnostic: buildDiagnosticFromMessage(
+          `${context} is missing an expression AST (expected expr, expression, or value).`,
+          source,
+          docPath,
+          "fail",
+        ),
+      };
+    }
+    return { value: { kind: "DynamicValue", expr }, diagnostic: null };
+  }
+
+  if ("expr" in record || "expression" in record || "value" in record) {
+    const exprCandidate = record.expr ?? record.expression ?? record.value;
+    const expr = asFluxExpr(exprCandidate);
+    if (!expr) {
+      return {
+        value: null,
+        diagnostic: buildDiagnosticFromMessage(
+          `${context} has no valid expression AST.`,
+          source,
+          docPath,
+          "fail",
+        ),
+      };
+    }
+    return { value: { kind: "DynamicValue", expr }, diagnostic: null };
+  }
+
+  return {
+    value: null,
+    diagnostic: buildDiagnosticFromMessage(
+      `${context} must be { kind: "DynamicValue", expr: <expression> } (legacy ExpressionValue/ExprValue accepted).`,
+      source,
+      docPath,
+      "fail",
+    ),
+  };
+}
+
+function asFluxExpr(value: unknown): FluxExpr | null {
+  if (!value || typeof value !== "object") return null;
+  const kind = (value as Record<string, unknown>).kind;
+  if (kind === "Literal") return value as FluxExpr;
+  if (kind === "Identifier") return value as FluxExpr;
+  if (kind === "ListExpression") return value as FluxExpr;
+  if (kind === "MemberExpression") return value as FluxExpr;
+  if (kind === "CallExpression") return value as FluxExpr;
+  if (kind === "NeighborsCallExpression") return value as FluxExpr;
+  if (kind === "UnaryExpression") return value as FluxExpr;
+  if (kind === "BinaryExpression") return value as FluxExpr;
+  return null;
 }
 
 function wrapLiteral(value: any): NodePropValue {

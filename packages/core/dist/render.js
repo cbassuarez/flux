@@ -1511,12 +1511,24 @@ function evalCallArgs(args, ctx) {
     }
     return { positional, named };
 }
+function resolveListArgument(positional, named, fnName) {
+    if (named.list !== undefined) {
+        if (!Array.isArray(named.list)) {
+            throw new Error(`${fnName}(list) expects a list`);
+        }
+        return { list: named.list, usedVariadic: false };
+    }
+    if (Array.isArray(positional[0])) {
+        return { list: positional[0], usedVariadic: false };
+    }
+    if (positional.length > 1) {
+        return { list: positional, usedVariadic: true };
+    }
+    throw new Error(`${fnName}(list) expects a list`);
+}
 function evalChoose(args, ctx) {
     const { positional, named } = evalCallArgs(args, ctx);
-    const list = (named.list ?? positional[0]);
-    if (!Array.isArray(list)) {
-        throw new Error("choose(list) expects a list");
-    }
+    const { list } = resolveListArgument(positional, named, "choose");
     if (list.length === 0)
         return null;
     const idx = Math.floor(ctx.rng() * list.length);
@@ -1538,13 +1550,10 @@ function evalChooseStep(args, ctx) {
 }
 function evalCycle(args, ctx) {
     const { positional, named } = evalCallArgs(args, ctx);
-    const list = (named.list ?? positional[0]);
-    if (!Array.isArray(list)) {
-        throw new Error("cycle(list, index) expects a list");
-    }
+    const { list, usedVariadic } = resolveListArgument(positional, named, "cycle");
     if (list.length === 0)
         return null;
-    const rawIndex = named.index ?? positional[1] ?? ctx.docstep;
+    const rawIndex = named.index ?? (usedVariadic ? undefined : positional[1]) ?? (named.list !== undefined ? positional[0] : undefined) ?? ctx.docstep;
     const indexValue = typeof rawIndex === "number" && Number.isFinite(rawIndex) ? rawIndex : 0;
     const idx = ((Math.floor(indexValue) % list.length) + list.length) % list.length;
     return list[idx];

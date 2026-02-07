@@ -206,7 +206,7 @@ describe("editor API transforms", () => {
       tmpDir,
       `
         document {
-          meta { version = "0.2.0"; }
+          meta { version = "0.3.0"; }
           body {
             page p1 {
               slot s1 {
@@ -227,6 +227,7 @@ describe("editor API transforms", () => {
           op: "setSlotGenerator",
           args: {
             id: "s1",
+            slotId: "s1",
             generator: {
               kind: "ExpressionValue",
               expression: {

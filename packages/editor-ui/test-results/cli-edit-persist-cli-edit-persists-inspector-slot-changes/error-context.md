@@ -1,0 +1,146 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - toolbar [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic [ref=e8]: cli-edit-doc.flux
+          - generic [ref=e9]: /var/folders/68/_bgz9y8x01l2_tf4889_jhdw0000gn/T/flux-cli-edit-e2e/cli-edit-doc.flux
+        - generic [ref=e12]: Saved ✓
+        - generic [ref=e13]:
+          - generic [ref=e14]: "doc: ready"
+          - generic [ref=e15]: "busy: false"
+          - generic [ref=e16]: "overlay: false"
+          - generic [ref=e17]: "focus: other"
+          - generic [ref=e18]: "selected: none"
+          - generic [ref=e19]: "mode: edit"
+      - generic [ref=e20]:
+        - generic [ref=e21]:
+          - button "Fit Width" [disabled] [ref=e22]
+          - button "100%" [disabled] [ref=e23]
+          - button "−" [disabled] [ref=e24]
+          - button "+" [disabled] [ref=e25]
+        - generic [ref=e27]:
+          - button "◀" [disabled] [ref=e28]
+          - generic [ref=e29]: 12 / 42
+          - button "▶" [disabled] [ref=e30]
+        - generic [ref=e32]:
+          - button "Preview" [ref=e33] [cursor=pointer]
+          - button "Edit Text" [ref=e34] [cursor=pointer]
+          - button "Source" [ref=e35] [cursor=pointer]
+      - generic [ref=e36]:
+        - generic "/Users/seb/flux/packages/editor-ui/dist" [ref=e37]:
+          - generic [ref=e38]: Editor
+          - generic [ref=e39]: editor-ca0b72719fe9
+        - button "Find" [ref=e40] [cursor=pointer]
+        - button "Commands" [ref=e41] [cursor=pointer]
+        - button "Show IDs" [ref=e42] [cursor=pointer]
+        - button "Export PDF" [ref=e43] [cursor=pointer]
+        - button "⋯" [ref=e44] [cursor=pointer]
+    - generic [ref=e45]:
+      - generic [ref=e46]:
+        - generic [ref=e47]: docRev 1
+        - generic [ref=e48]: sourceRev 1
+        - generic [ref=e49]: dirty false
+        - generic [ref=e50]: isSaving false
+        - generic [ref=e51]: isApplying false
+        - generic [ref=e52]: lastWriteId —
+        - generic [ref=e53]: lastLoadReason openDoc
+        - generic [ref=e54]: selected none
+        - generic [ref=e55]: activeEditor none
+      - generic [ref=e56]:
+        - generic [ref=e57]: Edit pipeline trace
+        - generic [ref=e58]:
+          - generic [ref=e59]:
+            - generic [ref=e60]: "1770499472195"
+            - generic [ref=e61]: FETCH_SOURCE_OK
+            - generic [ref=e62]: —
+            - generic [ref=e63]: clean
+            - generic [ref=e64]: —
+            - generic [ref=e65]: —
+            - generic [ref=e66]: 51dd8357
+            - generic [ref=e67]: "0"
+            - generic [ref=e68]: "1"
+            - generic [ref=e69]: —
+          - generic [ref=e70]:
+            - generic [ref=e71]: "1770499472196"
+            - generic [ref=e72]: CANON_SET
+            - generic [ref=e73]: —
+            - generic [ref=e74]: clean
+            - generic [ref=e75]: openDoc
+            - generic [ref=e76]: "00000000"
+            - generic [ref=e77]: 51dd8357
+            - generic [ref=e78]: "0"
+            - generic [ref=e79]: "1"
+            - generic [ref=e80]: —
+    - generic [ref=e81]:
+      - generic [ref=e82]:
+        - generic [ref=e83]: Mode
+        - generic [ref=e84]:
+          - button "Edit" [ref=e85] [cursor=pointer]
+          - button "Playback" [ref=e86] [cursor=pointer]
+      - generic [ref=e87]:
+        - generic [ref=e88]: Seed
+        - spinbutton [ref=e89]: "0"
+      - generic [ref=e90]:
+        - button "Play" [disabled] [ref=e91]
+        - slider [ref=e92]: "0"
+        - generic [ref=e93]: 0.0s
+        - combobox [disabled] [ref=e94]:
+          - option "0.25×"
+          - option "0.5×"
+          - option "1×" [selected]
+          - option "2×"
+      - generic [ref=e95]:
+        - generic [ref=e96]: Docstep
+        - generic [ref=e97]:
+          - button "−" [ref=e98] [cursor=pointer]
+          - spinbutton [ref=e99]: "0"
+          - button "+" [ref=e100] [cursor=pointer]
+        - generic [ref=e101]:
+          - checkbox "Auto" [ref=e102]
+          - text: Auto
+      - generic [ref=e104]:
+        - checkbox "Reduced motion" [ref=e105]
+        - text: Reduced motion
+    - main [ref=e106]:
+      - complementary [ref=e107]:
+        - generic [ref=e108]:
+          - generic [ref=e109]:
+            - generic [ref=e110]: Outline
+            - generic [ref=e111]: Document
+          - button "Hide Assets" [ref=e113] [cursor=pointer]
+        - textbox "Filter outline…" [ref=e115]
+        - generic [ref=e117]: No outline data.
+        - generic [ref=e120]: Asset Bank
+        - generic [ref=e123]:
+          - textbox "Search assets…" [ref=e124]
+          - generic [ref=e125]:
+            - button "Grid" [ref=e126] [cursor=pointer]
+            - button "List" [ref=e127] [cursor=pointer]
+      - separator [ref=e128]
+      - iframe [ref=e133]:
+        - main [ref=f2e3]:
+          - generic [ref=f2e5]:
+            - heading "Flux document error" [level=2] [ref=f2e6]
+            - list [ref=f2e7]:
+              - listitem [ref=f2e8]: "Parse error at 7:3 near 'page': Unexpected top-level construct 'page'"
+      - separator [ref=e134]
+      - complementary [ref=e135]:
+        - generic [ref=e136]:
+          - generic [ref=e137]: Inspector
+          - button "Palette" [ref=e139] [cursor=pointer]
+        - generic [ref=e141]: Select a node to inspect properties.
+    - contentinfo [ref=e142]:
+      - generic [ref=e143]:
+        - generic [ref=e144]: Saved ✓
+        - generic [ref=e145]: /var/folders/68/_bgz9y8x01l2_tf4889_jhdw0000gn/T/flux-cli-edit-e2e/cli-edit-doc.flux
+      - generic [ref=e146]:
+        - generic [ref=e147]: Diagnostics
+        - generic [ref=e148]: Pass 0
+        - generic [ref=e149]: Warn 0
+        - generic [ref=e150]: Fail 1
+  - status [ref=e151]
+```

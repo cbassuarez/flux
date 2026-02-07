@@ -261,6 +261,7 @@ describe("docService transform requests", () => {
     const retryArgs = retryRequest?.args ?? {};
     const retryGenerator =
       retryArgs.generator ?? retryArgs.node?.props?.generator ?? retryArgs.node?.generator ?? retryArgs.node?.props?.source;
+    expect(retryGenerator?.kind).toBe("DynamicValue");
     const expr = retryGenerator?.expr ?? retryGenerator?.expression ?? retryGenerator?.value ?? retryGenerator;
     expect(expr.kind).toBe("CallExpression");
     expect(expr.callee?.name).toBe("choose");
@@ -316,6 +317,7 @@ describe("docService transform requests", () => {
 
     postTransformMock.mock.calls.forEach(([request]) => {
       const requestGenerator = extractGenerator(request);
+      expect(requestGenerator?.kind).toBe("DynamicValue");
       const expr = requestGenerator?.expr ?? requestGenerator?.expression ?? requestGenerator?.value ?? requestGenerator;
       expect(expr?.kind).toBe("CallExpression");
       expect(expr?.callee?.name).toBe("choose");
