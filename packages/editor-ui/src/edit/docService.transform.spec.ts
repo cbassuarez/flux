@@ -1,0 +1,111 @@
+import type { JSONContent } from "@tiptap/core";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { createDocService } from "./docService";
+import { fetchEditSource, fetchEditState, postTransform } from "./api";
+
+vi.mock("./api", () => ({
+  fetchEditState: vi.fn(),
+  fetchEditSource: vi.fn(),
+  postTransform: vi.fn(),
+  RequestTimeoutError: class RequestTimeoutError extends Error {},
+}));
+
+vi.mock("./richText", () => ({
+  tiptapToFluxText: vi.fn((node: any) => ({
+    ...node,
+    props: {
+      ...(node?.props ?? {}),
+      content: { kind: "LiteralValue", value: "rich" },
+    },
+    children: [],
+  })),
+}));
+
+const baseDoc = {
+  kind: "document",
+  body: {
+    nodes: [
+      {
+        id: "t1",
+        kind: "text",
+        props: { content: { kind: "LiteralValue", value: "hello" } },
+        children: [],
+      },
+      {
+        id: "s1",
+        kind: "slot",
+        props: {},
+        children: [],
+      },
+    ],
+  },
+};
+
+const baseSource = "doc { }";
+
+const fetchEditStateMock = fetchEditState as unknown as Mock;
+const fetchEditSourceMock = fetchEditSource as unknown as Mock;
+const postTransformMock = postTransform as unknown as Mock;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  fetchEditStateMock.mockResolvedValue({ doc: baseDoc, revision: 1, source: baseSource });
+  fetchEditSourceMock.mockResolvedValue({ source: baseSource, revision: 1 });
+  postTransformMock.mockResolvedValue({ ok: true, source: baseSource, doc: baseDoc, revision: 2 });
+});
+
+describe("docService transform requests", () => {
+  it("uses replaceNode as the primary request for rich text", async () => {
+    const service = createDocService();
+    await service.loadDoc();
+    const richText: JSONContent = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Hello" }] }],
+    };
+
+    await service.applyTransform({ type: "setTextNodeContent", id: "t1", richText });
+
+    expect(postTransformMock.mock.calls[0][0]?.op).toBe("replaceNode");
+  });
+
+  it("keeps setTextNodeContent as primary for plain text", async () => {
+    const service = createDocService();
+    await service.loadDoc();
+
+    await service.applyTransform({ type: "setTextNodeContent", id: "t1", text: "hello" });
+
+    expect(postTransformMock.mock.calls[0][0]?.op).toBe("setTextNodeContent");
+  });
+
+  it("uses replaceNode as the primary request for slot props", async () => {
+    const service = createDocService();
+    await service.loadDoc();
+
+    await service.applyTransform({ type: "setSlotProps", id: "s1", reserve: "fixedWidth(9, ch)" });
+
+    expect(postTransformMock.mock.calls[0][0]?.op).toBe("replaceNode");
+  });
+
+  it("uses replaceNode as the primary request for slot generators", async () => {
+    const service = createDocService();
+    await service.loadDoc();
+
+    await service.applyTransform({
+      type: "setSlotGenerator",
+      id: "s1",
+      generator: { kind: "LiteralValue", value: "x" },
+    });
+
+    expect(postTransformMock.mock.calls[0][0]?.op).toBe("replaceNode");
+  });
+
+  it("adopts newRevision as doc.revision after hydration", async () => {
+    const service = createDocService();
+    await service.loadDoc();
+    postTransformMock.mockResolvedValueOnce({ ok: true, source: baseSource, doc: baseDoc, newRevision: 13 });
+
+    await service.applyTransform({ type: "setTextNodeContent", id: "t1", text: "hello" });
+
+    expect(service.getState().doc?.revision).toBe(13);
+  });
+});
