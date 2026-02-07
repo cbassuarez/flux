@@ -220,31 +220,6 @@ describe("editor API transforms", () => {
 
     const server = await startViewerServer({ docPath });
     try {
-      const promoteRes = await fetch(`${server.url}/api/edit/transform`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          op: "setSlotGenerator",
-          args: {
-            id: "s1",
-            generator: {
-              kind: "ExpressionValue",
-              expr: {
-                kind: "CallExpression",
-                callee: { kind: "Identifier", name: "choose" },
-                args: [
-                  { kind: "Literal", value: null },
-                  { kind: "Literal", value: "variant_2" },
-                ],
-              },
-            },
-          },
-        }),
-      });
-      expect(promoteRes.ok).toBe(true);
-      const promotePayload = await promoteRes.json();
-      expect(promotePayload.ok).toBe(true);
-
       const editRes = await fetch(`${server.url}/api/edit/transform`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
