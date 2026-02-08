@@ -89,11 +89,16 @@ jobs:
       - name: Compile release scripts
         run: pnpm -w exec tsc -p scripts/release/tsconfig.json
 
-      - name: Bump patch + sync versions
-        run: node scripts/release/dist/bumpPatchAndSync.js
+      - name: Bump patch + sync versions (ensure unused tag)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node scripts/release/dist/bumpPatchAndSync.js
           git fetch --tags origin
+
           VERSION="$(node -e "const v=require('./version.json'); console.log(v.version ?? v.baseVersion);")"
-          
+
           for i in $(seq 1 20); do
             if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
               echo "::warning::Tag v${VERSION} already exists; bumping patch again…"
@@ -103,27 +108,25 @@ jobs:
               break
             fi
           done
-          
+
           if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
             echo "::error::Could not find an unused version tag after 20 bumps. Aborting."
             exit 1
           fi
-          
+
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Commit release (includes dist fixes)
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(node -e "const v=require('./version.json'); console.log(v.version ?? v.baseVersion);")"
+          : "${VERSION:?VERSION not set}"
 
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          # Commit version + workspace package versions + any dist artifacts staged earlier.
           git add -A -- version.json packages/*/package.json packages/*/dist packages/viewer/editor-dist
 
-          # If nothing changed (rare but possible), exit cleanly.
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
@@ -139,6 +142,10 @@ jobs:
           git remote set-url origin "https://x-access-token:${{ secrets.RELEASE_PAT }}@github.com/${{ github.repository }}.git"
 
       - name: Push release commit and tag
-        run: git push origin HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${VERSION:?VERSION not set}"
+
+          git push origin HEAD
           git push origin "refs/tags/v${VERSION}"
-          
