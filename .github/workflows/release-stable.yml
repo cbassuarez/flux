@@ -3,6 +3,8 @@ name: Release Stable
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "badges/**"
 
 concurrency:
   group: release-stable-main
@@ -13,7 +15,7 @@ permissions:
 
 jobs:
   release:
-    if: github.repository == 'cbassuarez/flux' && !startsWith(github.event.head_commit.message, 'chore(release):')
+    if: github.repository == 'cbassuarez/flux' && github.actor != 'github-actions[bot]' && !startsWith(github.event.head_commit.message, 'chore(release):') && !contains(github.event.head_commit.message, '[skip release]')
     runs-on: ubuntu-latest
     env:
       GIT_PAGER: cat

@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   publish:
@@ -89,3 +89,47 @@ jobs:
           node scripts/release/dist/applyDistTags.js \
             --channel="${{ steps.release.outputs.channel }}" \
             --version="${{ steps.release.outputs.version }}"
+
+      - name: Regenerate badges and commit if changed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin "${DEFAULT_BRANCH}"
+          git checkout -B "${DEFAULT_BRANCH}" "origin/${DEFAULT_BRANCH}"
+          git pull --ff-only origin "${DEFAULT_BRANCH}"
+
+          pnpm run badges:generate
+
+          add_paths=()
+          for path in badges/generated; do
+            if [ -e "${path}" ]; then
+              add_paths+=("${path}")
+            fi
+          done
+
+          if [ ${#add_paths[@]} -eq 0 ]; then
+            echo "No badge output paths found; skipping commit."
+            exit 0
+          fi
+
+          git add -A -- "${add_paths[@]}"
+
+          if git diff --cached --quiet; then
+            echo "No badge changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore(badges): regenerate SVGs [skip release] [skip ci]"
+
+          if ! git push origin "HEAD:${DEFAULT_BRANCH}"; then
+            echo "::error::Badge push failed. Configure GitHub Actions to push directly to ${DEFAULT_BRANCH}."
+            exit 1
+          fi
