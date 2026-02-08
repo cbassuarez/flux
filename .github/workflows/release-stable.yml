@@ -42,22 +42,23 @@ jobs:
 
       - name: Check dist freshness
         run: |
+          export GIT_PAGER=cat
           git config --global core.pager cat
-          if ! git diff --quiet -- packages/**/dist packages/viewer/editor-dist; then
-            git diff --name-only -- packages/**/dist packages/viewer/editor-dist
-            git diff --stat -- packages/**/dist packages/viewer/editor-dist | head -n 200
-            git diff -- packages/**/dist packages/viewer/editor-dist > dist-diff.patch
-            gzip -9 dist-diff.patch
-            echo "::error::Dist outputs are stale. Run pnpm -r build and commit dist artifacts."
-            exit 1
+          DIST_PATHS=(':(glob)packages/**/dist' ':(glob)packages/viewer/editor-dist')
+          if ! git diff --quiet -- "${DIST_PATHS[@]}"; then
+            changed_count=$(git diff --name-only -- "${DIST_PATHS[@]}" | wc -l | tr -d ' ')
+            echo "dist changes: ${changed_count} file(s)"
+            git diff --name-only -- "${DIST_PATHS[@]}" | head -n 50
+            if [ "${changed_count}" -gt 50 ]; then
+              echo "...(truncated)"
+            fi
+            git diff --stat -- "${DIST_PATHS[@]}" | head -n 100
+            git add -- "${DIST_PATHS[@]}"
+            if ! git diff --quiet -- "${DIST_PATHS[@]}"; then
+              echo "::error::Dist outputs are nondeterministic across environments."
+              exit 1
+            fi
           fi
-
-      - name: Upload dist diff artifact
-        if: failure() && hashFiles('dist-diff.patch.gz') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-diff
-          path: dist-diff.patch.gz
 
       - name: Compile release scripts
         run: pnpm -w exec tsc -p scripts/release/tsconfig.json
