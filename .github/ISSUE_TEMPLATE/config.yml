@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/cbassuarez/flux
+    about: Start from the README and package manuals in the repo.
+  - name: Security policy
+    url: https://github.com/cbassuarez/flux/blob/main/SECURITY.md
+    about: Report vulnerabilities privately.

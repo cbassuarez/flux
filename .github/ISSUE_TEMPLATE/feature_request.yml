@@ -1,0 +1,74 @@
+name: Feature request
+description: Propose a new capability or workflow improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - @flux-lang/brand
+        - @flux-lang/cli
+        - @flux-lang/cli-core
+        - @flux-lang/cli-ui
+        - @flux-lang/core
+        - @flux-lang/editor-ui
+        - @flux-lang/flux
+        - @flux-lang/render-html
+        - @flux-lang/typesetter
+        - @flux-lang/viewer
+        - @flux-lang/vscode-flux
+        - core language
+        - docs
+        - build/CI
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Flux do?
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you consider?
+    validations:
+      required: false
+  - type: textarea
+    id: impact
+    attributes:
+      label: Who benefits / impact
+      description: Who does this help and why?
+    validations:
+      required: false
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Willing to contribute?
+      options:
+        - Yes
+        - No
+    validations:
+      required: true
+  - type: textarea
+    id: flux-shape
+    attributes:
+      label: Flux-side shape
+      description: Provide pseudocode, determinism notes, or IR impact if relevant.
+      placeholder: |
+        - Determinism impact:
+        - IR changes:
+        - CLI / viewer behavior:
+    validations:
+      required: false

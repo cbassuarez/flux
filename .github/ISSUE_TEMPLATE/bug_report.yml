@@ -1,0 +1,77 @@
+name: Bug report
+description: Report a reproducible problem in Flux.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: checkboxes
+    id: search
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues to avoid duplicates.
+          required: true
+  - type: dropdown
+    id: package
+    attributes:
+      label: Which package?
+      options:
+        - @flux-lang/brand
+        - @flux-lang/cli
+        - @flux-lang/cli-core
+        - @flux-lang/cli-ui
+        - @flux-lang/core
+        - @flux-lang/editor-ui
+        - @flux-lang/flux
+        - @flux-lang/render-html
+        - @flux-lang/typesetter
+        - @flux-lang/viewer
+        - @flux-lang/vscode-flux
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: Describe the expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro steps
+      description: Provide a minimal, deterministic repro.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: flux-version
+    attributes:
+      label: Flux version
+      description: Output of `flux --version` (or package version).
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS + Node version
+      description: Example: macOS 14.6 + Node 20.17.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      description: Paste logs or stack trace output.
+      render: shell
+    validations:
+      required: false
