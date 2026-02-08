@@ -13,8 +13,13 @@ const DEFAULT_VERSION_INFO = { version: "0.0.0", channel: "stable" };
 function readFluxVersionInfo() {
   if (!existsSync(VERSION_JSON_PATH)) return DEFAULT_VERSION_INFO;
   try {
-    const parsed = JSON.parse(readFileSync(VERSION_JSON_PATH, "utf8")) as { version?: string; channel?: string };
-    const version = String(parsed.version ?? DEFAULT_VERSION_INFO.version).replace(/^v+/i, "") || DEFAULT_VERSION_INFO.version;
+    const parsed = JSON.parse(readFileSync(VERSION_JSON_PATH, "utf8")) as {
+      baseVersion?: string;
+      version?: string;
+      channel?: string;
+    };
+    const rawVersion = parsed.baseVersion ?? parsed.version ?? DEFAULT_VERSION_INFO.version;
+    const version = String(rawVersion).replace(/^v+/i, "") || DEFAULT_VERSION_INFO.version;
     const channel = parsed.channel === "canary" ? "canary" : "stable";
     return { version, channel };
   } catch {

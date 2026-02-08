@@ -2,7 +2,9 @@ name: Publish Canary
 
 on:
   push:
-    branches: [main]
+    branches:
+      - canary
+      - "canary/*"
 
 concurrency:
   group: publish-canary
@@ -46,13 +48,17 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Bump canary versions
-        run: node scripts/canary.mjs
-        env:
-          GITHUB_SHA: ${{ github.sha }}
+      - name: Sync canary versions
+        run: node --loader ts-node/esm scripts/release/syncCanary.ts --sha=${{ github.sha }}
 
       - name: Publish canary packages
-        run: node scripts/publish-canary.mjs
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node --loader ts-node/esm scripts/release/publishPackages.ts --tag=canary
+
+      - name: Apply canary dist-tag
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=$(node -e "const pkgs=require('./packages/cli/package.json'); console.log(pkgs.version);")
+          node --loader ts-node/esm scripts/release/applyDistTags.ts --channel=canary --version=${VERSION}
