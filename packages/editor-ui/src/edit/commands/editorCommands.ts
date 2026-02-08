@@ -92,6 +92,7 @@ export type EditorCommandContext = {
   handleSave: () => void;
   handleExportPdf: () => void;
   handleResetLayout: () => void;
+  handleInsertPage: () => void;
   handleInsertSection: () => void;
   handleInsertParagraph: () => void;
   handleInsertFigure: () => void;
@@ -298,8 +299,8 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
     "insert.page": make({
       id: "insert.page",
       label: "Page",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.handleInsertPage,
       group: "Insert",
     }),
     "insert.section": make({

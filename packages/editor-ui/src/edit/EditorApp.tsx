@@ -168,6 +168,7 @@ export default function EditorApp() {
   const frameDraftRef = useRef<ImageFrame | null>(null);
   const frameDragRef = useRef<{ startX: number; startY: number; frame: ImageFrame } | null>(null);
   const previewCleanupRef = useRef<(() => void) | null>(null);
+  const pendingPageScrollRef = useRef(false);
   const slotPlaybackRef = useRef<Map<string, SlotPlaybackState>>(new Map());
   const previewTransitionTimerRef = useRef<number | null>(null);
 
@@ -881,6 +882,12 @@ export default function EditorApp() {
     void handleTransform(buildAddSectionTransform(), "Section added");
   }, [handleTransform]);
 
+  const handleInsertPage = useCallback(() => {
+    const afterPageId = docState.selection.kind === "page" ? docState.selection.id ?? undefined : undefined;
+    pendingPageScrollRef.current = true;
+    void handleTransform({ op: "addPage", args: { afterPageId } }, "Page added");
+  }, [docState.selection.id, docState.selection.kind, handleTransform]);
+
   const handleInsertParagraph = useCallback(() => {
     void handleTransform(buildAddParagraphTransform(), "Paragraph added");
   }, [handleTransform]);
@@ -903,6 +910,24 @@ export default function EditorApp() {
   const handleInsertSlot = useCallback(() => {
     void handleTransform(buildAddSlotTransform(), "Slot inserted");
   }, [handleTransform]);
+
+  const scrollPageIntoView = useCallback((pageId: string) => {
+    const frameDoc = previewFrameRef.current?.contentDocument;
+    if (!frameDoc) return;
+    const el = frameDoc.querySelector(`[data-flux-id="${pageId}"][data-flux-kind="page"]`);
+    if (el && "scrollIntoView" in el) {
+      (el as HTMLElement).scrollIntoView({ block: "nearest" });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pendingPageScrollRef.current) return;
+    pendingPageScrollRef.current = false;
+    if (!selectedId || !doc?.index) return;
+    const entry = doc.index.get(selectedId);
+    if (entry?.node.kind !== "page") return;
+    scrollPageIntoView(selectedId);
+  }, [doc?.index, scrollPageIntoView, selectedId]);
 
   const handleApplySource = useCallback(async () => {
     if (!sourceDirty) return;
@@ -1052,17 +1077,55 @@ export default function EditorApp() {
     (event: any) => {
       if (!doc?.index) return;
       const activeId = event.active?.data?.current?.nodeId as string | undefined;
-      const overId = event.over?.data?.current?.nodeId as string | undefined;
-      if (!activeId || !overId || activeId === overId) return;
+      if (!activeId) return;
       const activeEntry = doc.index.get(activeId);
-      const overEntry = doc.index.get(overId);
-      if (!activeEntry || !overEntry) return;
-      if (!activeEntry.parentId || activeEntry.parentId !== overEntry.parentId) return;
+      if (!activeEntry || !activeEntry.parentId) return;
+      if (activeEntry.node.kind === "page" || activeEntry.node.kind === "section") return;
+
       const parentEntry = doc.index.get(activeEntry.parentId);
       if (!parentEntry || parentEntry.node.kind !== "section") return;
-      const nextParent = reorderChildren(parentEntry.node, activeId, overId);
-      if (!nextParent) return;
-      void handleTransform({ op: "replaceNode", args: { id: parentEntry.id, node: nextParent } });
+      const fromContainerId = `section:${parentEntry.id}`;
+      const fromIndex = parentEntry.node.children?.findIndex((child) => child.id === activeId) ?? -1;
+      if (fromIndex < 0) return;
+
+      const overData = event.over?.data?.current as
+        | { nodeId?: string; containerType?: "page" | "section"; containerId?: string }
+        | undefined;
+      if (!overData) return;
+
+      let toContainerId: string | null = null;
+      let toIndex = 0;
+
+      if (overData.containerType && overData.containerId) {
+        toContainerId = `${overData.containerType}:${overData.containerId}`;
+        if (overData.containerType === "section") {
+          const sectionEntry = doc.index.get(overData.containerId);
+          toIndex = sectionEntry?.node.children?.length ?? 0;
+        } else {
+          const pageEntry = doc.index.get(overData.containerId);
+          const section = pageEntry?.node.children?.find((child) => child.kind === "section");
+          toIndex = section?.children?.length ?? 0;
+        }
+      } else if (overData.nodeId) {
+        const overEntry = doc.index.get(overData.nodeId);
+        if (!overEntry || !overEntry.parentId) return;
+        const overParent = doc.index.get(overEntry.parentId);
+        if (!overParent || overParent.node.kind !== "section") return;
+        toContainerId = `section:${overParent.id}`;
+        toIndex = overParent.node.children?.findIndex((child) => child.id === overEntry.id) ?? 0;
+      }
+
+      if (!toContainerId) return;
+      if (fromContainerId === toContainerId && fromIndex === toIndex) return;
+      void handleTransform({
+        op: "moveNode",
+        args: {
+          nodeId: activeId,
+          fromContainerId,
+          toContainerId,
+          toIndex,
+        },
+      });
       selectNode(activeId);
     },
     [doc?.index, handleTransform, selectNode],
@@ -1125,6 +1188,7 @@ export default function EditorApp() {
         handleSave,
         handleExportPdf,
         handleResetLayout,
+        handleInsertPage,
         handleInsertSection,
         handleInsertParagraph,
         handleInsertFigure,
@@ -1155,6 +1219,7 @@ export default function EditorApp() {
       handleSave,
       handleExportPdf,
       handleResetLayout,
+      handleInsertPage,
       handleInsertSection,
       handleInsertParagraph,
       handleInsertFigure,
@@ -1920,18 +1985,26 @@ function OutlineItem({
   onSelect: (id: string) => void;
 }) {
   const canDrag = parentKind === "section";
+  const isContainer = node.kind === "page" || node.kind === "section";
+  const droppableId =
+    node.kind === "page" ? `page:${node.id}` : node.kind === "section" ? `section:${node.id}` : `node:${node.id}`;
   const draggable = useDraggable({
     id: `outline-drag:${node.id}`,
     data: { type: "outline", nodeId: node.id },
     disabled: !canDrag,
   });
   const droppable = useDroppable({
-    id: `outline:${node.id}`,
-    data: { type: "outline-drop", nodeId: node.id },
+    id: droppableId,
+    data: {
+      type: "outline-drop",
+      nodeId: node.id,
+      containerType: isContainer ? (node.kind as "page" | "section") : undefined,
+      containerId: isContainer ? node.id : undefined,
+    },
   });
   const isSelected = selectedId === node.id;
   const allowAssetDrop = node.kind === "figure" || node.kind === "slot" || node.kind === "image";
-  const allowReorderDrop = parentKind === "section";
+  const allowReorderDrop = parentKind === "section" || isContainer;
   const showDropTarget =
     droppable.isOver && ((draggingAsset && allowAssetDrop) || (draggingOutlineId && allowReorderDrop));
   return (

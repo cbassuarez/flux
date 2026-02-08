@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectIds, insertTextSection, moveNode, updateInlineSlot } from "./docTransforms";
+import { collectIds, insertPage, insertTextSection, moveNode, updateInlineSlot } from "./docTransforms";
 import { findNodeById } from "./docModel";
 
 function stripLoc(node: any): any {
@@ -143,7 +143,12 @@ describe("doc transforms", () => {
       },
     } as any;
 
-    const updated = moveNode(doc, "b", "section1", 0);
+    const updated = moveNode(doc, {
+      nodeId: "b",
+      fromContainerId: "section:section1",
+      toContainerId: "section:section1",
+      toIndex: 0,
+    });
     const section = findNodeById(updated.body?.nodes ?? [], "section1");
     const order = section?.children?.map((child: any) => child.id);
     expect(order).toEqual(["b", "a", "c"]);
@@ -152,5 +157,151 @@ describe("doc transforms", () => {
     for (const id of ["a", "b", "c", "section1", "page1"]) {
       expect(ids.has(id)).toBe(true);
     }
+  });
+
+  it("inserts a page after the selected page with a default section", () => {
+    const doc = {
+      meta: { version: "0.1.0" },
+      state: { params: [] },
+      grids: [],
+      rules: [],
+      body: {
+        nodes: [
+          { id: "page1", kind: "page", props: {}, children: [] },
+          { id: "page2", kind: "page", props: {}, children: [] },
+        ],
+      },
+    } as any;
+
+    const result = insertPage(doc, { afterPageId: "page1" });
+    const pages = result.doc.body?.nodes ?? [];
+    expect(pages.map((node: any) => node.id)).toEqual(["page1", result.newPageId, "page2"]);
+    const inserted = pages[1];
+    expect(inserted.kind).toBe("page");
+    expect(inserted.children?.[0]?.kind).toBe("section");
+    expect(inserted.children?.[0]?.children ?? []).toEqual([]);
+  });
+
+  it("appends a page when no selection is provided", () => {
+    const doc = {
+      meta: { version: "0.1.0" },
+      state: { params: [] },
+      grids: [],
+      rules: [],
+      body: {
+        nodes: [{ id: "page1", kind: "page", props: {}, children: [] }],
+      },
+    } as any;
+
+    const result = insertPage(doc);
+    const pages = result.doc.body?.nodes ?? [];
+    expect(pages.map((node: any) => node.id)).toEqual(["page1", result.newPageId]);
+  });
+
+  it("moves nodes across containers", () => {
+    const doc = {
+      meta: { version: "0.1.0" },
+      state: { params: [] },
+      grids: [],
+      rules: [],
+      body: {
+        nodes: [
+          {
+            id: "page1",
+            kind: "page",
+            props: {},
+            children: [
+              {
+                id: "section1",
+                kind: "section",
+                props: {},
+                children: [
+                  { id: "a", kind: "text", props: {}, children: [] },
+                  { id: "b", kind: "text", props: {}, children: [] },
+                ],
+              },
+              {
+                id: "section2",
+                kind: "section",
+                props: {},
+                children: [{ id: "c", kind: "text", props: {}, children: [] }],
+              },
+            ],
+          },
+        ],
+      },
+    } as any;
+
+    const updated = moveNode(doc, {
+      nodeId: "b",
+      fromContainerId: "section:section1",
+      toContainerId: "section:section2",
+      toIndex: 1,
+    });
+    const section1 = findNodeById(updated.body?.nodes ?? [], "section1");
+    const section2 = findNodeById(updated.body?.nodes ?? [], "section2");
+    expect(section1?.children?.map((child: any) => child.id)).toEqual(["a"]);
+    expect(section2?.children?.map((child: any) => child.id)).toEqual(["c", "b"]);
+  });
+
+  it("appends nodes when dropping on a container", () => {
+    const doc = {
+      meta: { version: "0.1.0" },
+      state: { params: [] },
+      grids: [],
+      rules: [],
+      body: {
+        nodes: [
+          {
+            id: "page1",
+            kind: "page",
+            props: {},
+            children: [
+              {
+                id: "section1",
+                kind: "section",
+                props: {},
+                children: [{ id: "a", kind: "text", props: {}, children: [] }],
+              },
+              {
+                id: "section2",
+                kind: "section",
+                props: {},
+                children: [{ id: "b", kind: "text", props: {}, children: [] }],
+              },
+            ],
+          },
+        ],
+      },
+    } as any;
+
+    const updated = moveNode(doc, {
+      nodeId: "a",
+      fromContainerId: "section:section1",
+      toContainerId: "section:section2",
+      toIndex: 1,
+    });
+    const section2 = findNodeById(updated.body?.nodes ?? [], "section2");
+    expect(section2?.children?.map((child: any) => child.id)).toEqual(["b", "a"]);
+  });
+
+  it("rejects moving container nodes", () => {
+    const doc = {
+      meta: { version: "0.1.0" },
+      state: { params: [] },
+      grids: [],
+      rules: [],
+      body: {
+        nodes: [{ id: "page1", kind: "page", props: {}, children: [] }],
+      },
+    } as any;
+
+    const updated = moveNode(doc, {
+      nodeId: "page1",
+      fromContainerId: "section:section1",
+      toContainerId: "section:section2",
+      toIndex: 0,
+    });
+    expect(updated).toEqual(doc);
   });
 });
