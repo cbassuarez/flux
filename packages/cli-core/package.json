@@ -21,10 +21,10 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@flux-lang/core": "^0.1.6",
-    "@flux-lang/render-html": "^0.1.6",
-    "@flux-lang/typesetter": "^0.1.6",
-    "@flux-lang/viewer": "^0.1.6"
+    "@flux-lang/core": "workspace:^",
+    "@flux-lang/render-html": "workspace:^",
+    "@flux-lang/typesetter": "workspace:^",
+    "@flux-lang/viewer": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

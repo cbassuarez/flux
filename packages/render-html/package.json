@@ -24,7 +24,7 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@flux-lang/core": "^0.1.6",
+    "@flux-lang/core": "workspace:^",
     "hyphenation.en-us": "^0.2.1",
     "hypher": "^0.2.5"
   },

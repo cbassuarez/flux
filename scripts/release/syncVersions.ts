@@ -14,26 +14,16 @@ type PackageJson = {
   optionalDependencies?: Record<string, string>;
 };
 
-function alignDependencyVersion(current: string | undefined, nextVersion: string): string {
-  if (!current) return `^${nextVersion}`;
-  if (current.startsWith("workspace:")) {
-    return `workspace:${nextVersion}`;
-  }
-  if (current.startsWith("^")) {
-    return `^${nextVersion}`;
-  }
-  if (current.startsWith("~")) {
-    return `~${nextVersion}`;
-  }
-  return nextVersion;
+function alignInternalDependency(): string {
+  return "workspace:^";
 }
 
-function updateDeps(deps: Record<string, string> | undefined, packages: Set<string>, nextVersion: string): boolean {
+function updateDeps(deps: Record<string, string> | undefined, packages: Set<string>): boolean {
   if (!deps) return false;
   let changed = false;
   for (const [name, value] of Object.entries(deps)) {
     if (name.startsWith(INTERNAL_SCOPE) && packages.has(name)) {
-      const updated = alignDependencyVersion(value, nextVersion);
+      const updated = alignInternalDependency();
       if (updated !== value) {
         deps[name] = updated;
         changed = true;
@@ -59,10 +49,10 @@ export async function syncVersions(nextVersion: string): Promise<WorkspacePackag
   for (const pkg of packages) {
     const pkgJson = await readPackageJson(pkg.dir);
     pkgJson.version = nextVersion;
-    const changed = updateDeps(pkgJson.dependencies, packageNames, nextVersion);
-    updateDeps(pkgJson.devDependencies, packageNames, nextVersion);
-    updateDeps(pkgJson.peerDependencies, packageNames, nextVersion);
-    updateDeps(pkgJson.optionalDependencies, packageNames, nextVersion);
+    const changed = updateDeps(pkgJson.dependencies, packageNames);
+    updateDeps(pkgJson.devDependencies, packageNames);
+    updateDeps(pkgJson.peerDependencies, packageNames);
+    updateDeps(pkgJson.optionalDependencies, packageNames);
     await writePackageJson(pkg.dir, pkgJson);
     if (changed) {
       // eslint-disable-next-line no-console
