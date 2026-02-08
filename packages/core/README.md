@@ -1,128 +1,50 @@
 # @flux-lang/core
 
-Core library for the **Flux** evolving document language: AST types, parser, Render IR, and the legacy v0.1 runtime kernel.
+1) **What this package is**
+   Core AST, parser, Render IR, and runtime kernel for the Flux score language.
 
-Flux is a small, declarative language for **deterministically evolving documents**. The `@flux-lang/core` package is the reference implementation of:
+2) **When you use it**
+   Use it when you need to parse `.flux` sources, render deterministic IR, or execute the runtime kernel.
 
-- The **Flux v0.2 grammar** (with v0.1 compatibility).
-- The **FluxDocument AST IR** (parse output).
-- The **RenderDocument IR** (resolved render output).
-- A minimal **v0.1 runtime kernel** with `docstep` rules and `neighbors.*` semantics.
-
----
-
-## Installation
+3) **Install**
 
 ```bash
-npm install @flux-lang/core
-# or
 pnpm add @flux-lang/core
-# or
-yarn add @flux-lang/core
-````
-
----
-
-## Basic usage
-
-### Parse source → AST IR
-
-```ts
-import { parseDocument } from "@flux-lang/core";
-
-const source = `
-document {
-  meta {
-    version = "0.1.0";
-    title   = "Example";
-  }
-
-  state {
-    param tempo : float [40, 72] @ 60;
-  }
-}
-`;
-
-const doc = parseDocument(source);
-// doc is a FluxDocument (AST IR)
 ```
 
-### Render IR (v0.2)
+4) **Basic usage**
 
 ```ts
 import { parseDocument, renderDocument } from "@flux-lang/core";
 
-const doc = parseDocument(source);
-const ir = renderDocument(doc, { seed: 123, time: 10, docstep: 2 });
-// ir is a RenderDocument (resolved, deterministic Render IR)
-```
-
-### Runtime kernel: docstep + neighbors (legacy v0.1)
-
-```ts
-import {
-  parseDocument,
-  initRuntimeState,
-  runDocstepOnce,
-} from "@flux-lang/core";
-
-const doc = parseDocument(source);
-
-// Build initial RuntimeState from the document
-const state0 = initRuntimeState(doc);
-
-// Advance one docstep (applies all mode=docstep rules)
-const state1 = runDocstepOnce(doc, state0);
-```
-
----
-
-## Static checks
-
-`@flux-lang/core` also exposes a small static checker used by the CLI and VS Code extension:
-
-```ts
-import { parseDocument, checkDocument } from "@flux-lang/core";
-
-const doc = parseDocument(source);
-const errors = checkDocument("example.flux", doc);
-
-if (errors.length > 0) {
-  for (const line of errors) {
-    console.error(line);
+const source = `
+  document {
+    meta { version = "0.2.0"; }
+    body { page p1 { text t1 { content = "Hello"; } } }
   }
-}
+`;
+
+const doc = parseDocument(source);
+const ir = renderDocument(doc, { seed: 42, docstep: 0, time: 0 });
 ```
 
-Typical diagnostics include:
+5) **Reference**
+- **Parse**: `parseDocument`
+- **Render**: `renderDocument`, `renderDocumentIR`, `createDocumentRuntime`, `createDocumentRuntimeIR`
+- **Runtime kernel**: `initRuntimeState`, `runDocstepOnce`, `handleEvent`
+- **Static checks**: `checkDocument`
+- **Layout**: `computeGridLayout`
 
-* Unknown grid references in `rule ... (grid = main)`.
-* Unsupported `neighbors.*` methods.
-* Obvious runtime timer issues (e.g. non-positive `timer(...)` amounts).
+6) **How it relates to IR/runtime**
+This package defines the AST IR (`FluxDocument`) and the Render IR (`RenderDocument`/`RenderDocumentIR`), and implements the runtime stepping semantics that drive docsteps and time.
 
----
+7) **Gotchas & troubleshooting**
+- `renderDocumentIR` returns stable node IDs for patching and viewer workflows; use it when you need deterministic diffing.
 
-## Flux IR contract
+8) **Versioning / compatibility notes**
+- Flux uses semantic versioning in `meta.version`, and `0.x` releases are considered unstable.
 
-The canonical IR is the `FluxDocument` type exported from `@flux-lang/core`. It is:
-
-* Produced by `parseDocument(source)`.
-* Safe to serialize as JSON and pass across process boundaries.
-* Used by the CLI (`flux parse`) and editor tooling.
-
-See the Flux IR spec in the main repo for the full shape and semantics:
-
-* GitHub: `https://github.com/cbassuarez/flux` (IR docs live under `packages/core/docs/`)
-
----
-
-## Related tooling
-
-* **CLI:** `@flux-lang/cli` — `flux parse` / `flux check` built on top of this package.
-* **VS Code:** `@flux-lang/vscode-flux` — syntax highlighting + diagnostics using `@flux-lang/core`.
-
----
-
-## License
-
-MIT – see the LICENSE file in the repo root.
+9) **Links**
+- Root Flux manual: [`../../README.md`](../../README.md)
+- Render IR spec: [`docs/flux-ir-v0.2.md`](docs/flux-ir-v0.2.md)
+- Source: [`src/`](src/)

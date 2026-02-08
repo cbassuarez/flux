@@ -1,0 +1,33 @@
+name: Documentation request
+description: Report missing or unclear documentation.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: textarea
+    id: stuck
+    attributes:
+      label: Where did you get stuck?
+      description: Describe the exact point of confusion.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to find?
+      description: Describe the missing or unclear docs.
+    validations:
+      required: true
+  - type: textarea
+    id: outline
+    attributes:
+      label: Suggested outline / wording
+      description: Optional draft text or structure.
+    validations:
+      required: false
+  - type: input
+    id: links
+    attributes:
+      label: Link(s) to affected page/section
+      description: Optional URLs or file paths.
+    validations:
+      required: false
