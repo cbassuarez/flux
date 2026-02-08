@@ -2,10 +2,12 @@ import { type CSSProperties, type KeyboardEvent, type MouseEvent, useId } from "
 import { FLUX_TAGLINE, coerceVersionInfo, formatFluxVersion, type FluxVersionInfo } from "./index.js";
 
 export const FLUX_MARK_FAVICON_PATH = "/flux-mark-favicon.svg";
+export type FluxMarkRenderMode = "mono" | "color";
 
 export type FluxMarkProps = {
   size?: number;
   markPath?: string;
+  renderMode?: FluxMarkRenderMode;
   className?: string;
   title?: string;
   testId?: string;
@@ -14,11 +16,25 @@ export type FluxMarkProps = {
 export function FluxMark({
   size = 18,
   markPath = FLUX_MARK_FAVICON_PATH,
+  renderMode = "mono",
   className,
   title = "Flux mark",
   testId = "flux-mark",
 }: FluxMarkProps) {
   const maskId = useId().replace(/:/g, "");
+  if (renderMode === "color") {
+    return (
+      <img
+        src={markPath}
+        alt={title}
+        data-testid={testId}
+        className={joinClassName("flux-brand-mark", className)}
+        width={size}
+        height={size}
+        style={{ display: "block", width: size, height: size, flexShrink: 0 }}
+      />
+    );
+  }
 
   return (
     <svg
@@ -48,13 +64,21 @@ export type FluxWordmarkProps = {
 
 const WORDMARK_STYLE: CSSProperties = {
   fontFamily: '"IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-  fontStyle: "italic",
-  fontWeight: 600,
+  display: "inline-flex",
   fontVariantLigatures: "contextual common-ligatures",
   fontFeatureSettings: '"liga" 1, "calt" 1',
   letterSpacing: "-0.01em",
   lineHeight: 1,
   textTransform: "lowercase",
+};
+
+type FluxWordmarkLetter = "f" | "l" | "u" | "x";
+
+const WORDMARK_LETTER_STYLE: Record<FluxWordmarkLetter, CSSProperties> = {
+  f: { fontStyle: "italic", fontWeight: 600 },
+  l: { fontStyle: "italic", fontWeight: 500 },
+  u: { fontStyle: "normal", fontWeight: 400 },
+  x: { fontStyle: "normal", fontWeight: 300 },
 };
 
 export function FluxWordmark({ className }: FluxWordmarkProps) {
@@ -65,7 +89,34 @@ export function FluxWordmark({ className }: FluxWordmarkProps) {
       className={joinClassName("flux-brand-wordmark", className)}
       style={WORDMARK_STYLE}
     >
-      flux
+      <span
+        data-testid="flux-wordmark-letter-f"
+        className="flux-brand-wordmark-letter flux-brand-wordmark-letter-f"
+        style={WORDMARK_LETTER_STYLE.f}
+      >
+        f
+      </span>
+      <span
+        data-testid="flux-wordmark-letter-l"
+        className="flux-brand-wordmark-letter flux-brand-wordmark-letter-l"
+        style={WORDMARK_LETTER_STYLE.l}
+      >
+        l
+      </span>
+      <span
+        data-testid="flux-wordmark-letter-u"
+        className="flux-brand-wordmark-letter flux-brand-wordmark-letter-u"
+        style={WORDMARK_LETTER_STYLE.u}
+      >
+        u
+      </span>
+      <span
+        data-testid="flux-wordmark-letter-x"
+        className="flux-brand-wordmark-letter flux-brand-wordmark-letter-x"
+        style={WORDMARK_LETTER_STYLE.x}
+      >
+        x
+      </span>
     </span>
   );
 }
@@ -76,6 +127,7 @@ export type FluxBrandHeaderProps = {
   info: Partial<FluxVersionInfo>;
   variant?: FluxBrandHeaderVariant;
   markPath?: string;
+  markRenderMode?: FluxMarkRenderMode;
   showTagline?: boolean;
   onVersionClick?: () => void;
   className?: string;
@@ -106,6 +158,7 @@ export function FluxBrandHeader({
   info,
   variant = "header",
   markPath,
+  markRenderMode = "mono",
   showTagline = variant !== "menu",
   onVersionClick,
   className,
@@ -148,7 +201,7 @@ export function FluxBrandHeader({
         className={joinClassName("flux-brand-line1", line1ClassName)}
         style={{ display: "inline-flex", alignItems: "center", gap: sizing.gap, fontSize: sizing.line1Size }}
       >
-        <FluxMark size={sizing.mark} markPath={markPath} />
+        <FluxMark size={sizing.mark} markPath={markPath} renderMode={markRenderMode} />
         <FluxWordmark />
         <span
           data-testid="flux-brand-version"

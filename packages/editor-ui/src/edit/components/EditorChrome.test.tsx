@@ -108,7 +108,7 @@ describe("editor header chrome", () => {
     );
 
     const menubar = screen.getByRole("menubar");
-    expect(within(menubar).getByText("flux")).toBeTruthy();
+    expect(within(menubar).getByTestId("flux-wordmark")).toBeTruthy();
     expect(within(menubar).getByText("v0.1.4")).toBeTruthy();
     const labels = ["File", "Edit", "Insert", "Format", "View", "Runtime", "Window", "Help"];
     labels.forEach((label) => expect(within(menubar).getByText(label)).toBeTruthy());
@@ -132,7 +132,7 @@ describe("editor header chrome", () => {
       />,
     );
 
-    expect(within(menubar).getByText("flux")).toBeTruthy();
+    expect(within(menubar).getByTestId("flux-wordmark")).toBeTruthy();
     labels.forEach((label) => expect(within(menubar).getByText(label)).toBeTruthy());
   });
 

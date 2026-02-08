@@ -186,6 +186,7 @@ export function MenuBar({ commands, checked, brandInfo, onBrandVersionClick }: M
                   info={brandInfo}
                   variant="menu"
                   markPath="/edit/flux-mark-favicon.svg"
+                  markRenderMode="color"
                   showTagline={false}
                   onVersionClick={onBrandVersionClick}
                 />
