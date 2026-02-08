@@ -91,6 +91,25 @@ jobs:
 
       - name: Bump patch + sync versions
         run: node scripts/release/dist/bumpPatchAndSync.js
+          git fetch --tags origin
+          VERSION="$(node -e "const v=require('./version.json'); console.log(v.version ?? v.baseVersion);")"
+          
+          for i in $(seq 1 20); do
+            if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+              echo "::warning::Tag v${VERSION} already exists; bumping patch again…"
+              node scripts/release/dist/bumpPatchAndSync.js
+              VERSION="$(node -e "const v=require('./version.json'); console.log(v.version ?? v.baseVersion);")"
+            else
+              break
+            fi
+          done
+          
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "::error::Could not find an unused version tag after 20 bumps. Aborting."
+            exit 1
+          fi
+          
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Commit release (includes dist fixes)
         shell: bash
@@ -120,4 +139,6 @@ jobs:
           git remote set-url origin "https://x-access-token:${{ secrets.RELEASE_PAT }}@github.com/${{ github.repository }}.git"
 
       - name: Push release commit and tag
-        run: git push origin HEAD --tags
+        run: git push origin HEAD
+          git push origin "refs/tags/v${VERSION}"
+          
