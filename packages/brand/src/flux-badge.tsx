@@ -10,7 +10,7 @@ const FLUX_BADGE_HREF = "https://www.npmjs.com/package/@flux-lang/flux";
 const FLUX_BADGE_FALLBACK_VERSION = "v0.0.0-dev";
 const FLUX_BADGE_MARK_SRC = new URL("./flux-mark-badge.svg", import.meta.url).toString();
 
-export type FluxBadgeTheme = "dark" | "blueprint";
+export type FluxBadgeTheme = "light" | "dark" | "blueprint";
 
 export type FluxBadgeProps = {
   className?: string;

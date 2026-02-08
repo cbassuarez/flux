@@ -1,5 +1,5 @@
 export declare const FLUX_BADGE_BASE_CLASSES: string;
-export type FluxBadgeTheme = "dark" | "blueprint";
+export type FluxBadgeTheme = "light" | "dark" | "blueprint";
 export type FluxBadgeProps = {
     className?: string;
     theme?: FluxBadgeTheme;
