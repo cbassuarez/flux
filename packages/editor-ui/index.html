@@ -10,6 +10,23 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("flux.theme");
+          var theme =
+            stored === "dark" || stored === "light" || stored === "blueprint"
+              ? stored
+              : window.matchMedia &&
+                window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+          document.documentElement.dataset.theme = theme;
+        } catch (err) {
+          // Ignore theme boot failures.
+        }
+      })();
+    </script>
     <title>Flux Editor · Guided Transforms</title>
   </head>
   <body>
