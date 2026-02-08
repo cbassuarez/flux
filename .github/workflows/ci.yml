@@ -40,7 +40,7 @@ jobs:
       - name: Release + self-update tests
         run: |
           node --test scripts/release/__tests__/version.test.cjs
-          node --loader ts-node/esm --test packages/flux/test/self-update.test.mjs
+          node --test packages/flux/test/self-update.test.mjs
 
   vscode_flux_typecheck:
     name: VS Code extension (typecheck only)

@@ -29,10 +29,10 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@flux-lang/brand": "^0.1.0",
-    "@flux-lang/core": "^0.1.6",
-    "@flux-lang/render-html": "^0.1.6",
-    "@flux-lang/typesetter": "^0.1.6"
+    "@flux-lang/brand": "workspace:^",
+    "@flux-lang/core": "workspace:^",
+    "@flux-lang/render-html": "workspace:^",
+    "@flux-lang/typesetter": "workspace:^"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
