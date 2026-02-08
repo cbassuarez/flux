@@ -2,11 +2,13 @@ import * as Menubar from "@radix-ui/react-menubar";
 import { FLUX_TAGLINE, type FluxVersionInfo } from "@flux-lang/brand";
 import { FluxBrandHeader } from "@flux-lang/brand/web";
 import type { EditorCommand, EditorCommandId } from "../commands/editorCommands";
+import { useTheme, type EditorTheme } from "../theme/theme";
 
 type MenuItem =
   | { kind: "command"; id: EditorCommandId }
   | { kind: "checkbox"; id: EditorCommandId }
   | { kind: "separator" }
+  | { kind: "theme" }
   | { kind: "submenu"; label: string; items: MenuItem[] };
 
 type MenuDefinition = { label: string; items: MenuItem[] };
@@ -120,6 +122,8 @@ const MENUS: MenuDefinition[] = [
       { kind: "command", id: "view.sourceMode" },
       { kind: "separator" },
       { kind: "checkbox", id: "view.showStatusBar" },
+      { kind: "separator" },
+      { kind: "theme" },
     ],
   },
   {
@@ -158,7 +162,15 @@ const MENUS: MenuDefinition[] = [
   },
 ];
 
+const THEME_OPTIONS: Array<{ value: EditorTheme; label: string }> = [
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+  { value: "blueprint", label: "Blueprint" },
+];
+
 export function MenuBar({ commands, checked, brandInfo, onBrandVersionClick }: MenuBarProps) {
+  const { theme, setTheme } = useTheme();
+
   return (
     <div className="editor-menubar">
       <Menubar.Root className="menubar-root">
@@ -184,7 +196,14 @@ export function MenuBar({ commands, checked, brandInfo, onBrandVersionClick }: M
             <Menubar.Portal>
               <Menubar.Content className="menubar-content" align="start" sideOffset={6}>
                 {menu.items.map((item, index) => (
-                  <MenuItemRenderer key={`${menu.label}-${index}`} item={item} commands={commands} checked={checked} />
+                  <MenuItemRenderer
+                    key={`${menu.label}-${index}`}
+                    item={item}
+                    commands={commands}
+                    checked={checked}
+                    theme={theme}
+                    onThemeChange={setTheme}
+                  />
                 ))}
               </Menubar.Content>
             </Menubar.Portal>
@@ -199,13 +218,41 @@ function MenuItemRenderer({
   item,
   commands,
   checked,
+  theme,
+  onThemeChange,
 }: {
   item: MenuItem;
   commands: Record<EditorCommandId, EditorCommand>;
   checked: Partial<Record<EditorCommandId, boolean>>;
+  theme: EditorTheme;
+  onThemeChange: (theme: EditorTheme) => void;
 }) {
   if (item.kind === "separator") {
     return <Menubar.Separator className="menubar-separator" />;
+  }
+  if (item.kind === "theme") {
+    return (
+      <Menubar.Sub>
+        <Menubar.SubTrigger className="menubar-item menubar-subtrigger">
+          <span>Theme</span>
+          <span className="menubar-chevron">›</span>
+        </Menubar.SubTrigger>
+        <Menubar.Portal>
+          <Menubar.SubContent className="menubar-content" alignOffset={-6}>
+            <Menubar.RadioGroup value={theme} onValueChange={(value) => onThemeChange(value as EditorTheme)}>
+              {THEME_OPTIONS.map((option) => (
+                <Menubar.RadioItem key={option.value} value={option.value} className="menubar-item menubar-radio">
+                  <span className="menubar-check">
+                    <Menubar.ItemIndicator>✓</Menubar.ItemIndicator>
+                  </span>
+                  <span className="menubar-label">{option.label}</span>
+                </Menubar.RadioItem>
+              ))}
+            </Menubar.RadioGroup>
+          </Menubar.SubContent>
+        </Menubar.Portal>
+      </Menubar.Sub>
+    );
   }
   if (item.kind === "submenu") {
     return (
@@ -222,6 +269,8 @@ function MenuItemRenderer({
                 item={child}
                 commands={commands}
                 checked={checked}
+                theme={theme}
+                onThemeChange={onThemeChange}
               />
             ))}
           </Menubar.SubContent>

@@ -23,6 +23,7 @@ import {
   OutlinePane,
   PageStage,
 } from "./components/EditorShell";
+import { Button } from "./components/ui/Button";
 import { MenuBar } from "./components/MenuBar";
 import { StatusBar } from "./components/StatusBar";
 import { monaco } from "./monaco";
@@ -1335,14 +1336,14 @@ export default function EditorApp() {
   if (docState.status === "error") {
     return (
       <div className="editor-root">
-        <div className="editor-loading-panel">
-          <h2>Unable to load editor</h2>
-          <p>{docState.error ?? "Unknown error"}</p>
-          <button type="button" className="btn" onClick={() => void docService.loadDoc()}>
-            Retry
-          </button>
+          <div className="editor-loading-panel">
+            <h2>Unable to load editor</h2>
+            <p>{docState.error ?? "Unknown error"}</p>
+            <Button type="button" onClick={() => void docService.loadDoc()}>
+              Retry
+            </Button>
+          </div>
         </div>
-      </div>
     );
   }
 
@@ -1363,12 +1364,12 @@ export default function EditorApp() {
           <div className="conflict-bar">
             <span>File changed on disk. Reload?</span>
             <div className="conflict-actions">
-              <button className="btn btn-primary btn-xs" onClick={() => docService.acceptExternalReload()}>
+              <Button variant="primary" size="sm" onClick={() => docService.acceptExternalReload()}>
                 Reload
-              </button>
-              <button className="btn btn-ghost btn-xs" onClick={() => docService.dismissExternalReload()}>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => docService.dismissExternalReload()}>
                 Keep local
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}
@@ -1414,9 +1415,9 @@ export default function EditorApp() {
                       <div className="pane-breadcrumb">{breadcrumbLabel}</div>
                     </div>
                     <div className="pane-actions">
-                      <button className="btn btn-ghost btn-xs" onClick={() => setAssetPanelOpen((open) => !open)}>
+                      <Button variant="ghost" size="sm" onClick={() => setAssetPanelOpen((open) => !open)}>
                         {assetPanelOpen ? "Hide Assets" : "Assets"}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                   <div className="pane-search">
@@ -1495,9 +1496,9 @@ export default function EditorApp() {
                           <span className={`status-pill ${sourceDirty ? "status-dirty" : "status-saved"}`}>
                             {sourceDirty ? "Unsaved" : "Clean"}
                           </span>
-                          <button className="btn btn-ghost btn-xs" onClick={handleApplySource} disabled={!sourceDirty || docState.isApplying}>
+                          <Button variant="ghost" size="sm" onClick={handleApplySource} disabled={!sourceDirty || docState.isApplying}>
                             Apply
-                          </button>
+                          </Button>
                         </div>
                       </div>
                       <div className="pane-body source-body">
@@ -1526,9 +1527,9 @@ export default function EditorApp() {
                       <div className="pane-header">
                         <div className="pane-title">Inspector</div>
                         <div className="pane-actions">
-                          <button className="btn btn-ghost btn-xs" onClick={() => setPaletteOpen(true)}>
+                          <Button variant="ghost" size="sm" onClick={() => setPaletteOpen(true)}>
                             Palette
-                          </button>
+                          </Button>
                         </div>
                       </div>
                       <div className="pane-body scroll">
@@ -1543,21 +1544,22 @@ export default function EditorApp() {
                                 </button>
                               </div>
                               <div className="inspector-actions">
-                                <button className="btn btn-ghost btn-xs" type="button" disabled>
+                                <Button variant="ghost" size="sm" type="button" disabled>
                                   Duplicate
-                                </button>
-                                <button className="btn btn-ghost btn-xs" type="button" disabled>
+                                </Button>
+                                <Button variant="ghost" size="sm" type="button" disabled>
                                   Delete
-                                </button>
+                                </Button>
                               </div>
                             </div>
                             {transformError ? <div className="inspector-alert">{transformError}</div> : null}
                             {illegalSlotProps && selectedNode ? (
                               <div className="inspector-alert slot-alert">
                                 <div>Refresh/transition can only be set on slots.</div>
-                                <button
+                                <Button
                                   type="button"
-                                  className="btn btn-ghost btn-xs"
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={() => {
                                     const props = { ...(selectedNode.props ?? {}) } as Record<string, unknown>;
                                     delete props.refresh;
@@ -1572,7 +1574,7 @@ export default function EditorApp() {
                                   }}
                                 >
                                   Fix
-                                </button>
+                                </Button>
                               </div>
                             ) : null}
 
@@ -1770,9 +1772,9 @@ export default function EditorApp() {
                   <span>Tagline</span>
                   <span>{fluxVersionInfo.tagline}</span>
                 </div>
-                <button type="button" className="btn btn-ghost btn-xs" onClick={handleCopyBuildInfo}>
+                <Button type="button" variant="ghost" size="sm" onClick={handleCopyBuildInfo}>
                   Copy Build Info
-                </button>
+                </Button>
               </div>
             </ModalShell>
           ) : null}
@@ -1783,12 +1785,12 @@ export default function EditorApp() {
             <div className="modal-layer" aria-hidden={!findOpen}>
               <div className="modal-scrim" onClick={() => setFindOpen(false)} />
               <div className="modal-panel find-panel" role="dialog" aria-modal="true">
-                <div className="modal-header">
-                  <span className="modal-title">Find in Document</span>
-                  <button className="btn btn-ghost btn-icon" onClick={() => setFindOpen(false)}>
-                    ✕
-                  </button>
-                </div>
+                  <div className="modal-header">
+                    <span className="modal-title">Find in Document</span>
+                    <Button variant="ghost" size="sm" iconOnly onClick={() => setFindOpen(false)}>
+                      ✕
+                    </Button>
+                  </div>
                 <input
                   className="input"
                   autoFocus
@@ -2003,12 +2005,22 @@ function AssetBrowser({ assets }: { assets: AssetItem[] }) {
           placeholder="Search assets…"
         />
         <div className="asset-view-toggle">
-          <button className={`btn btn-ghost ${view === "grid" ? "is-active" : ""}`} onClick={() => setView("grid")}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={view === "grid" ? "is-active" : undefined}
+            onClick={() => setView("grid")}
+          >
             Grid
-          </button>
-          <button className={`btn btn-ghost ${view === "list" ? "is-active" : ""}`} onClick={() => setView("list")}>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={view === "list" ? "is-active" : undefined}
+            onClick={() => setView("list")}
+          >
             List
-          </button>
+          </Button>
         </div>
       </div>
       {tags.length ? (
@@ -2600,41 +2612,48 @@ function SlotInspector({
                       }}
                     />
                     <div className="variant-actions">
-                      <button
+                      <Button
                         type="button"
-                        className="btn btn-ghost btn-xs"
+                        variant="ghost"
+                        size="sm"
+                        iconOnly
                         onClick={() => handleMoveVariant(index, -1)}
                         disabled={index === 0}
                       >
                         ↑
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="btn btn-ghost btn-xs"
+                        variant="ghost"
+                        size="sm"
+                        iconOnly
                         onClick={() => handleMoveVariant(index, 1)}
                         disabled={index === variants.length - 1}
                       >
                         ↓
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="btn btn-ghost btn-xs"
+                        variant="ghost"
+                        size="sm"
+                        iconOnly
                         onClick={() => handleRemoveVariant(index)}
                         disabled={variants.length <= 1 && baseSpec?.kind === "literal"}
                       >
                         ✕
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}
-                <button
+                <Button
                   type="button"
-                  className="btn btn-ghost btn-xs"
+                  variant="ghost"
+                  size="sm"
                   data-testid="inspector-action:add-variant"
                   onClick={handleAddVariant}
                 >
                   Add variant
-                </button>
+                </Button>
               </div>
             </>
           ) : isNonEnumerable ? (
@@ -2737,9 +2756,9 @@ function SlotInspector({
             reducedMotion={reducedMotion}
             onChange={(next) => onPropsChange({ transition: next })}
           />
-          <button type="button" className="btn btn-ghost btn-xs" onClick={handlePreviewTransition}>
+          <Button type="button" variant="ghost" size="sm" onClick={handlePreviewTransition}>
             Preview transition
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -2971,16 +2990,17 @@ function RefreshEditor({
       {validation.hint ? <div className="field-hint">{validation.hint}</div> : null}
       {validation.error ? <div className="field-error">{validation.error}</div> : null}
       <div className="refresh-actions">
-        <button
+        <Button
           type="button"
-          className="btn btn-ghost btn-xs"
+          variant="ghost"
+          size="sm"
           disabled={!validation.policy || Boolean(validation.error)}
           onClick={() => {
             if (validation.policy) onChange(validation.policy);
           }}
         >
           Apply
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -3161,16 +3181,18 @@ function ImageFrameInspector({
     <div className="inspector-section frame-section">
       <div className="section-title">Frame</div>
       <div className="frame-toolbar">
-        <button
+        <Button
           type="button"
-          className={`btn btn-ghost btn-xs ${adjustMode ? "is-active" : ""}`}
+          variant="ghost"
+          size="sm"
+          className={adjustMode ? "is-active" : undefined}
           onClick={onToggleAdjust}
         >
           Adjust image
-        </button>
-        <button type="button" className="btn btn-ghost btn-xs" onClick={onReset}>
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={onReset}>
           Reset
-        </button>
+        </Button>
       </div>
       <label className="field">
         <span>Fit</span>
@@ -3220,20 +3242,44 @@ function ImageFrameInspector({
         </label>
       </div>
       <div className="frame-nudge">
-        <button type="button" className="btn btn-ghost btn-xs" onClick={() => commitPatch({ offsetY: frame.offsetY - 1 })}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          iconOnly
+          onClick={() => commitPatch({ offsetY: frame.offsetY - 1 })}
+        >
           ↑
-        </button>
+        </Button>
         <div className="frame-nudge-row">
-          <button type="button" className="btn btn-ghost btn-xs" onClick={() => commitPatch({ offsetX: frame.offsetX - 1 })}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            iconOnly
+            onClick={() => commitPatch({ offsetX: frame.offsetX - 1 })}
+          >
             ←
-          </button>
-          <button type="button" className="btn btn-ghost btn-xs" onClick={() => commitPatch({ offsetX: frame.offsetX + 1 })}>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            iconOnly
+            onClick={() => commitPatch({ offsetX: frame.offsetX + 1 })}
+          >
             →
-          </button>
+          </Button>
         </div>
-        <button type="button" className="btn btn-ghost btn-xs" onClick={() => commitPatch({ offsetY: frame.offsetY + 1 })}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          iconOnly
+          onClick={() => commitPatch({ offsetY: frame.offsetY + 1 })}
+        >
           ↓
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -3302,9 +3348,9 @@ function ModalShell({
       <div className="modal-panel" role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-header">
           <span className="modal-title">{title}</span>
-          <button className="btn btn-ghost btn-icon" onClick={onClose}>
+          <Button variant="ghost" size="sm" iconOnly onClick={onClose}>
             ✕
-          </button>
+          </Button>
         </div>
         {children}
       </div>

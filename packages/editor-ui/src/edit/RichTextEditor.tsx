@@ -11,6 +11,7 @@ import Link from "@tiptap/extension-link";
 import History from "@tiptap/extension-history";
 import type { DocumentNode } from "@flux-lang/core";
 import { fluxTextToTiptap, type InlineSlotAttrs } from "./richText";
+import { Button } from "./components/ui/Button";
 
 type RichTextEditorProps = {
   node: DocumentNode;
@@ -176,29 +177,37 @@ export default function RichTextEditor({
   return (
     <div className="rich-text-editor">
       <div className="rich-text-toolbar">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           className={`toolbar-btn ${editor.isActive("bold") ? "is-active" : ""}`}
           onClick={() => editor.chain().focus().toggleBold().run()}
         >
           Bold
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           className={`toolbar-btn ${editor.isActive("italic") ? "is-active" : ""}`}
           onClick={() => editor.chain().focus().toggleItalic().run()}
         >
           Italic
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           className={`toolbar-btn ${editor.isActive("code") ? "is-active" : ""}`}
           onClick={() => editor.chain().focus().toggleCode().run()}
         >
           Code
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           className={`toolbar-btn ${editor.isActive("link") ? "is-active" : ""}`}
           onClick={() => {
             const href = editor.getAttributes("link").href ?? "";
@@ -207,15 +216,17 @@ export default function RichTextEditor({
           }}
         >
           Link
-        </button>
+        </Button>
         {editor.isActive("link") ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             className="toolbar-btn"
             onClick={() => editor.chain().focus().unsetLink().run()}
           >
             Unlink
-          </button>
+          </Button>
         ) : null}
         {linkOpen ? (
           <div className="toolbar-link">
@@ -225,8 +236,10 @@ export default function RichTextEditor({
               onChange={(event) => setLinkValue(event.target.value)}
               placeholder="https://"
             />
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               className="toolbar-btn"
               onClick={() => {
                 if (linkValue.trim()) {
@@ -238,7 +251,7 @@ export default function RichTextEditor({
               }}
             >
               Apply
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>

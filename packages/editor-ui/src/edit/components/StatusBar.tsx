@@ -1,4 +1,5 @@
 import { formatDuration } from "../slotRuntime";
+import { Button } from "./ui/Button";
 
 type StatusBarProps = {
   canSave: boolean;
@@ -37,15 +38,15 @@ export function StatusBar({
   return (
     <div className="editor-statusbar" role="contentinfo">
       <div className="statusbar-left">
-        <button type="button" className="statusbar-button" onClick={onUndo}>
+        <Button type="button" variant="ghost" size="sm" className="statusbar-button" onClick={onUndo}>
           Undo
-        </button>
-        <button type="button" className="statusbar-button" onClick={onRedo}>
+        </Button>
+        <Button type="button" variant="ghost" size="sm" className="statusbar-button" onClick={onRedo}>
           Redo
-        </button>
-        <button type="button" className="statusbar-button" onClick={onSave} disabled={!canSave}>
+        </Button>
+        <Button type="button" variant="ghost" size="sm" className="statusbar-button" onClick={onSave} disabled={!canSave}>
           Save
-        </button>
+        </Button>
       </div>
       <button type="button" className="statusbar-center" onClick={onOpenDocSettings}>
         <span className="statusbar-filename">{fileName}</span>
@@ -54,12 +55,12 @@ export function StatusBar({
         {dirty ? <span className="statusbar-dirty" aria-label="Unsaved changes" /> : null}
       </button>
       <div className="statusbar-right">
-        <button type="button" className="statusbar-diagnostics" onClick={onOpenDiagnostics}>
+        <Button type="button" variant="ghost" size="sm" className="statusbar-diagnostics" onClick={onOpenDiagnostics}>
           Diagnostics
           <span className="statusbar-badge" aria-label={`${diagnosticsCount} diagnostics`}>
             {diagnosticsCount}
           </span>
-        </button>
+        </Button>
         <span className="statusbar-connection">{saveLabel}</span>
         <span className="statusbar-connection">{connectionLabel}</span>
         <span className="statusbar-runtime">

@@ -68,11 +68,15 @@
 .menubar-content {
   min-width: 220px;
   padding: 6px;
-  background: var(--editor-surface-panel);
-  border-radius: var(--editor-radius-sm);
-  border: 1px solid var(--editor-line-hairline);
-  box-shadow: var(--editor-shadow-stack);
-  z-index: 60;
+  background: var(--surface-2);
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  border-radius: var(--editor-radius-lg);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--fg);
+  z-index: 100;
 }
 
 .menubar-item {
@@ -83,16 +87,17 @@
   padding: 6px 8px;
   border-radius: var(--editor-radius-sm);
   font-size: 12px;
-  color: var(--editor-text-fg);
+  color: var(--fg);
   cursor: pointer;
 }
 
-.menubar-item[data-highlighted] {
-  background: var(--editor-surface-hover);
+.menubar-item[data-highlighted],
+.menubar-item[data-state="open"] {
+  background: var(--surface-3);
 }
 
 .menubar-item[data-disabled] {
-  color: var(--editor-text-muted);
+  color: var(--muted);
   cursor: default;
 }
 
@@ -102,7 +107,7 @@
 
 .menubar-shortcut {
   font-size: 11px;
-  color: var(--editor-text-muted);
+  color: var(--muted);
   justify-self: end;
 }
 
@@ -113,7 +118,7 @@
 .menubar-check {
   width: 16px;
   text-align: center;
-  color: var(--editor-text-fg);
+  color: var(--fg);
 }
 
 .menubar-subtrigger {
@@ -121,13 +126,17 @@
 }
 
 .menubar-chevron {
-  color: var(--editor-text-muted);
+  color: var(--muted);
 }
 
 .menubar-separator {
   height: 1px;
-  background: var(--editor-line-hairline);
+  background: var(--border);
   margin: 4px 6px;
+}
+
+.menubar-radio {
+  grid-template-columns: 16px auto 1fr;
 }
 
 .editor-toolbar {
@@ -574,78 +583,118 @@
   background: var(--editor-accent);
 }
 
-.btn {
+.editor-button {
   border: 1px solid var(--editor-line-hairline);
-  background: transparent;
+  background: var(--editor-surface-panel);
   color: var(--editor-text-fg);
-  border-radius: var(--editor-radius-sm);
-  padding: 6px 10px;
+  border-radius: var(--editor-radius-md);
+  padding: 0 14px;
+  height: 36px;
   font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
 }
 
-.btn:hover {
-  background: var(--editor-surface-hover);
+.editor-button--sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 11px;
+  border-radius: var(--editor-radius-sm);
+}
+
+.editor-button--md {
+  height: 36px;
+}
+
+.editor-button--lg {
+  height: 42px;
+  padding: 0 18px;
+  font-size: 13px;
+  border-radius: var(--editor-radius-lg);
+}
+
+.editor-button--secondary {
+  background: var(--editor-surface-panel);
   border-color: var(--editor-line-hairline);
+  color: var(--editor-text-fg);
 }
 
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.editor-button--secondary:hover {
+  background: var(--editor-surface-hover);
+  border-color: var(--editor-line-muted);
 }
 
-.btn-ghost {
+.editor-button--ghost {
   background: transparent;
   border-color: transparent;
   color: var(--editor-text-muted);
 }
 
-.btn-ghost:hover {
+.editor-button--ghost:hover {
   color: var(--editor-text-fg);
   background: var(--editor-surface-hover);
   border-color: var(--editor-line-hairline);
 }
 
-.btn-ghost.is-active {
+.editor-button--ghost.is-active {
   background: var(--editor-accent-muted);
   border-color: var(--editor-accent);
   color: var(--editor-text-fg);
 }
 
-.btn-primary {
+.editor-button--primary {
   background: var(--editor-accent-gradient);
   border-color: transparent;
   color: var(--editor-text-ink);
-  font-weight: 600;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--editor-accent) 30%, transparent);
 }
 
-.btn-primary:hover {
+.editor-button--primary:hover {
   filter: brightness(1.05);
 }
 
-.btn-icon {
-  width: 30px;
-  height: 28px;
+.editor-button--danger {
+  background: color-mix(in srgb, var(--editor-status-error) 22%, transparent);
+  border-color: color-mix(in srgb, var(--editor-status-error) 50%, transparent);
+  color: var(--editor-text-fg);
+}
+
+.editor-button--danger:hover {
+  background: color-mix(in srgb, var(--editor-status-error) 32%, transparent);
+}
+
+.editor-button--icon {
+  width: 34px;
   padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
-.btn-xs {
-  padding: 4px 8px;
-  font-size: 11px;
+.editor-button:active {
+  transform: translateY(1px);
 }
 
-.btn:focus-visible,
+.editor-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.editor-button:focus-visible,
 .mode-tab:focus-visible,
 .input:focus-visible,
 .select:focus-visible,
 .toolbar-input:focus-visible,
 .command-input:focus-visible {
-  outline: 1px solid var(--editor-accent-strong);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--editor-ring);
 }
 
 .input,
@@ -1138,13 +1187,10 @@
 }
 
 .toolbar-btn {
-  border: 1px solid var(--editor-line-hairline);
-  background: transparent;
-  color: var(--editor-text-fg);
   border-radius: var(--editor-radius-xs);
-  padding: 4px 8px;
+  height: 28px;
+  padding: 0 8px;
   font-size: 11px;
-  cursor: pointer;
 }
 
 .toolbar-btn.is-active {
@@ -1356,18 +1402,11 @@
 }
 
 .statusbar-button {
-  border: 1px solid var(--editor-line-hairline);
-  background: transparent;
-  color: var(--editor-text-fg);
-  padding: 4px 8px;
   font-size: 11px;
-  border-radius: var(--editor-radius-sm);
-  cursor: pointer;
 }
 
 .statusbar-button:disabled {
   color: var(--editor-text-muted);
-  cursor: default;
 }
 
 .statusbar-filename {
@@ -1388,16 +1427,7 @@
 }
 
 .statusbar-diagnostics {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--editor-line-hairline);
-  background: transparent;
-  color: var(--editor-text-fg);
-  padding: 4px 8px;
-  border-radius: var(--editor-radius-sm);
   font-size: 11px;
-  cursor: pointer;
 }
 
 .statusbar-badge {
