@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/core",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Core AST, parser, and evaluator for the Flux score language.",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",
