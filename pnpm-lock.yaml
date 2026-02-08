@@ -45,16 +45,16 @@ importers:
   packages/cli:
     dependencies:
       '@flux-lang/brand':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../brand
       '@flux-lang/cli-core':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../cli-core
       '@flux-lang/cli-ui':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../cli-ui
       '@flux-lang/core':
-        specifier: ^0.1.6
+        specifier: workspace:^
         version: link:../core
     devDependencies:
       '@types/node':
@@ -73,16 +73,16 @@ importers:
   packages/cli-core:
     dependencies:
       '@flux-lang/core':
-        specifier: ^0.1.6
+        specifier: workspace:^
         version: link:../core
       '@flux-lang/render-html':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../render-html
       '@flux-lang/typesetter':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../typesetter
       '@flux-lang/viewer':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../viewer
     devDependencies:
       '@types/node':
@@ -98,10 +98,10 @@ importers:
   packages/cli-ui:
     dependencies:
       '@flux-lang/brand':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../brand
       '@flux-lang/cli-core':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../cli-core
       chalk:
         specifier: ^5.4.1
@@ -150,10 +150,10 @@ importers:
         specifier: ^3.2.2
         version: 3.2.2(react@18.3.1)
       '@flux-lang/brand':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../brand
       '@flux-lang/core':
-        specifier: ^0.1.6
+        specifier: workspace:^
         version: link:../core
       '@monaco-editor/react':
         specifier: ^4.6.0
@@ -211,7 +211,7 @@ importers:
         version: 6.30.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
     devDependencies:
       '@flux-lang/viewer':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../viewer
       '@playwright/test':
         specifier: ^1.58.1
@@ -278,7 +278,7 @@ importers:
   packages/render-html:
     dependencies:
       '@flux-lang/core':
-        specifier: ^0.1.6
+        specifier: workspace:^
         version: link:../core
       hyphenation.en-us:
         specifier: ^0.2.1
@@ -307,16 +307,16 @@ importers:
   packages/viewer:
     dependencies:
       '@flux-lang/brand':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../brand
       '@flux-lang/core':
-        specifier: ^0.1.6
+        specifier: workspace:^
         version: link:../core
       '@flux-lang/render-html':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../render-html
       '@flux-lang/typesetter':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../typesetter
     devDependencies:
       typescript:
@@ -329,8 +329,8 @@ importers:
   packages/vscode-flux:
     dependencies:
       '@flux-lang/core':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: workspace:^
+        version: link:../core
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -798,9 +798,6 @@ packages:
 
   '@floating-ui/utils@0.2.10':
     resolution: {integrity: sha512-aGTxbpbg8/b5JfU1HXSrbH3wXZuLPJcNEcZQFMxLs3oSzgtVu6nFPkbbGGUvBcUjKV2YyB9Wxxabo+HEH9tcRQ==}
-
-  '@flux-lang/core@0.1.0':
-    resolution: {integrity: sha512-kGdKqwlFPLE/uphP3lj8E4GLTypXvIL/hkONOz9A6AP6PqO3emserbwoXM/MIDdlSrx43iq2uY7XPRqHjjJgAg==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -3115,8 +3112,6 @@ snapshots:
       react-dom: 18.3.1(react@18.3.1)
 
   '@floating-ui/utils@0.2.10': {}
-
-  '@flux-lang/core@0.1.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
