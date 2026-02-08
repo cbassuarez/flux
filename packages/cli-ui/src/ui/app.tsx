@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { coerceVersionInfo, formatFluxVersion, type FluxVersionInfo } from "@flux-lang/brand";
+import { renderCliBrandHeader } from "@flux-lang/brand/cli";
 import {
   getRecentsStore,
   updateRecents,
@@ -46,7 +48,7 @@ import { useToasts } from "../state/toasts.js";
 import { useProgress } from "../state/progress.js";
 import { resolveActionRoute, resolveRouteAfterOpen } from "../state/dashboard-machine.js";
 import { buildPaletteItems, filterPaletteItems, groupPaletteItems } from "../palette/index.js";
-import { accent, color, truncateMiddle } from "../theme/index.js";
+import { color, truncateMiddle } from "../theme/index.js";
 import { hasControlChars, sanitizePrintableInput } from "../ui/input.js";
 import { getLayoutMetrics, isTerminalTooSmall, MIN_COLS, MIN_ROWS } from "../ui/layout.js";
 import { useDebouncedValue } from "../ui/useDebouncedValue.js";
@@ -73,7 +75,8 @@ interface AppProps {
   initialArgs?: string[];
   detach?: boolean;
   helpCommand?: string;
-  version?: string;
+  versionInfo: FluxVersionInfo;
+  showVersionModal?: boolean;
 }
 
 const TEMPLATE_OPTIONS: { label: string; value: TemplateName; hint: string }[] = [
@@ -128,9 +131,10 @@ const FILE_SCAN_BATCH_MS = 75;
 
 export function App(props: AppProps) {
   const { exit } = useApp();
+  const brandInfo = useMemo(() => coerceVersionInfo(props.versionInfo), [props.versionInfo]);
   const initialRoute: AppRoute = props.mode === "new" ? "new" : "open";
   const initialFocusTarget: FocusTarget =
-    props.helpCommand ? "help" : props.version ? "modal" : defaultFocusForRoute(initialRoute);
+    props.helpCommand ? "help" : props.showVersionModal ? "modal" : defaultFocusForRoute(initialRoute);
   const [recents, setRecents] = useState<NavItem[]>([]);
   const [recentsPath, setRecentsPath] = useState<string | undefined>(undefined);
   const [currentDocument, setCurrentDocument] = useState<string | null>(null);
@@ -166,7 +170,7 @@ export function App(props: AppProps) {
   const [paletteQuery, setPaletteQuery] = useState("");
   const [paletteIndex, setPaletteIndex] = useState(0);
   const [helpOpen, setHelpOpen] = useState(Boolean(props.helpCommand));
-  const [versionOpen, setVersionOpen] = useState(Boolean(props.version));
+  const [versionOpen, setVersionOpen] = useState(Boolean(props.showVersionModal));
   const [wizardStep, setWizardStep] = useState(0);
   const initialTitle = titleFromTemplate("demo");
   const initialName = slugify(initialTitle);
@@ -965,18 +969,19 @@ export function App(props: AppProps) {
 
   return (
     <MouseProvider disabled={mouseDisabled}>
-      <Box position="relative" width="100%" height="100%">
-        <AppFrame debug={debugLayout}>
-        <Box flexDirection="row" gap={2} height="100%">
-          <PaneFrame focused={focusTarget === "nav"} width={navWidth} height="100%">
-            <Box flexDirection="column" gap={1}>
-              <Box flexDirection="column">
-                <Text>{accent("FLUX")}</Text>
-                <Box flexDirection="row" gap={1}>
-                  <Text color={streamOk ? "green" : color.muted}>{streamOk ? "●" : "○"}</Text>
-                  <Text color={color.muted}>{`Flux ${props.version ?? "0.x"} · ${streamOk ? "online" : "offline"} · backend: ${BACKEND_LABEL}`}</Text>
-                </Box>
-              </Box>
+	      <Box position="relative" width="100%" height="100%">
+	        <AppFrame debug={debugLayout}>
+	        <Box flexDirection="row" gap={2} height="100%">
+	          <PaneFrame focused={focusTarget === "nav"} width={navWidth} height="100%">
+	            <Box flexDirection="column" gap={1}>
+	              <Box flexDirection="column">
+	                {/* Brand comes from @flux-lang/brand; do not fork. */}
+	                {renderCliBrandHeader({ info: brandInfo, isOnline: streamOk, width: navContentWidth })
+	                  .split("\n")
+	                  .map((line, index) => (
+	                    <Text key={`brand-line-${index}`}>{line}</Text>
+	                  ))}
+	              </Box>
 
               <Card
                 title="Navigation"
@@ -1037,35 +1042,39 @@ export function App(props: AppProps) {
           />
         </ModalOverlay>
 
-        <ModalOverlay
-          isOpen={helpOpen}
+	        <ModalOverlay
+	          isOpen={helpOpen}
           title="Help"
           subtitle="Esc to close"
           width={modalLayout.width}
           height={modalLayout.height}
           onRequestClose={closeHelp}
         >
-          <HelpOverlay
-            width={modalLayout.contentWidth}
-            version={props.version}
-            recentsPath={recentsPath}
-            backend={BACKEND_LABEL}
-            extraLines={props.helpCommand ? getHelpLines(props.helpCommand) : undefined}
-          />
-        </ModalOverlay>
+	          <HelpOverlay
+	            width={modalLayout.contentWidth}
+	            version={formatFluxVersion(brandInfo.version)}
+	            recentsPath={recentsPath}
+	            backend={BACKEND_LABEL}
+	            extraLines={props.helpCommand ? getHelpLines(props.helpCommand) : undefined}
+	          />
+	        </ModalOverlay>
 
-        <ModalOverlay
-          isOpen={versionOpen}
+	        <ModalOverlay
+	          isOpen={versionOpen}
           title="Flux CLI"
           subtitle="Esc to close"
           width={modalLayout.width}
           height={modalLayout.height}
           onRequestClose={closeVersion}
         >
-          <Box flexDirection="column" gap={1}>
-            <Text color={color.muted}>{props.version ?? "version unknown"}</Text>
-          </Box>
-        </ModalOverlay>
+	          <Box flexDirection="column" gap={1}>
+	            <Text color={color.muted}>{`flux ${formatFluxVersion(brandInfo.version)}`}</Text>
+	            <Text color={color.muted}>{brandInfo.tagline}</Text>
+	            {brandInfo.channel ? <Text color={color.muted}>{`channel: ${brandInfo.channel}`}</Text> : null}
+	            {brandInfo.build ? <Text color={color.muted}>{`build: ${brandInfo.build}`}</Text> : null}
+	            {brandInfo.sha ? <Text color={color.muted}>{`sha: ${brandInfo.sha}`}</Text> : null}
+	          </Box>
+	        </ModalOverlay>
       </Box>
     </MouseProvider>
   );

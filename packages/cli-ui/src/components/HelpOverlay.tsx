@@ -75,7 +75,7 @@ export function HelpOverlay({
         {(backend || recentsPath || version) ? (
           <Box flexDirection="column" gap={0}>
             <Text color={color.fg} bold>Details</Text>
-            {version ? <Text color={color.muted}>{`Flux ${version}`}</Text> : null}
+            {version ? <Text color={color.muted}>{`flux ${version}`}</Text> : null}
             {backend ? <Text color={color.muted}>{`Backend: ${backend}`}</Text> : null}
             {recentsPath ? <Text color={color.muted}>{`Recents: ${recentsPath}`}</Text> : null}
           </Box>

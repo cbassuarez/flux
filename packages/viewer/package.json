@@ -23,12 +23,13 @@
   },
   "scripts": {
     "prepare-editor": "npm run build --workspace @flux-lang/editor-ui --if-present && node ../../scripts/sync-editor-dist.mjs",
-    "prebuild": "npm run prepare-editor",
+    "prebuild": "npm run build --workspace @flux-lang/brand && npm run prepare-editor",
     "build": "tsc -p tsconfig.json",
-    "pretest": "npm run prepare-editor",
+    "pretest": "npm run build --workspace @flux-lang/brand && npm run prepare-editor",
     "test": "vitest"
   },
   "dependencies": {
+    "@flux-lang/brand": "^0.1.0",
     "@flux-lang/core": "^0.1.6",
     "@flux-lang/render-html": "^0.1.0",
     "@flux-lang/typesetter": "^0.1.0"

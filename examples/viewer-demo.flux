@@ -411,6 +411,11 @@ document {
         path = "chapters/appendix-a.flux";
         visibleIf = @meta.target == "screen";
       }
+
+      section section1 {
+        text section1Heading { style = "H2"; content = "Section Heading"; }
+        text section1Body { content = "Start writing here."; }
+      }
     }
   }
 }

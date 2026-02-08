@@ -1,6 +1,7 @@
 import http from "node:http";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   parseDocument,
   checkDocument,
@@ -19,6 +20,7 @@ import {
 } from "@flux-lang/core";
 import { renderHtml, type RenderHtmlResult } from "@flux-lang/render-html";
 import { createTypesetterBackend } from "@flux-lang/typesetter";
+import { coerceVersionInfo, type FluxVersionInfo } from "@flux-lang/brand";
 import { buildEditorMissingHtml, resolveEditorDist } from "./editor-dist.js";
 import { renderViewerToolbar, viewerToolbarCss } from "./ui/ViewerToolbar.js";
 import { viewerThemeCss } from "./ui/viewerTheme.js";
@@ -26,6 +28,8 @@ import crypto from "node:crypto";
 import viewerPkg from "../package.json" with { type: "json" };
 
 export const VIEWER_VERSION = (viewerPkg as { version?: string }).version ?? "0.0.0";
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_VERSION_JSON_PATH = path.resolve(MODULE_DIR, "../../../version.json");
 
 export interface ViewerServerOptions {
   docPath: string;
@@ -117,6 +121,22 @@ type ViewerRenderOptions = Parameters<typeof renderHtml>[1];
 
 export function noCacheHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return { ...NO_CACHE_HEADERS, ...extra };
+}
+
+function inferChannelFromVersion(version: string): FluxVersionInfo["channel"] {
+  return /-canary(?:\.|$)/i.test(version) ? "canary" : "stable";
+}
+
+async function loadFluxVersionInfo(): Promise<FluxVersionInfo> {
+  try {
+    const raw = await fs.readFile(REPO_VERSION_JSON_PATH, "utf8");
+    return coerceVersionInfo(JSON.parse(raw) as Partial<FluxVersionInfo>);
+  } catch {
+    return coerceVersionInfo({
+      version: VIEWER_VERSION,
+      channel: inferChannelFromVersion(VIEWER_VERSION),
+    });
+  }
 }
 
 export async function computeBuildId(
@@ -540,6 +560,12 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
             editorDist: editorDist.dir ?? null,
           }),
         );
+        return;
+      }
+
+      if (url.pathname === "/api/version") {
+        const versionInfo = await loadFluxVersionInfo();
+        sendJson(res, versionInfo, buildHeaders);
         return;
       }
 

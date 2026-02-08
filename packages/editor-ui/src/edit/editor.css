@@ -50,6 +50,14 @@
   cursor: pointer;
 }
 
+.menubar-trigger-brand {
+  padding: 2px 4px;
+}
+
+.menubar-trigger-brand .flux-brand-version {
+  color: var(--editor-text-muted);
+}
+
 .menubar-trigger[data-highlighted],
 .menubar-trigger:focus-visible {
   outline: none;
@@ -1497,6 +1505,12 @@
 .modal-meta {
   font-size: 11px;
   color: var(--editor-text-muted);
+}
+
+.flux-about-tagline {
+  margin: 0;
+  color: var(--editor-text-fg);
+  font-size: 13px;
 }
 
 .command-shortcut {

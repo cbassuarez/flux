@@ -27,7 +27,9 @@ import {
   defaultEmbeddedDir,
   VIEWER_VERSION as VIEWER_PACKAGE_VERSION,
 } from "@flux-lang/viewer";
+import { type FluxVersionInfo } from "@flux-lang/brand";
 import { FLUX_CLI_VERSION } from "../version.js";
+import { getFluxVersionInfoCli } from "../versionInfo.js";
 
 const CLI_VERSION = FLUX_CLI_VERSION;
 
@@ -47,6 +49,7 @@ void (async () => {
 async function main(argv: string[]): Promise<ExitCode> {
   const parsed = parseGlobalArgs(argv);
   const args = parsed.args;
+  const fluxVersionInfo = await getFluxVersionInfoCli(process.cwd());
 
   const uiEnabled = shouldLaunchUi({
     stdoutIsTTY: Boolean(process.stdout.isTTY),
@@ -62,12 +65,13 @@ async function main(argv: string[]): Promise<ExitCode> {
       initialArgs: args,
       detach: parsed.detach,
       helpCommand: parsed.help ? args[0] : undefined,
-      version: parsed.version ? `flux v${CLI_VERSION}` : undefined,
+      versionInfo: fluxVersionInfo,
+      showVersionModal: parsed.version,
     });
   }
 
   if (parsed.version) {
-    await printVersion(parsed.json);
+    await printVersion(parsed.json, fluxVersionInfo);
     return 0;
   }
 
@@ -181,7 +185,9 @@ function parseGlobalArgs(argv: string[]) {
   return { ...flags, args };
 }
 
-async function collectComponentVersions(): Promise<{ cli: string; viewer: string; editorBuildId: string | null }> {
+async function collectComponentVersions(
+  versionInfo: FluxVersionInfo,
+): Promise<{ cli: string; viewer: string; editorBuildId: string | null }> {
   let editorBuildId: string | null = null;
   try {
     const embedded = defaultEmbeddedDir();
@@ -191,14 +197,14 @@ async function collectComponentVersions(): Promise<{ cli: string; viewer: string
     editorBuildId = null;
   }
   return {
-    cli: CLI_VERSION,
+    cli: versionInfo.version,
     viewer: VIEWER_PACKAGE_VERSION,
     editorBuildId,
   };
 }
 
-async function printVersion(asJson: boolean): Promise<void> {
-  const info = await collectComponentVersions();
+async function printVersion(asJson: boolean, versionInfo: FluxVersionInfo): Promise<void> {
+  const info = await collectComponentVersions(versionInfo);
   if (asJson) {
     console.log(JSON.stringify(info));
     return;
@@ -1374,7 +1380,8 @@ async function launchUi(options: {
   initialArgs?: string[];
   detach?: boolean;
   helpCommand?: string;
-  version?: string;
+  versionInfo: FluxVersionInfo;
+  showVersionModal?: boolean;
 }): Promise<ExitCode> {
   const { runCliUi } = await import("@flux-lang/cli-ui");
   await runCliUi({
@@ -1383,7 +1390,8 @@ async function launchUi(options: {
     initialArgs: options.initialArgs,
     detach: options.detach,
     helpCommand: options.helpCommand,
-    version: options.version,
+    versionInfo: options.versionInfo,
+    showVersionModal: options.showVersionModal,
   });
   return 0;
 }

@@ -1,4 +1,6 @@
 import * as Menubar from "@radix-ui/react-menubar";
+import { FLUX_TAGLINE, type FluxVersionInfo } from "@flux-lang/brand";
+import { FluxBrandHeader } from "@flux-lang/brand/web";
 import type { EditorCommand, EditorCommandId } from "../commands/editorCommands";
 
 type MenuItem =
@@ -12,6 +14,8 @@ type MenuDefinition = { label: string; items: MenuItem[] };
 type MenuBarProps = {
   commands: Record<EditorCommandId, EditorCommand>;
   checked: Partial<Record<EditorCommandId, boolean>>;
+  brandInfo: FluxVersionInfo;
+  onBrandVersionClick?: () => void;
 };
 
 const MENUS: MenuDefinition[] = [
@@ -154,13 +158,29 @@ const MENUS: MenuDefinition[] = [
   },
 ];
 
-export function MenuBar({ commands, checked }: MenuBarProps) {
+export function MenuBar({ commands, checked, brandInfo, onBrandVersionClick }: MenuBarProps) {
   return (
     <div className="editor-menubar">
       <Menubar.Root className="menubar-root">
         {MENUS.map((menu) => (
           <Menubar.Menu key={menu.label}>
-            <Menubar.Trigger className="menubar-trigger">{menu.label}</Menubar.Trigger>
+            <Menubar.Trigger
+              className={`menubar-trigger${menu.label === "Flux" ? " menubar-trigger-brand" : ""}`}
+              title={menu.label === "Flux" ? FLUX_TAGLINE : undefined}
+            >
+              {menu.label === "Flux" ? (
+                // Brand comes from @flux-lang/brand; do not fork.
+                <FluxBrandHeader
+                  info={brandInfo}
+                  variant="menu"
+                  markPath="/edit/flux-mark-favicon.svg"
+                  showTagline={false}
+                  onVersionClick={onBrandVersionClick}
+                />
+              ) : (
+                menu.label
+              )}
+            </Menubar.Trigger>
             <Menubar.Portal>
               <Menubar.Content className="menubar-content" align="start" sideOffset={6}>
                 {menu.items.map((item, index) => (

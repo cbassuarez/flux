@@ -1,5 +1,6 @@
 import React from "react";
 import { render } from "ink";
+import type { FluxVersionInfo } from "@flux-lang/brand";
 import { App } from "./ui/app.js";
 
 export interface CliUiOptions {
@@ -8,7 +9,8 @@ export interface CliUiOptions {
   initialArgs?: string[];
   detach?: boolean;
   helpCommand?: string;
-  version?: string;
+  versionInfo: FluxVersionInfo;
+  showVersionModal?: boolean;
 }
 
 export async function runCliUi(options: CliUiOptions): Promise<void> {

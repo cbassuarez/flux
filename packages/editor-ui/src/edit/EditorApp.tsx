@@ -14,6 +14,7 @@ import { Command } from "cmdk";
 import MonacoEditor, { loader } from "@monaco-editor/react";
 import type { JSONContent } from "@tiptap/core";
 import type { DocumentNode, NodePropValue, RefreshPolicy } from "@flux-lang/core";
+import { FLUX_TAGLINE, coerceVersionInfo, formatFluxVersion, type FluxVersionInfo } from "@flux-lang/brand";
 import "./editor.css";
 import {
   DividerHairline,
@@ -76,6 +77,7 @@ import {
 import { EditorRuntimeProvider, useEditorRuntimeState } from "./runtimeContext";
 import { buildGeneratorExpr, hasEmptyValue, isChooseCycleSpec, promoteVariants, wrapExpressionValue } from "./generatorUtils";
 import { buildEditorCommands, type EditorCommand } from "./commands/editorCommands";
+import { getFluxVersionInfo } from "./versionInfo";
 
 loader.config({ monaco });
 
@@ -141,6 +143,7 @@ export default function EditorApp() {
   const [activeEditor, setActiveEditor] = useState<"tiptap" | "monaco" | "none">("none");
   const [debugEnabled] = useState(() => isDebugEnabled());
   const [buildInfo, setBuildInfo] = useState<{ id: string | null; dist: string | null }>({ id: null, dist: null });
+  const [fluxVersionInfo, setFluxVersionInfo] = useState<FluxVersionInfo>(() => coerceVersionInfo({ version: "0.0.0" }));
 
   const runtimeInputs = useMemo<EditorRuntimeInputs>(
     () => ({
@@ -204,6 +207,17 @@ export default function EditorApp() {
         };
         void fetchBuildId();
     }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void getFluxVersionInfo().then((info) => {
+      if (!alive) return;
+      setFluxVersionInfo(info);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!doc?.source) return;
@@ -1358,6 +1372,7 @@ export default function EditorApp() {
             </div>
           </div>
         ) : null}
+        {/* Brand comes from @flux-lang/brand; do not fork. */}
         <MenuBar
           commands={editorCommands}
           checked={{
@@ -1367,6 +1382,8 @@ export default function EditorApp() {
             "view.toggleDiagnostics": diagnosticsOpen,
             "view.showStatusBar": showStatusBar,
           }}
+          brandInfo={fluxVersionInfo}
+          onBrandVersionClick={() => editorCommands["help.buildInfo"]?.run()}
         />
         {showStatusBar ? (
           <StatusBar
@@ -1691,7 +1708,11 @@ export default function EditorApp() {
           {aboutOpen ? (
             <ModalShell title="About Flux Editor" onClose={() => setAboutOpen(false)}>
               <div className="modal-body">
-                <p>Flux Editor for authoring Flux documents.</p>
+                <p className="flux-about-tagline">{FLUX_TAGLINE}</p>
+                <div className="settings-row">
+                  <span>Version</span>
+                  <span>{formatFluxVersion(fluxVersionInfo.version)}</span>
+                </div>
                 <div className="modal-meta">{buildInfoLabel}</div>
               </div>
             </ModalShell>
@@ -1724,12 +1745,30 @@ export default function EditorApp() {
             <ModalShell title="Version / Build Info" onClose={() => setBuildInfoOpen(false)}>
               <div className="modal-body">
                 <div className="settings-row">
+                  <span>Version</span>
+                  <span>{formatFluxVersion(fluxVersionInfo.version)}</span>
+                </div>
+                <div className="settings-row">
+                  <span>Channel</span>
+                  <span>{fluxVersionInfo.channel ?? "stable"}</span>
+                </div>
+                <div className="settings-row">
                   <span>Build</span>
                   <span>{buildInfo.id ?? "—"}</span>
                 </div>
                 <div className="settings-row">
                   <span>Distribution</span>
                   <span>{buildInfo.dist ?? "—"}</span>
+                </div>
+                {fluxVersionInfo.sha ? (
+                  <div className="settings-row">
+                    <span>SHA</span>
+                    <span>{fluxVersionInfo.sha}</span>
+                  </div>
+                ) : null}
+                <div className="settings-row">
+                  <span>Tagline</span>
+                  <span>{fluxVersionInfo.tagline}</span>
                 </div>
                 <button type="button" className="btn btn-ghost btn-xs" onClick={handleCopyBuildInfo}>
                   Copy Build Info

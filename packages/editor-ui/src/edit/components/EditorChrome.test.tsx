@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { coerceVersionInfo } from "@flux-lang/brand";
 import { MenuBar } from "./MenuBar";
 import { StatusBar } from "./StatusBar";
 import type { EditorCommand, EditorCommandId } from "../commands/editorCommands";
@@ -102,11 +103,14 @@ describe("editor header chrome", () => {
           "view.toggleDiagnostics": false,
           "view.showStatusBar": true,
         }}
+        brandInfo={coerceVersionInfo({ version: "0.1.4" })}
       />,
     );
 
     const menubar = screen.getByRole("menubar");
-    const labels = ["Flux", "File", "Edit", "Insert", "Format", "View", "Runtime", "Window", "Help"];
+    expect(within(menubar).getByText("flux")).toBeTruthy();
+    expect(within(menubar).getByText("v0.1.4")).toBeTruthy();
+    const labels = ["File", "Edit", "Insert", "Format", "View", "Runtime", "Window", "Help"];
     labels.forEach((label) => expect(within(menubar).getByText(label)).toBeTruthy());
     expect(within(menubar).queryByText(/Delete/i)).toBeNull();
 
@@ -124,9 +128,11 @@ describe("editor header chrome", () => {
           "view.toggleDiagnostics": false,
           "view.showStatusBar": true,
         }}
+        brandInfo={coerceVersionInfo({ version: "0.1.4" })}
       />,
     );
 
+    expect(within(menubar).getByText("flux")).toBeTruthy();
     labels.forEach((label) => expect(within(menubar).getByText(label)).toBeTruthy());
   });
 
