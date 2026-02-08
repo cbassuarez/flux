@@ -130,7 +130,11 @@ function inferChannelFromVersion(version: string): FluxVersionInfo["channel"] {
 async function loadFluxVersionInfo(): Promise<FluxVersionInfo> {
   try {
     const raw = await fs.readFile(REPO_VERSION_JSON_PATH, "utf8");
-    return coerceVersionInfo(JSON.parse(raw) as Partial<FluxVersionInfo>);
+    const parsed = JSON.parse(raw) as { baseVersion?: string; version?: string; channel?: FluxVersionInfo["channel"] };
+    return coerceVersionInfo({
+      version: parsed.baseVersion ?? parsed.version,
+      channel: parsed.channel,
+    });
   } catch {
     return coerceVersionInfo({
       version: VIEWER_VERSION,

@@ -32,7 +32,11 @@ export async function getFluxVersionInfoCli(cwd = process.cwd()): Promise<FluxVe
   if (fromRepo) {
     try {
       const raw = await fs.readFile(fromRepo, "utf8");
-      return coerceVersionInfo(JSON.parse(raw) as Partial<FluxVersionInfo>);
+      const parsed = JSON.parse(raw) as { baseVersion?: string; version?: string; channel?: FluxChannel };
+      return coerceVersionInfo({
+        version: parsed.baseVersion ?? parsed.version,
+        channel: parsed.channel,
+      });
     } catch {
       // Fall through to package fallback.
     }
