@@ -551,243 +551,317 @@ export async function startViewerServer(options) {
                 return;
             }
             if (url.pathname === "/api/edit/transform" && req.method === "POST") {
-                const payload = await readJson(req);
-                const requestedPath = typeof payload?.file === "string" ? payload.file : payload?.docPath;
-                if (requestedPath && path.resolve(requestedPath) !== docPath) {
-                    res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
-                    res.end(JSON.stringify({ ok: false, error: "Document path not allowed" }));
-                    return;
-                }
-                const op = payload?.op;
-                const args = payload?.args ?? {};
-                const source = await fs.readFile(docPath, "utf8");
-                const parsed = parseSource(source);
-                if (!parsed.doc || parsed.errors.length) {
+                const logPrefix = "[edit/transform]";
+                const logEvent = (message, meta = {}) => {
+                    console.info(logPrefix, message, meta);
+                };
+                logEvent("handler entry", {
+                    method: req.method,
+                    url: req.url,
+                    contentLength: req.headers["content-length"],
+                    contentType: req.headers["content-type"],
+                });
+                req.on("aborted", () => logEvent("request aborted"));
+                req.on("error", (error) => logEvent("request error", { error: String(error) }));
+                res.on("close", () => logEvent("response close", { status: res.statusCode }));
+                res.on("error", (error) => logEvent("response error", { error: String(error) }));
+                res.once("finish", () => logEvent("response finished", { status: res.statusCode }));
+                const responseTimeout = setTimeout(() => {
+                    if (res.headersSent || res.writableEnded)
+                        return;
+                    logEvent("response timeout");
                     sendJson(res, {
                         ok: false,
-                        diagnostics: parsed.diagnostics,
-                        error: parsed.errors.join("; "),
+                        error: "Transform response timed out",
+                        diagnostics: buildDiagnosticsBundle([
+                            buildDiagnosticFromMessage("Transform response timed out", currentSource, docPath, "fail"),
+                        ]),
                     }, buildHeaders);
-                    return;
-                }
-                if (op === "setSource") {
-                    const nextRaw = typeof args.source === "string" ? args.source : "";
-                    if (!nextRaw.trim()) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing source" }, buildHeaders);
+                }, 10000);
+                try {
+                    logEvent("before body parse");
+                    const rawPayload = (await readJson(req, { timeoutMs: 9000 }));
+                    logEvent("after body parse");
+                    const source = await fs.readFile(docPath, "utf8");
+                    const beforeHash = crypto.createHash("sha1").update(source).digest("hex").slice(0, 12);
+                    const buildEditHeaders = (applied, afterHash, error) => ({
+                        ...buildHeaders,
+                        "X-Flux-Edit-Applied": applied ? "1" : "0",
+                        "X-Flux-Edit-Before": beforeHash,
+                        "X-Flux-Edit-After": afterHash,
+                        ...(error ? { "X-Flux-Edit-Error": error } : {}),
+                    });
+                    const sendTransform = (payload, options) => {
+                        if (res.writableEnded) {
+                            logEvent("response already ended");
+                            return;
+                        }
+                        const afterHash = options.afterHash ?? beforeHash;
+                        logEvent("sending response", { applied: options.applied, error: options.error });
+                        sendJson(res, payload, buildEditHeaders(options.applied, afterHash, options.error));
+                    };
+                    const normalized = normalizeEditTransformPayload(rawPayload, source, docPath);
+                    if (normalized.diagnostics.length) {
+                        const primary = normalized.diagnostics[0]?.message ?? "Invalid transform payload";
+                        sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle(normalized.diagnostics), error: primary }, { applied: false, error: primary });
                         return;
                     }
-                    const formatted = formatFluxSource(nextRaw);
-                    const validated = parseSource(formatted);
+                    const payload = normalized.payload;
+                    const op = payload?.op;
+                    const args = payload?.args ?? {};
+                    const parsed = parseSource(source);
+                    if (!parsed.doc || parsed.errors.length) {
+                        sendTransform({
+                            ok: false,
+                            diagnostics: parsed.diagnostics,
+                            error: parsed.errors.join("; "),
+                        }, { applied: false });
+                        return;
+                    }
+                    if (op === "setSource") {
+                        const nextRaw = typeof args.source === "string" ? args.source : "";
+                        if (!nextRaw.trim()) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing source" }, { applied: false });
+                            return;
+                        }
+                        const formatted = formatFluxSource(nextRaw);
+                        const validated = parseSource(formatted);
+                        if (!validated.doc || validated.errors.length) {
+                            sendTransform({
+                                ok: false,
+                                diagnostics: validated.diagnostics,
+                                error: validated.errors.join("; "),
+                            }, { applied: false });
+                            return;
+                        }
+                        await writeFileAtomic(docPath, formatted);
+                        currentSource = formatted;
+                        revision += 1;
+                        lastValidRevision = revision;
+                        rebuildFromSource(formatted);
+                        broadcastDocChanged();
+                        sendTransform({
+                            ok: current.errors.length === 0,
+                            newRevision: revision,
+                            diagnostics: current.diagnostics,
+                            outline: buildOutline(),
+                            state: await buildEditState(),
+                            source: currentSource,
+                        }, {
+                            applied: true,
+                            afterHash: crypto.createHash("sha1").update(formatted).digest("hex").slice(0, 12),
+                        });
+                        return;
+                    }
+                    let nextSource = null;
+                    let selectedId;
+                    if (op === "setTextNodeContent") {
+                        const id = typeof args.id === "string" ? args.id : "";
+                        const text = typeof args.text === "string"
+                            ? args.text
+                            : typeof args.richText?.content === "string"
+                                ? args.richText.content
+                                : "";
+                        const result = applySetTextTransform(source, parsed.doc, id, text, docPath);
+                        if (!result.ok) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            return;
+                        }
+                        nextSource = formatFluxSource(result.source);
+                        selectedId = id;
+                    }
+                    else if (op === "setNodeProps") {
+                        const id = typeof args.id === "string" ? args.id : "";
+                        const props = typeof args.props === "object" && args.props ? args.props : {};
+                        const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
+                        if (!node) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, { applied: false });
+                            return;
+                        }
+                        const merged = { ...node, props: { ...(node.props ?? {}), ...wrapLiteralProps(props) } };
+                        const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
+                        if (!result.ok) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            return;
+                        }
+                        nextSource = formatFluxSource(result.source);
+                        selectedId = id;
+                    }
+                    else if (op === "setSlotProps") {
+                        const id = typeof args.id === "string" ? args.id : "";
+                        const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
+                        if (!node) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, { applied: false });
+                            return;
+                        }
+                        const nextProps = { ...(node.props ?? {}) };
+                        if (args.reserve !== undefined)
+                            nextProps.reserve = wrapLiteral(args.reserve);
+                        if (args.fit !== undefined)
+                            nextProps.fit = wrapLiteral(args.fit);
+                        if (args.refresh !== undefined)
+                            nextProps.refresh = args.refresh;
+                        if (args.transition !== undefined)
+                            nextProps.transition = args.transition;
+                        const merged = { ...node, props: nextProps };
+                        const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
+                        if (!result.ok) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            return;
+                        }
+                        nextSource = formatFluxSource(result.source);
+                        selectedId = id;
+                    }
+                    else if (op === "setSlotGenerator") {
+                        const id = typeof args.id === "string" ? args.id : typeof args.slotId === "string" ? args.slotId : "";
+                        const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
+                        if (!node) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, { applied: false });
+                            return;
+                        }
+                        const nextProps = { ...(node.props ?? {}) };
+                        nextProps.generator = args.generator === null ? wrapLiteral(null) : args.generator;
+                        const merged = { ...node, props: nextProps };
+                        const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
+                        if (!result.ok) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            return;
+                        }
+                        nextSource = formatFluxSource(result.source);
+                        selectedId = id;
+                    }
+                    else if (op === "replaceNode") {
+                        const id = typeof args.id === "string" ? args.id : "";
+                        const node = typeof args.node === "object" && args.node ? args.node : null;
+                        if (!node) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing node payload" }, { applied: false });
+                            return;
+                        }
+                        const result = applyReplaceNodeTransform(source, parsed.doc, id, node, docPath);
+                        if (!result.ok) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            return;
+                        }
+                        nextSource = formatFluxSource(result.source);
+                        selectedId = id;
+                    }
+                    else if (op === "setText") {
+                        const id = typeof args.id === "string" ? args.id : "";
+                        const text = typeof args.text === "string" ? args.text : "";
+                        const result = applySetTextTransform(source, parsed.doc, id, text, docPath);
+                        if (!result.ok) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            return;
+                        }
+                        nextSource = formatFluxSource(result.source);
+                        selectedId = id;
+                    }
+                    else {
+                        const toOptions = () => {
+                            if (op === "addSection") {
+                                return {
+                                    kind: "section",
+                                    heading: typeof args.heading === "string" ? args.heading : undefined,
+                                    noHeading: typeof args.noHeading === "boolean" ? args.noHeading : undefined,
+                                };
+                            }
+                            if (op === "addParagraph") {
+                                return {
+                                    kind: "paragraph",
+                                    text: typeof args.text === "string" ? args.text : undefined,
+                                };
+                            }
+                            if (op === "addFigure") {
+                                return {
+                                    kind: "figure",
+                                    bankName: typeof args.bankName === "string" ? args.bankName : undefined,
+                                    tags: Array.isArray(args.tags) ? args.tags.map((tag) => String(tag)) : undefined,
+                                    caption: typeof args.caption === "string" ? args.caption : undefined,
+                                    label: typeof args.label === "string" ? args.label : undefined,
+                                    reserve: args.reserve,
+                                    fit: typeof args.fit === "string" ? args.fit : undefined,
+                                };
+                            }
+                            if (op === "addCallout") {
+                                return {
+                                    kind: "callout",
+                                    label: typeof args.tone === "string" ? args.tone : undefined,
+                                    text: typeof args.text === "string" ? args.text : undefined,
+                                };
+                            }
+                            if (op === "addTable") {
+                                return { kind: "table" };
+                            }
+                            if (op === "addSlot") {
+                                return { kind: "slot" };
+                            }
+                            throw new Error("Unsupported edit operation");
+                        };
+                        try {
+                            nextSource = formatFluxSource(applyAddTransform(source, parsed.doc, toOptions()));
+                        }
+                        catch (err) {
+                            sendTransform({
+                                ok: false,
+                                diagnostics: buildDiagnosticsBundle([
+                                    buildDiagnosticFromMessage(String(err?.message ?? err), source, docPath, "fail"),
+                                ]),
+                            }, { applied: false });
+                            return;
+                        }
+                    }
+                    if (!nextSource) {
+                        sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([]), error: "No changes produced" }, { applied: false });
+                        return;
+                    }
+                    const validated = parseSource(nextSource);
                     if (!validated.doc || validated.errors.length) {
-                        sendJson(res, {
+                        sendTransform({
                             ok: false,
                             diagnostics: validated.diagnostics,
                             error: validated.errors.join("; "),
-                        }, buildHeaders);
+                        }, { applied: false });
                         return;
                     }
-                    await writeFileAtomic(docPath, formatted);
-                    currentSource = formatted;
+                    await writeFileAtomic(docPath, nextSource);
+                    currentSource = nextSource;
                     revision += 1;
                     lastValidRevision = revision;
-                    rebuildFromSource(formatted);
+                    rebuildFromSource(nextSource);
                     broadcastDocChanged();
-                    sendJson(res, {
+                    sendTransform({
                         ok: current.errors.length === 0,
                         newRevision: revision,
                         diagnostics: current.diagnostics,
                         outline: buildOutline(),
+                        selectedId,
                         state: await buildEditState(),
                         source: currentSource,
-                    }, buildHeaders);
+                        writeId: typeof payload?.writeId === "string" ? payload.writeId : null,
+                    }, {
+                        applied: true,
+                        afterHash: crypto.createHash("sha1").update(nextSource).digest("hex").slice(0, 12),
+                    });
                     return;
                 }
-                let nextSource = null;
-                let selectedId;
-                if (op === "setTextNodeContent") {
-                    const id = typeof args.id === "string" ? args.id : "";
-                    const text = typeof args.text === "string"
-                        ? args.text
-                        : typeof args.richText?.content === "string"
-                            ? args.richText.content
-                            : "";
-                    const result = applySetTextTransform(source, parsed.doc, id, text, docPath);
-                    if (!result.ok) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
-                        return;
-                    }
-                    nextSource = formatFluxSource(result.source);
-                    selectedId = id;
-                }
-                else if (op === "setNodeProps") {
-                    const id = typeof args.id === "string" ? args.id : "";
-                    const props = typeof args.props === "object" && args.props ? args.props : {};
-                    const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
-                    if (!node) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, buildHeaders);
-                        return;
-                    }
-                    const merged = { ...node, props: { ...(node.props ?? {}), ...wrapLiteralProps(props) } };
-                    const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
-                    if (!result.ok) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
-                        return;
-                    }
-                    nextSource = formatFluxSource(result.source);
-                    selectedId = id;
-                }
-                else if (op === "setSlotProps") {
-                    const id = typeof args.id === "string" ? args.id : "";
-                    const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
-                    if (!node) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, buildHeaders);
-                        return;
-                    }
-                    const nextProps = { ...(node.props ?? {}) };
-                    if (args.reserve !== undefined)
-                        nextProps.reserve = wrapLiteral(args.reserve);
-                    if (args.fit !== undefined)
-                        nextProps.fit = wrapLiteral(args.fit);
-                    if (args.refresh !== undefined)
-                        nextProps.refresh = args.refresh;
-                    if (args.transition !== undefined)
-                        nextProps.transition = args.transition;
-                    const merged = { ...node, props: nextProps };
-                    const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
-                    if (!result.ok) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
-                        return;
-                    }
-                    nextSource = formatFluxSource(result.source);
-                    selectedId = id;
-                }
-                else if (op === "setSlotGenerator") {
-                    const id = typeof args.id === "string" ? args.id : "";
-                    const node = findNodeById(parsed.doc.body?.nodes ?? [], id);
-                    if (!node) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Node not found" }, buildHeaders);
-                        return;
-                    }
-                    const nextProps = { ...(node.props ?? {}) };
-                    nextProps.generator = args.generator;
-                    const merged = { ...node, props: nextProps };
-                    const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
-                    if (!result.ok) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
-                        return;
-                    }
-                    nextSource = formatFluxSource(result.source);
-                    selectedId = id;
-                }
-                else if (op === "replaceNode") {
-                    const id = typeof args.id === "string" ? args.id : "";
-                    const node = typeof args.node === "object" && args.node ? args.node : null;
-                    if (!node) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "Missing node payload" }, buildHeaders);
-                        return;
-                    }
-                    const result = applyReplaceNodeTransform(source, parsed.doc, id, node, docPath);
-                    if (!result.ok) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
-                        return;
-                    }
-                    nextSource = formatFluxSource(result.source);
-                    selectedId = id;
-                }
-                else if (op === "setText") {
-                    const id = typeof args.id === "string" ? args.id : "";
-                    const text = typeof args.text === "string" ? args.text : "";
-                    const result = applySetTextTransform(source, parsed.doc, id, text, docPath);
-                    if (!result.ok) {
-                        sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, buildHeaders);
-                        return;
-                    }
-                    nextSource = formatFluxSource(result.source);
-                    selectedId = id;
-                }
-                else {
-                    const toOptions = () => {
-                        if (op === "addSection") {
-                            return {
-                                kind: "section",
-                                heading: typeof args.heading === "string" ? args.heading : undefined,
-                                noHeading: typeof args.noHeading === "boolean" ? args.noHeading : undefined,
-                            };
-                        }
-                        if (op === "addParagraph") {
-                            return {
-                                kind: "paragraph",
-                                text: typeof args.text === "string" ? args.text : undefined,
-                            };
-                        }
-                        if (op === "addFigure") {
-                            return {
-                                kind: "figure",
-                                bankName: typeof args.bankName === "string" ? args.bankName : undefined,
-                                tags: Array.isArray(args.tags) ? args.tags.map((tag) => String(tag)) : undefined,
-                                caption: typeof args.caption === "string" ? args.caption : undefined,
-                                label: typeof args.label === "string" ? args.label : undefined,
-                                reserve: args.reserve,
-                                fit: typeof args.fit === "string" ? args.fit : undefined,
-                            };
-                        }
-                        if (op === "addCallout") {
-                            return {
-                                kind: "callout",
-                                label: typeof args.tone === "string" ? args.tone : undefined,
-                                text: typeof args.text === "string" ? args.text : undefined,
-                            };
-                        }
-                        if (op === "addTable") {
-                            return { kind: "table" };
-                        }
-                        if (op === "addSlot") {
-                            return { kind: "slot" };
-                        }
-                        throw new Error("Unsupported edit operation");
-                    };
-                    try {
-                        nextSource = formatFluxSource(applyAddTransform(source, parsed.doc, toOptions()));
-                    }
-                    catch (err) {
+                catch (err) {
+                    const error = err;
+                    if (!res.headersSent && !res.writableEnded) {
+                        const message = err instanceof ReadJsonError ? err.message : "Transform request failed";
+                        logEvent("handler error", { error: String(error?.message ?? error) });
                         sendJson(res, {
                             ok: false,
-                            diagnostics: buildDiagnosticsBundle([
-                                buildDiagnosticFromMessage(String(err?.message ?? err), source, docPath, "fail"),
-                            ]),
+                            error: message,
+                            diagnostics: buildDiagnosticsBundle([buildDiagnosticFromMessage(message, currentSource, docPath, "fail")]),
                         }, buildHeaders);
-                        return;
+                    }
+                    else {
+                        logEvent("handler error after headers", { error: String(error?.message ?? error) });
                     }
                 }
-                if (!nextSource) {
-                    sendJson(res, { ok: false, diagnostics: buildDiagnosticsBundle([]), error: "No changes produced" }, buildHeaders);
-                    return;
+                finally {
+                    clearTimeout(responseTimeout);
                 }
-                const validated = parseSource(nextSource);
-                if (!validated.doc || validated.errors.length) {
-                    sendJson(res, {
-                        ok: false,
-                        diagnostics: validated.diagnostics,
-                        error: validated.errors.join("; "),
-                    }, buildHeaders);
-                    return;
-                }
-                await writeFileAtomic(docPath, nextSource);
-                currentSource = nextSource;
-                revision += 1;
-                lastValidRevision = revision;
-                rebuildFromSource(nextSource);
-                broadcastDocChanged();
-                sendJson(res, {
-                    ok: current.errors.length === 0,
-                    newRevision: revision,
-                    diagnostics: current.diagnostics,
-                    outline: buildOutline(),
-                    selectedId,
-                    state: await buildEditState(),
-                    source: currentSource,
-                    writeId: typeof payload?.writeId === "string" ? payload.writeId : null,
-                }, buildHeaders);
                 return;
             }
             if (url.pathname === "/api/render") {
@@ -840,7 +914,18 @@ export async function startViewerServer(options) {
                 return;
             }
             if (url.pathname === "/api/ticker" && req.method === "POST") {
-                const payload = await readJson(req);
+                let payload;
+                try {
+                    payload = await readJson(req);
+                }
+                catch (err) {
+                    if (err instanceof ReadJsonError) {
+                        res.writeHead(err.status, { "Content-Type": "application/json; charset=utf-8" });
+                        res.end(JSON.stringify({ ok: false, error: err.message }));
+                        return;
+                    }
+                    throw err;
+                }
                 if (typeof payload?.docstepMs === "number" && Number.isFinite(payload.docstepMs)) {
                     intervalMs = Math.max(50, payload.docstepMs);
                     if (running) {
@@ -859,7 +944,18 @@ export async function startViewerServer(options) {
                 return;
             }
             if (url.pathname === "/api/runtime" && req.method === "POST") {
-                const payload = await readJson(req);
+                let payload;
+                try {
+                    payload = await readJson(req);
+                }
+                catch (err) {
+                    if (err instanceof ReadJsonError) {
+                        res.writeHead(err.status, { "Content-Type": "application/json; charset=utf-8" });
+                        res.end(JSON.stringify({ ok: false, error: err.message }));
+                        return;
+                    }
+                    throw err;
+                }
                 const updated = resetRuntime({
                     seed: typeof payload?.seed === "number" ? payload.seed : undefined,
                     docstep: typeof payload?.docstep === "number" ? payload.docstep : undefined,
@@ -1831,14 +1927,67 @@ function sendJson(res, payload, headers = {}) {
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", ...noCacheHeaders(), ...headers });
     res.end(JSON.stringify(payload));
 }
-async function readJson(req) {
+class ReadJsonError extends Error {
+    status;
+    code;
+    constructor(message, status, code) {
+        super(message);
+        this.status = status;
+        this.code = code;
+    }
+}
+class ReadJsonTimeoutError extends ReadJsonError {
+    timeoutMs;
+    constructor(timeoutMs) {
+        super(`Request body timeout after ${timeoutMs}ms`, 408, "timeout");
+        this.timeoutMs = timeoutMs;
+    }
+}
+class ReadJsonParseError extends ReadJsonError {
+    constructor(message = "Invalid JSON body") {
+        super(message, 400, "parse_error");
+    }
+}
+async function readJson(req, options = {}) {
+    const timeoutMs = options.timeoutMs ?? 8000;
     const chunks = [];
-    for await (const chunk of req) {
-        chunks.push(Buffer.from(chunk));
+    let timedOut = false;
+    req.resume();
+    const timeoutId = setTimeout(() => {
+        timedOut = true;
+        req.destroy(new ReadJsonTimeoutError(timeoutMs));
+    }, timeoutMs);
+    try {
+        for await (const chunk of req) {
+            chunks.push(Buffer.from(chunk));
+        }
+    }
+    catch (err) {
+        if (err instanceof ReadJsonError) {
+            throw err;
+        }
+        if (timedOut) {
+            throw new ReadJsonTimeoutError(timeoutMs);
+        }
+        if (req.aborted) {
+            throw new ReadJsonError("Request body aborted", 400, "aborted");
+        }
+        throw err;
+    }
+    finally {
+        clearTimeout(timeoutId);
     }
     if (!chunks.length)
         return null;
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const raw = Buffer.concat(chunks).toString("utf8");
+    if (!raw.trim())
+        return null;
+    try {
+        return JSON.parse(raw);
+    }
+    catch (err) {
+        throw new ReadJsonParseError();
+    }
 }
 function resolveAssetPath(ir, id, docRoot) {
     const asset = ir.assets.find((entry) => entry.id === id);
@@ -2284,6 +2433,182 @@ function findNodeById(nodes, id) {
         if (child)
             return child;
     }
+    return null;
+}
+function normalizeEditTransformPayload(payload, source, docPath) {
+    if (!payload || typeof payload !== "object") {
+        return {
+            payload: null,
+            diagnostics: [buildDiagnosticFromMessage("Invalid transform payload", source, docPath, "fail")],
+        };
+    }
+    const record = payload;
+    if (typeof record.op !== "string") {
+        return {
+            payload: null,
+            diagnostics: [buildDiagnosticFromMessage("Transform payload missing operation", source, docPath, "fail")],
+        };
+    }
+    const diagnostics = [];
+    const args = record.args && typeof record.args === "object" ? { ...record.args } : {};
+    const normalizedRecord = { ...record, args };
+    // Canonical edit payload keys at the server boundary:
+    // - Generator wrapper kind: "DynamicValue"
+    // - Generator expression field: "expr"
+    // - Slot identity key: args.id (legacy args.slotId is accepted and copied to args.id)
+    if (record.op === "setSlotGenerator") {
+        const id = typeof args.id === "string" ? args.id : typeof args.slotId === "string" ? args.slotId : "";
+        if (id) {
+            args.id = id;
+            if (typeof args.slotId !== "string")
+                args.slotId = id;
+        }
+        const coercion = coerceDynamicValue(args.generator, source, docPath, "setSlotGenerator.args.generator");
+        if (coercion.diagnostic) {
+            diagnostics.push(coercion.diagnostic);
+        }
+        else {
+            args.generator = coercion.value;
+        }
+        return { payload: normalizedRecord, diagnostics };
+    }
+    if (record.op === "replaceNode") {
+        const node = args.node;
+        if (node && typeof node === "object") {
+            args.node = normalizeSlotGeneratorNode(node, source, docPath, diagnostics);
+        }
+        return { payload: normalizedRecord, diagnostics };
+    }
+    return { payload: normalizedRecord, diagnostics };
+}
+function normalizeSlotGeneratorNode(node, source, docPath, diagnostics) {
+    const nodeRecord = node;
+    let nextNode = null;
+    const ensureNode = () => {
+        if (!nextNode)
+            nextNode = { ...nodeRecord };
+        return nextNode;
+    };
+    const setPropsGenerator = (value) => {
+        const target = ensureNode();
+        const baseProps = target.props && typeof target.props === "object"
+            ? { ...target.props }
+            : nodeRecord.props && typeof nodeRecord.props === "object"
+                ? { ...nodeRecord.props }
+                : {};
+        baseProps.generator = value === null ? wrapLiteral(null) : value;
+        target.props = baseProps;
+    };
+    const propsRecord = nodeRecord.props && typeof nodeRecord.props === "object" ? nodeRecord.props : null;
+    const hasPropsGenerator = Boolean(propsRecord && "generator" in propsRecord);
+    if (propsRecord && "generator" in propsRecord) {
+        const coercion = coerceDynamicValue(propsRecord.generator, source, docPath, "replaceNode.args.node.props.generator");
+        if (coercion.diagnostic) {
+            diagnostics.push(coercion.diagnostic);
+        }
+        else {
+            setPropsGenerator(coercion.value);
+        }
+    }
+    if ("generator" in nodeRecord && !hasPropsGenerator) {
+        const coercion = coerceDynamicValue(nodeRecord.generator, source, docPath, "replaceNode.args.node.generator");
+        if (coercion.diagnostic) {
+            diagnostics.push(coercion.diagnostic);
+        }
+        else {
+            setPropsGenerator(coercion.value);
+            delete ensureNode().generator;
+        }
+    }
+    const children = node.children ?? [];
+    let nextChildren = null;
+    for (let i = 0; i < children.length; i += 1) {
+        const child = children[i];
+        if (!child || typeof child !== "object")
+            continue;
+        const normalizedChild = normalizeSlotGeneratorNode(child, source, docPath, diagnostics);
+        if (normalizedChild === child)
+            continue;
+        if (!nextChildren)
+            nextChildren = [...children];
+        nextChildren[i] = normalizedChild;
+    }
+    if (nextChildren) {
+        ensureNode().children = nextChildren;
+    }
+    return (nextNode ?? node);
+}
+function coerceDynamicValue(input, source, docPath, context) {
+    if (input === null)
+        return { value: null, diagnostic: null };
+    if (input === undefined) {
+        return {
+            value: null,
+            diagnostic: buildDiagnosticFromMessage(`${context} is missing (expected DynamicValue or null).`, source, docPath, "fail"),
+        };
+    }
+    const directExpr = asFluxExpr(input);
+    if (directExpr) {
+        return { value: { kind: "DynamicValue", expr: directExpr }, diagnostic: null };
+    }
+    if (!input || typeof input !== "object") {
+        return {
+            value: null,
+            diagnostic: buildDiagnosticFromMessage(`${context} must be a dynamic expression payload.`, source, docPath, "fail"),
+        };
+    }
+    const record = input;
+    const kind = typeof record.kind === "string" ? record.kind : "";
+    if (kind === "LiteralValue" && record.value === null) {
+        return { value: null, diagnostic: null };
+    }
+    if (kind === "DynamicValue" || kind === "ExpressionValue" || kind === "ExprValue") {
+        const exprCandidate = record.expr ?? record.expression ?? record.value;
+        const expr = asFluxExpr(exprCandidate);
+        if (!expr) {
+            return {
+                value: null,
+                diagnostic: buildDiagnosticFromMessage(`${context} is missing an expression AST (expected expr, expression, or value).`, source, docPath, "fail"),
+            };
+        }
+        return { value: { kind: "DynamicValue", expr }, diagnostic: null };
+    }
+    if ("expr" in record || "expression" in record || "value" in record) {
+        const exprCandidate = record.expr ?? record.expression ?? record.value;
+        const expr = asFluxExpr(exprCandidate);
+        if (!expr) {
+            return {
+                value: null,
+                diagnostic: buildDiagnosticFromMessage(`${context} has no valid expression AST.`, source, docPath, "fail"),
+            };
+        }
+        return { value: { kind: "DynamicValue", expr }, diagnostic: null };
+    }
+    return {
+        value: null,
+        diagnostic: buildDiagnosticFromMessage(`${context} must be { kind: "DynamicValue", expr: <expression> } (legacy ExpressionValue/ExprValue accepted).`, source, docPath, "fail"),
+    };
+}
+function asFluxExpr(value) {
+    if (!value || typeof value !== "object")
+        return null;
+    const kind = value.kind;
+    if (kind === "Literal")
+        return value;
+    if (kind === "Identifier")
+        return value;
+    if (kind === "ListExpression")
+        return value;
+    if (kind === "MemberExpression")
+        return value;
+    if (kind === "CallExpression")
+        return value;
+    if (kind === "NeighborsCallExpression")
+        return value;
+    if (kind === "UnaryExpression")
+        return value;
+    if (kind === "BinaryExpression")
+        return value;
     return null;
 }
 function wrapLiteral(value) {
