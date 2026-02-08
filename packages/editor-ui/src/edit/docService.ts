@@ -362,7 +362,15 @@ export function createDocService(): DocService {
     const nextHash = hashSource(source);
 
     const nextRuntime = extractRuntimeInputs(payloadState, state.runtime);
-    const nextSelection = normalizeSelection(state.selection, index);
+    const incomingSelection =
+      typeof (payloadState as any)?.selectedId === "string" || (payloadState as any)?.selectedId === null
+        ? ((payloadState as any)?.selectedId as string | null)
+        : typeof (payload as any)?.selectedId === "string" || (payload as any)?.selectedId === null
+          ? ((payload as any)?.selectedId as string | null)
+          : undefined;
+    const baseSelection =
+      incomingSelection !== undefined ? { id: incomingSelection, kind: null } : state.selection;
+    const nextSelection = normalizeSelection(baseSelection, index);
     const docChanged = reason !== "unknown";
     const sourceChanged = source !== prevSource;
     const nextDocRev = docChanged ? state.docRev + 1 : state.docRev;
