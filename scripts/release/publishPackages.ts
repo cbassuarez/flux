@@ -33,8 +33,8 @@ async function main(): Promise<void> {
       continue;
     }
     // eslint-disable-next-line no-console
-    console.log(`[publish] npm publish --workspace ${pkg.name} --tag ${tag}`);
-    await execFileAsync("npm", ["publish", "--workspace", pkg.name, "--tag", tag, "--access", "public", "--no-git-checks"], {
+    console.log(`[publish] pnpm --filter ${pkg.name} publish --tag ${tag}`);
+    await execFileAsync("pnpm", ["--filter", pkg.name, "publish", "--tag", tag, "--access", "public", "--no-git-checks"], {
       env: { ...process.env, npm_config_update_notifier: "false" },
     });
   }
