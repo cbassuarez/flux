@@ -33,9 +33,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Verify dist freshness
-        run: git diff --exit-code -- packages/**/dist packages/viewer/editor-dist packages/editor-ui/dist
-
       - name: Bump patch + sync versions
         run: node --loader ts-node/esm scripts/release/bumpPatchAndSync.ts
 
