@@ -1,15 +1,19 @@
 import http from "node:http";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseDocument, checkDocument, createDocumentRuntimeIR, applyAddTransform, formatFluxSource, } from "@flux-lang/core";
 import { renderHtml } from "@flux-lang/render-html";
 import { createTypesetterBackend } from "@flux-lang/typesetter";
+import { coerceVersionInfo } from "@flux-lang/brand";
 import { buildEditorMissingHtml, resolveEditorDist } from "./editor-dist.js";
 import { renderViewerToolbar, viewerToolbarCss } from "./ui/ViewerToolbar.js";
 import { viewerThemeCss } from "./ui/viewerTheme.js";
 import crypto from "node:crypto";
 import viewerPkg from "../package.json" with { type: "json" };
 export const VIEWER_VERSION = viewerPkg.version ?? "0.0.0";
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_VERSION_JSON_PATH = path.resolve(MODULE_DIR, "../../../version.json");
 const DEFAULT_DOCSTEP_MS = 1000;
 const MAX_TICK_SECONDS = 1;
 const NO_CACHE_HEADERS = {
@@ -18,6 +22,25 @@ const NO_CACHE_HEADERS = {
 };
 export function noCacheHeaders(extra = {}) {
     return { ...NO_CACHE_HEADERS, ...extra };
+}
+function inferChannelFromVersion(version) {
+    return /-canary(?:\.|$)/i.test(version) ? "canary" : "stable";
+}
+async function loadFluxVersionInfo() {
+    try {
+        const raw = await fs.readFile(REPO_VERSION_JSON_PATH, "utf8");
+        const parsed = JSON.parse(raw);
+        return coerceVersionInfo({
+            version: parsed.baseVersion ?? parsed.version,
+            channel: parsed.channel,
+        });
+    }
+    catch {
+        return coerceVersionInfo({
+            version: VIEWER_VERSION,
+            channel: inferChannelFromVersion(VIEWER_VERSION),
+        });
+    }
 }
 export async function computeBuildId(dir, indexPath) {
     if (!dir || !indexPath)
@@ -403,6 +426,11 @@ export async function startViewerServer(options) {
                     editorBuildId: buildId ?? null,
                     editorDist: editorDist.dir ?? null,
                 }));
+                return;
+            }
+            if (url.pathname === "/api/version") {
+                const versionInfo = await loadFluxVersionInfo();
+                sendJson(res, versionInfo, buildHeaders);
                 return;
             }
             if (url.pathname.startsWith("/api/edit/")) {
