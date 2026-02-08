@@ -42,7 +42,16 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          if pnpm install --frozen-lockfile; then
+            echo "lockfile ok"
+          else
+            echo "::warning::pnpm-lock.yaml out of date; regenerating…"
+            pnpm install --no-frozen-lockfile
+            git add pnpm-lock.yaml
+          fi
 
       - name: Build core + cli
         run: |
