@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pickVersionFromDistTags } from "../src/self-update.ts";
+import { pickVersionFromDistTags } from "../dist/self-update.js";
 
 test("stable uses stable tag when present", () => {
   const version = pickVersionFromDistTags("stable", { stable: "1.2.3", latest: "1.2.2" });

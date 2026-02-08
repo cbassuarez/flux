@@ -23,8 +23,13 @@ async function isPublished(name: string, version: string): Promise<boolean> {
 async function main(): Promise<void> {
   const tag = parseTag();
   const packages = await getPublishablePackages();
+  const ordered = packages.slice().sort((a, b) => {
+    if (a.name === "@flux-lang/brand") return -1;
+    if (b.name === "@flux-lang/brand") return 1;
+    return 0;
+  });
 
-  for (const pkg of packages) {
+  for (const pkg of ordered) {
     if (!pkg.version) throw new Error(`Missing version for ${pkg.name}`);
     const published = await isPublished(pkg.name, pkg.version);
     if (published) {
