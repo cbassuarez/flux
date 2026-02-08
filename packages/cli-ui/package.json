@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/cli-ui",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Ink-based UI for the Flux CLI",
   "license": "MIT",
   "type": "module",

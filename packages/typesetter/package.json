@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/typesetter",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Typesetting backends for Flux HTML rendering.",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",
