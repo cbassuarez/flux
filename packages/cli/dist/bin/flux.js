@@ -8,6 +8,7 @@ import { createRuntime, parseDocument } from "@flux-lang/core";
 import { shouldLaunchUi } from "../ui-routing.js";
 import { computeBuildId, defaultEmbeddedDir, VIEWER_VERSION as VIEWER_PACKAGE_VERSION, } from "@flux-lang/viewer";
 import { FLUX_CLI_VERSION } from "../version.js";
+import { getFluxVersionInfoCli } from "../versionInfo.js";
 const CLI_VERSION = FLUX_CLI_VERSION;
 void (async () => {
     try {
@@ -24,6 +25,7 @@ void (async () => {
 async function main(argv) {
     const parsed = parseGlobalArgs(argv);
     const args = parsed.args;
+    const fluxVersionInfo = await getFluxVersionInfoCli(process.cwd());
     const uiEnabled = shouldLaunchUi({
         stdoutIsTTY: Boolean(process.stdout.isTTY),
         stdinIsTTY: process.stdin.isTTY,
@@ -37,11 +39,12 @@ async function main(argv) {
             initialArgs: args,
             detach: parsed.detach,
             helpCommand: parsed.help ? args[0] : undefined,
-            version: parsed.version ? `flux v${CLI_VERSION}` : undefined,
+            versionInfo: fluxVersionInfo,
+            showVersionModal: parsed.version,
         });
     }
     if (parsed.version) {
-        await printVersion(parsed.json);
+        await printVersion(parsed.json, fluxVersionInfo);
         return 0;
     }
     if (parsed.help) {
@@ -148,7 +151,7 @@ function parseGlobalArgs(argv) {
     }
     return { ...flags, args };
 }
-async function collectComponentVersions() {
+async function collectComponentVersions(versionInfo) {
     let editorBuildId = null;
     try {
         const embedded = defaultEmbeddedDir();
@@ -159,13 +162,13 @@ async function collectComponentVersions() {
         editorBuildId = null;
     }
     return {
-        cli: CLI_VERSION,
+        cli: versionInfo.version,
         viewer: VIEWER_PACKAGE_VERSION,
         editorBuildId,
     };
 }
-async function printVersion(asJson) {
-    const info = await collectComponentVersions();
+async function printVersion(asJson, versionInfo) {
+    const info = await collectComponentVersions(versionInfo);
     if (asJson) {
         console.log(JSON.stringify(info));
         return;
@@ -1320,7 +1323,8 @@ async function launchUi(options) {
         initialArgs: options.initialArgs,
         detach: options.detach,
         helpCommand: options.helpCommand,
-        version: options.version,
+        versionInfo: options.versionInfo,
+        showVersionModal: options.showVersionModal,
     });
     return 0;
 }

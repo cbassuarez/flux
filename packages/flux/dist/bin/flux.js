@@ -4,12 +4,14 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import envPaths from "env-paths";
 import semver from "semver";
+import { assertAlignedVersions, pickVersionFromDistTags } from "../self-update.js";
 const paths = envPaths("flux", { suffix: "" });
 const CONFIG_PATH = path.join(paths.config, "config.json");
 const CACHE_ROOT = path.join(paths.cache, "cli");
 const LOCK_PATH = path.join(paths.cache, "install.lock");
 const DEFAULT_CHANNEL = "canary";
 const DEFAULT_TTL_MINUTES = 10;
+const SELF_UPDATE_PACKAGES = ["@flux-lang/cli", "@flux-lang/viewer"];
 const FIX_HINT = "Re-run online or set a pinned version via `flux self pin <version>`.";
 async function readConfig() {
     try {
@@ -32,11 +34,41 @@ async function writeConfig(cfg) {
     await fs.mkdir(path.dirname(CONFIG_PATH), { recursive: true });
     await fs.writeFile(CONFIG_PATH, JSON.stringify(cfg, null, 2));
 }
+function normalizeLastResolved(input) {
+    if (!input)
+        return {};
+    const normalized = {};
+    for (const [channel, value] of Object.entries(input)) {
+        if (!value)
+            continue;
+        if (typeof value === "string") {
+            normalized[channel] = { "@flux-lang/cli": value };
+        }
+        else {
+            normalized[channel] = value;
+        }
+    }
+    return normalized;
+}
+function parseVerboseFlag(args) {
+    let verbose = false;
+    const rest = [];
+    for (const arg of args) {
+        if (arg === "--verbose" || arg === "--verbose=true") {
+            verbose = true;
+        }
+        else {
+            rest.push(arg);
+        }
+    }
+    return { verbose, rest };
+}
 function parseArgs(argv) {
     const passthrough = [];
     let channel;
     let pin;
     let selfCmd;
+    let verbose = false;
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
         if (arg === "--channel") {
@@ -46,6 +78,10 @@ function parseArgs(argv) {
         }
         if (arg.startsWith("--channel=")) {
             channel = arg.slice("--channel=".length);
+            continue;
+        }
+        if (arg === "--verbose" || arg === "--verbose=true") {
+            verbose = true;
             continue;
         }
         if (arg === "self") {
@@ -69,7 +105,7 @@ function parseArgs(argv) {
             passthrough.push(arg);
         }
     }
-    return { channel, pin, selfCmd, passthrough };
+    return { channel, pin, selfCmd, passthrough, verbose };
 }
 async function loadPackageJsonFrom(dir) {
     try {
@@ -83,17 +119,34 @@ async function loadPackageJsonFrom(dir) {
 function cliPackageDir(installDir) {
     return path.join(installDir, "node_modules", "@flux-lang", "cli");
 }
-async function resolveDistTag(channel) {
-    const { stdout, exitCode } = await spawnAsync("npm", ["view", "@flux-lang/cli", `dist-tags.${channel}`, "--json"], {
-        env: npmEnv(),
+function packageInstallDir(installDir, pkgName) {
+    const scoped = pkgName.startsWith("@") ? pkgName.slice(1).split("/") : [pkgName];
+    return path.join(installDir, "node_modules", ...scoped);
+}
+function npmRegistryUrl(pkgName) {
+    return `https://registry.npmjs.org/${encodeURIComponent(pkgName)}`;
+}
+async function fetchDistTags(pkgName) {
+    const res = await fetch(npmRegistryUrl(pkgName), {
+        headers: { Accept: "application/vnd.npm.install-v1+json" },
     });
-    if (exitCode !== 0)
-        throw new Error("npm view failed");
-    return stdout.trim().replace(/"/g, "");
+    if (!res.ok) {
+        throw new Error(`Failed to fetch dist-tags for ${pkgName} (${res.status})`);
+    }
+    const data = (await res.json());
+    return data["dist-tags"] ?? {};
 }
 async function hasInstalled(version) {
-    const pkg = await loadPackageJsonFrom(cliPackageDir(path.join(CACHE_ROOT, version)));
-    return Boolean(pkg?.version === version && pkg.bin && pkg.bin.flux);
+    const installDir = path.join(CACHE_ROOT, version);
+    const pkg = await loadPackageJsonFrom(cliPackageDir(installDir));
+    if (!pkg?.bin?.flux || pkg.version !== version)
+        return false;
+    for (const name of SELF_UPDATE_PACKAGES) {
+        const pkgJson = await loadPackageJsonFrom(packageInstallDir(installDir, name));
+        if (pkgJson?.version !== version)
+            return false;
+    }
+    return true;
 }
 async function resolveInstalledBin(version) {
     const installDir = path.join(CACHE_ROOT, version);
@@ -119,16 +172,17 @@ async function newestCachedVersion() {
 async function ensureInstalled(version) {
     const installDir = path.join(CACHE_ROOT, version);
     const pkg = await loadPackageJsonFrom(cliPackageDir(installDir));
-    if (pkg?.version === version && pkg.bin && pkg.bin.flux) {
+    if (pkg?.version === version && pkg.bin && pkg.bin.flux && (await hasInstalled(version))) {
         return { version, binPath: path.join(cliPackageDir(installDir), pkg.bin.flux) };
     }
     await withLock(async () => {
         await fs.mkdir(installDir, { recursive: true });
-        const args = ["install", `@flux-lang/cli@${version}`, "--no-audit", "--no-fund", "--prefix", installDir];
+        const packages = SELF_UPDATE_PACKAGES.map((name) => `${name}@${version}`);
+        const args = ["install", ...packages, "--no-audit", "--no-fund", "--prefix", installDir];
         const { exitCode, stdout, stderr } = await spawnAsync("npm", args, { env: npmEnv() });
         if (exitCode !== 0) {
             const details = [stdout, stderr].map((chunk) => chunk.trim()).filter(Boolean).join("\n");
-            throw new Error(`Failed to install @flux-lang/cli@${version}.\n` +
+            throw new Error(`Failed to install ${packages.join(", ")}.\n` +
                 `Command: npm ${args.join(" ")}\n` +
                 `${details || "No npm output captured."}`);
         }
@@ -147,32 +201,54 @@ function effectiveAutoUpdate(cfg) {
         return true;
     return cfg.autoUpdate ?? true;
 }
-async function resolveTargetVersion(cfg, overrides) {
+function logVerbose(enabled, message) {
+    if (enabled) {
+        // eslint-disable-next-line no-console
+        console.log(message);
+    }
+}
+async function resolveTargetVersions(cfg, overrides, verbose) {
     if (overrides.pin !== undefined) {
         cfg.pinnedVersion = overrides.pin || undefined;
         await writeConfig(cfg);
     }
-    if (cfg.pinnedVersion)
-        return cfg.pinnedVersion;
+    if (cfg.pinnedVersion) {
+        const pinnedVersions = Object.fromEntries(SELF_UPDATE_PACKAGES.map((name) => [name, cfg.pinnedVersion]));
+        return { channel: overrides.channel ?? cfg.channel ?? DEFAULT_CHANNEL, versions: pinnedVersions, usedCache: false };
+    }
     const channel = overrides.channel ?? cfg.channel ?? DEFAULT_CHANNEL;
     const ttlMinutes = cfg.ttlMinutes ?? DEFAULT_TTL_MINUTES;
     const now = Date.now();
     const useCache = !overrides.forceRefresh && cfg.lastCheckMs && now - cfg.lastCheckMs < ttlMinutes * 60_000;
-    if (useCache && cfg.lastResolved?.[channel]) {
-        return cfg.lastResolved[channel];
+    const cached = normalizeLastResolved(cfg.lastResolved)[channel];
+    logVerbose(verbose, `[self-update] channel ${channel}`);
+    logVerbose(verbose, `[self-update] cache ${useCache ? "eligible" : "bypassed"}`);
+    if (useCache && cached && SELF_UPDATE_PACKAGES.every((pkg) => cached[pkg])) {
+        logVerbose(verbose, `[self-update] cache hit for channel ${channel}`);
+        return { channel, versions: cached, usedCache: true };
     }
     try {
-        const version = await resolveDistTag(channel);
+        const versions = {};
+        for (const pkg of SELF_UPDATE_PACKAGES) {
+            const distTags = await fetchDistTags(pkg);
+            const version = pickVersionFromDistTags(channel, distTags);
+            logVerbose(verbose, `[self-update] ${pkg} dist-tags ${JSON.stringify(distTags)}`);
+            logVerbose(verbose, `[self-update] ${pkg} -> ${version}`);
+            versions[pkg] = version;
+        }
+        assertAlignedVersions(versions);
         cfg.channel = channel;
-        cfg.lastResolved = { ...(cfg.lastResolved ?? {}), [channel]: version };
+        cfg.lastResolved = { ...normalizeLastResolved(cfg.lastResolved), [channel]: versions };
         cfg.lastCheckMs = now;
         await writeConfig(cfg);
-        return version;
+        logVerbose(verbose, `[self-update] resolved via registry (cache miss)`);
+        return { channel, versions, usedCache: false };
     }
-    catch {
-        const cached = cfg.lastResolved?.[channel];
-        if (cached)
-            return cached;
+    catch (err) {
+        if (cached) {
+            logVerbose(verbose, `[self-update] registry lookup failed; falling back to cache`);
+            return { channel, versions: cached, usedCache: true };
+        }
         throw new Error(`Offline and no cached version available for channel '${channel}'. ${FIX_HINT}`);
     }
 }
@@ -191,20 +267,21 @@ async function withLock(fn) {
     }
 }
 async function runSelfCommand(cmd, cfg, args) {
+    const { verbose, rest } = parseVerboseFlag(args);
     switch (cmd) {
         case "status": {
             console.log(`channel ${cfg.channel ?? DEFAULT_CHANNEL}`);
             console.log(`pinned ${cfg.pinnedVersion ?? "none"}`);
             console.log(`autoUpdate ${effectiveAutoUpdate(cfg) ? "on" : "off"}`);
             console.log(`ttlMinutes ${cfg.ttlMinutes ?? DEFAULT_TTL_MINUTES}`);
-            const last = cfg.lastResolved ?? {};
-            for (const key of Object.keys(last)) {
-                console.log(`${key} ${last[key]}`);
+            const last = normalizeLastResolved(cfg.lastResolved);
+            for (const [key, versions] of Object.entries(last)) {
+                console.log(`${key} ${JSON.stringify(versions)}`);
             }
             return 0;
         }
         case "autoupdate": {
-            const next = (args[0] ?? "").toLowerCase();
+            const next = (rest[0] ?? "").toLowerCase();
             if (next !== "on" && next !== "off") {
                 console.error("Usage: flux self autoupdate on|off");
                 return 1;
@@ -215,20 +292,21 @@ async function runSelfCommand(cmd, cfg, args) {
             return 0;
         }
         case "update": {
-            const version = await resolveTargetVersion(cfg, { forceRefresh: true });
+            const { versions } = await resolveTargetVersions(cfg, { forceRefresh: true }, verbose);
+            const version = assertAlignedVersions(versions);
             await ensureInstalled(version);
-            console.log(`updated @flux-lang/cli to ${version}`);
+            console.log(`updated ${SELF_UPDATE_PACKAGES.join(", ")} to ${version}`);
             return 0;
         }
         case "channel": {
-            const next = args[0] ?? DEFAULT_CHANNEL;
+            const next = rest[0] ?? DEFAULT_CHANNEL;
             cfg.channel = next;
             await writeConfig(cfg);
             console.log(`channel set to ${next}`);
             return 0;
         }
         case "pin": {
-            const version = args[0];
+            const version = rest[0];
             if (!version || !semver.valid(version)) {
                 console.error("Provide a valid semver version to pin.");
                 return 1;
@@ -250,7 +328,7 @@ async function runSelfCommand(cmd, cfg, args) {
             return 0;
         }
         default:
-            console.error("Unknown self command. Supported: status, channel, pin, unpin, clear-cache");
+            console.error("Unknown self command. Supported: status, channel, update, pin, unpin, autoupdate, clear-cache");
             return 1;
     }
 }
@@ -261,7 +339,8 @@ async function main(argv) {
     if (parsed.selfCmd) {
         return runSelfCommand(parsed.selfCmd, cfg, parsed.passthrough);
     }
-    const version = await resolveTargetVersion(cfg, { channel: parsed.channel, pin: parsed.pin });
+    const initial = await resolveTargetVersions(cfg, { channel: parsed.channel, pin: parsed.pin }, parsed.verbose);
+    const version = assertAlignedVersions(initial.versions);
     let resolved = null;
     if (autoUpdate) {
         try {
@@ -270,11 +349,8 @@ async function main(argv) {
         catch (err) {
             // If cached dist-tag is stale right after a publish, force-refresh once and retry.
             if (!cfg.pinnedVersion) {
-                const freshVersion = await resolveTargetVersion(cfg, {
-                    channel: parsed.channel,
-                    pin: parsed.pin,
-                    forceRefresh: true,
-                });
+                const fresh = await resolveTargetVersions(cfg, { channel: parsed.channel, pin: parsed.pin, forceRefresh: true }, parsed.verbose);
+                const freshVersion = assertAlignedVersions(fresh.versions);
                 if (freshVersion !== version) {
                     resolved = await ensureInstalled(freshVersion);
                 }

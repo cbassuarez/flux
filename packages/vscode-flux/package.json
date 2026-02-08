@@ -2,7 +2,7 @@
   "name": "@flux-lang/vscode-flux",
   "displayName": "Flux Language Support",
   "publisher": "cbassuarez",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "description": "Language support for the Flux score language (syntax + diagnostics).",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",
@@ -28,8 +28,13 @@
     "languages": [
       {
         "id": "flux",
-        "aliases": ["Flux", "flux"],
-        "extensions": [".flux"],
+        "aliases": [
+          "Flux",
+          "flux"
+        ],
+        "extensions": [
+          ".flux"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -73,7 +78,7 @@
     "test": "echo \"No tests yet\""
   },
   "dependencies": {
-    "@flux-lang/core": "0.1.0"
+    "@flux-lang/core": "0.1.5"
   },
   "devDependencies": {
     "@types/vscode": "^1.85.0",

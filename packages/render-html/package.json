@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/render-html",
-  "version": "0.1.1",
+  "version": "0.1.5",
   "description": "HTML/CSS renderer for Flux RenderDocumentIR.",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",
@@ -24,7 +24,7 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@flux-lang/core": "^0.1.6",
+    "@flux-lang/core": "^0.1.5",
     "hyphenation.en-us": "^0.2.1",
     "hypher": "^0.2.5"
   },

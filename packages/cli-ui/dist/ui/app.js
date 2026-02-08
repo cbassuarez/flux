@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { coerceVersionInfo, formatFluxVersion } from "@flux-lang/brand";
+import { renderCliBrandHeader } from "@flux-lang/brand/cli";
 import { getRecentsStore, updateRecents, getPinnedDirsStore, addPinnedDir, removePinnedDir, getLastUsedDirStore, setLastUsedDir, indexFiles, walkFilesFromFs, resolveConfig, viewCommand, pdfCommand, checkCommand, formatCommand, addCommand, newCommand, fetchViewerPatch, fetchViewerStatus, requestViewerPdf, } from "@flux-lang/cli-core";
 import { AppFrame } from "../components/AppFrame.js";
 import { Card } from "../components/Card.js";
@@ -26,7 +28,7 @@ import { useToasts } from "../state/toasts.js";
 import { useProgress } from "../state/progress.js";
 import { resolveActionRoute, resolveRouteAfterOpen } from "../state/dashboard-machine.js";
 import { buildPaletteItems, filterPaletteItems, groupPaletteItems } from "../palette/index.js";
-import { accent, color, truncateMiddle } from "../theme/index.js";
+import { color, truncateMiddle } from "../theme/index.js";
 import { hasControlChars, sanitizePrintableInput } from "../ui/input.js";
 import { getLayoutMetrics, isTerminalTooSmall, MIN_COLS, MIN_ROWS } from "../ui/layout.js";
 import { useDebouncedValue } from "../ui/useDebouncedValue.js";
@@ -77,8 +79,9 @@ const SEARCH_DEBOUNCE_MS = 200;
 const FILE_SCAN_BATCH_MS = 75;
 export function App(props) {
     const { exit } = useApp();
+    const brandInfo = useMemo(() => coerceVersionInfo(props.versionInfo), [props.versionInfo]);
     const initialRoute = props.mode === "new" ? "new" : "open";
-    const initialFocusTarget = props.helpCommand ? "help" : props.version ? "modal" : defaultFocusForRoute(initialRoute);
+    const initialFocusTarget = props.helpCommand ? "help" : props.showVersionModal ? "modal" : defaultFocusForRoute(initialRoute);
     const [recents, setRecents] = useState([]);
     const [recentsPath, setRecentsPath] = useState(undefined);
     const [currentDocument, setCurrentDocument] = useState(null);
@@ -108,7 +111,7 @@ export function App(props) {
     const [paletteQuery, setPaletteQuery] = useState("");
     const [paletteIndex, setPaletteIndex] = useState(0);
     const [helpOpen, setHelpOpen] = useState(Boolean(props.helpCommand));
-    const [versionOpen, setVersionOpen] = useState(Boolean(props.version));
+    const [versionOpen, setVersionOpen] = useState(Boolean(props.showVersionModal));
     const [wizardStep, setWizardStep] = useState(0);
     const initialTitle = titleFromTemplate("demo");
     const initialName = slugify(initialTitle);
@@ -718,13 +721,15 @@ export function App(props) {
                 setEditLogsOpen((prev) => !prev);
             }, debug: debugLayout }));
     })();
-    return (_jsx(MouseProvider, { disabled: mouseDisabled, children: _jsxs(Box, { position: "relative", width: "100%", height: "100%", children: [_jsxs(AppFrame, { debug: debugLayout, children: [_jsxs(Box, { flexDirection: "row", gap: 2, height: "100%", children: [_jsx(PaneFrame, { focused: focusTarget === "nav", width: navWidth, height: "100%", children: _jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: accent("FLUX") }), _jsxs(Box, { flexDirection: "row", gap: 1, children: [_jsx(Text, { color: streamOk ? "green" : color.muted, children: streamOk ? "●" : "○" }), _jsx(Text, { color: color.muted, children: `Flux ${props.version ?? "0.x"} · ${streamOk ? "online" : "offline"} · backend: ${BACKEND_LABEL}` })] })] }), _jsx(Card, { title: "Navigation", meta: "", accent: focusTarget === "nav", ruleWidth: navContentWidth - 2, debug: debugLayout, footer: (_jsx(Text, { color: color.muted, children: "Ctrl+K palette \u00B7 / search \u00B7 Tab focus \u00B7 q quit \u00B7 ? help" })), children: _jsx(NavList, { items: navItems, selectedIndex: navIndex, onSelect: (index) => {
+    return (_jsx(MouseProvider, { disabled: mouseDisabled, children: _jsxs(Box, { position: "relative", width: "100%", height: "100%", children: [_jsxs(AppFrame, { debug: debugLayout, children: [_jsxs(Box, { flexDirection: "row", gap: 2, height: "100%", children: [_jsx(PaneFrame, { focused: focusTarget === "nav", width: navWidth, height: "100%", children: _jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Box, { flexDirection: "column", children: renderCliBrandHeader({ info: brandInfo, isOnline: streamOk, width: navContentWidth })
+                                                    .split("\n")
+                                                    .map((line, index) => (_jsx(Text, { children: line }, `brand-line-${index}`))) }), _jsx(Card, { title: "Navigation", meta: "", accent: focusTarget === "nav", ruleWidth: navContentWidth - 2, debug: debugLayout, footer: (_jsx(Text, { color: color.muted, children: "Ctrl+K palette \u00B7 / search \u00B7 Tab focus \u00B7 q quit \u00B7 ? help" })), children: _jsx(NavList, { items: navItems, selectedIndex: navIndex, onSelect: (index) => {
                                                         setNavIndex(index);
                                                         setFocusTarget("nav");
                                                         const item = navItems[index];
                                                         if (item)
                                                             void activateNavItem(item);
-                                                    }, width: navContentWidth, maxHeight: navListHeight, debug: debugLayout }) })] }) }), _jsx(PaneFrame, { focused: focusTarget !== "nav", flexGrow: 1, height: "100%", children: _jsx(Clickable, { id: "pane-focus", onClick: () => focusPaneForRoute(), priority: 0, children: _jsx(Box, { flexDirection: "column", gap: 1, children: rightPane }) }) })] }), _jsx(Box, { marginTop: 1, children: _jsx(ToastHost, { toasts: toasts, busy: busy, progress: progress }) })] }), _jsx(ModalOverlay, { isOpen: paletteOpen, title: "Command Palette", subtitle: "Esc to close \u00B7 \u2191\u2193 to navigate \u00B7 Enter to run", width: modalLayout.width, height: modalLayout.height, onRequestClose: closePalette, children: _jsx(CommandPaletteModal, { query: paletteQuery, groups: paletteGroups, selectedId: limitedPalette[paletteIndex]?.id, width: modalLayout.contentWidth, debug: debugLayout }) }), _jsx(ModalOverlay, { isOpen: helpOpen, title: "Help", subtitle: "Esc to close", width: modalLayout.width, height: modalLayout.height, onRequestClose: closeHelp, children: _jsx(HelpOverlay, { width: modalLayout.contentWidth, version: props.version, recentsPath: recentsPath, backend: BACKEND_LABEL, extraLines: props.helpCommand ? getHelpLines(props.helpCommand) : undefined }) }), _jsx(ModalOverlay, { isOpen: versionOpen, title: "Flux CLI", subtitle: "Esc to close", width: modalLayout.width, height: modalLayout.height, onRequestClose: closeVersion, children: _jsx(Box, { flexDirection: "column", gap: 1, children: _jsx(Text, { color: color.muted, children: props.version ?? "version unknown" }) }) })] }) }));
+                                                    }, width: navContentWidth, maxHeight: navListHeight, debug: debugLayout }) })] }) }), _jsx(PaneFrame, { focused: focusTarget !== "nav", flexGrow: 1, height: "100%", children: _jsx(Clickable, { id: "pane-focus", onClick: () => focusPaneForRoute(), priority: 0, children: _jsx(Box, { flexDirection: "column", gap: 1, children: rightPane }) }) })] }), _jsx(Box, { marginTop: 1, children: _jsx(ToastHost, { toasts: toasts, busy: busy, progress: progress }) })] }), _jsx(ModalOverlay, { isOpen: paletteOpen, title: "Command Palette", subtitle: "Esc to close \u00B7 \u2191\u2193 to navigate \u00B7 Enter to run", width: modalLayout.width, height: modalLayout.height, onRequestClose: closePalette, children: _jsx(CommandPaletteModal, { query: paletteQuery, groups: paletteGroups, selectedId: limitedPalette[paletteIndex]?.id, width: modalLayout.contentWidth, debug: debugLayout }) }), _jsx(ModalOverlay, { isOpen: helpOpen, title: "Help", subtitle: "Esc to close", width: modalLayout.width, height: modalLayout.height, onRequestClose: closeHelp, children: _jsx(HelpOverlay, { width: modalLayout.contentWidth, version: formatFluxVersion(brandInfo.version), recentsPath: recentsPath, backend: BACKEND_LABEL, extraLines: props.helpCommand ? getHelpLines(props.helpCommand) : undefined }) }), _jsx(ModalOverlay, { isOpen: versionOpen, title: "Flux CLI", subtitle: "Esc to close", width: modalLayout.width, height: modalLayout.height, onRequestClose: closeVersion, children: _jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { color: color.muted, children: `flux ${formatFluxVersion(brandInfo.version)}` }), _jsx(Text, { color: color.muted, children: brandInfo.tagline }), brandInfo.channel ? _jsx(Text, { color: color.muted, children: `channel: ${brandInfo.channel}` }) : null, brandInfo.build ? _jsx(Text, { color: color.muted, children: `build: ${brandInfo.build}` }) : null, brandInfo.sha ? _jsx(Text, { color: color.muted, children: `sha: ${brandInfo.sha}` }) : null] }) })] }) }));
     async function refreshRecents() {
         const store = await getRecentsStore(props.cwd);
         const list = store.entries.map((entry) => ({

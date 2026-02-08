@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/cli-core",
-  "version": "0.1.1",
+  "version": "0.1.5",
   "description": "Core command implementations for Flux CLI",
   "license": "MIT",
   "type": "module",
@@ -21,10 +21,10 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@flux-lang/core": "^0.1.6",
-    "@flux-lang/render-html": "^0.1.0",
-    "@flux-lang/typesetter": "^0.1.0",
-    "@flux-lang/viewer": "^0.1.0"
+    "@flux-lang/core": "^0.1.5",
+    "@flux-lang/render-html": "^0.1.5",
+    "@flux-lang/typesetter": "^0.1.5",
+    "@flux-lang/viewer": "^0.1.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

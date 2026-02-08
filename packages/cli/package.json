@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/cli",
-  "version": "0.1.6",
+  "version": "0.1.5",
   "description": "CLI tooling for the Flux score language",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",
@@ -27,9 +27,9 @@
   },
   "dependencies": {
     "@flux-lang/brand": "^0.1.0",
-    "@flux-lang/core": "^0.1.6",
-    "@flux-lang/cli-core": "^0.1.0",
-    "@flux-lang/cli-ui": "^0.1.0"
+    "@flux-lang/core": "^0.1.5",
+    "@flux-lang/cli-core": "^0.1.5",
+    "@flux-lang/cli-ui": "^0.1.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
