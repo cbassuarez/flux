@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GIT_PAGER: cat
+      CI: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,6 +28,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
+          cache: pnpm
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -40,24 +42,35 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Check dist freshness
+      - name: Check dist freshness (self-heal + tiny logs)
+        id: dist
+        shell: bash
         run: |
+          set -euo pipefail
           export GIT_PAGER=cat
           git config --global core.pager cat
-          DIST_PATHS=(':(glob)packages/**/dist' ':(glob)packages/viewer/editor-dist')
-          if ! git diff --quiet -- "${DIST_PATHS[@]}"; then
-            changed_count=$(git diff --name-only -- "${DIST_PATHS[@]}" | wc -l | tr -d ' ')
-            echo "dist changes: ${changed_count} file(s)"
-            git diff --name-only -- "${DIST_PATHS[@]}" | head -n 50
-            if [ "${changed_count}" -gt 50 ]; then
-              echo "...(truncated)"
-            fi
-            git diff --stat -- "${DIST_PATHS[@]}" | head -n 100
-            git add -- "${DIST_PATHS[@]}"
-            if ! git diff --quiet -- "${DIST_PATHS[@]}"; then
-              echo "::error::Dist outputs are nondeterministic across environments."
-              exit 1
-            fi
+
+          # Make globs safe: if packages/*/dist doesn't match, it disappears.
+          shopt -s nullglob
+
+          # Use real directories (shell-expanded), not git glob-magic.
+          DIST_DIRS=(packages/*/dist packages/viewer/editor-dist)
+
+          if [ ${#DIST_DIRS[@]} -eq 0 ]; then
+            echo "::warning::No dist directories found; skipping dist sync."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED="$(git status --porcelain=v1 --untracked-files=all -- "${DIST_DIRS[@]}")"
+          if [ -n "$CHANGED" ]; then
+            echo "dist changes detected; staging…"
+            echo "$CHANGED" | head -n 80
+            echo "...(truncated)"
+            git add -A -- "${DIST_DIRS[@]}"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Compile release scripts
@@ -66,12 +79,24 @@ jobs:
       - name: Bump patch + sync versions
         run: node scripts/release/dist/bumpPatchAndSync.js
 
-      - name: Commit release
+      - name: Commit release (includes dist fixes)
+        shell: bash
         run: |
-          VERSION=$(node -e "const v=require('./version.json'); console.log(v.baseVersion || v.version);")
+          set -euo pipefail
+          VERSION="$(node -e "const v=require('./version.json'); console.log(v.version ?? v.baseVersion);")"
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add version.json packages/*/package.json
+
+          # Commit version + workspace package versions + any dist artifacts staged earlier.
+          git add -A -- version.json packages/*/package.json packages/*/dist packages/viewer/editor-dist
+
+          # If nothing changed (rare but possible), exit cleanly.
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
           git commit -m "chore(release): v${VERSION}"
           git tag -a "v${VERSION}" -m "v${VERSION}"
 
