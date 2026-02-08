@@ -977,6 +977,38 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           }
           nextSource = formatFluxSource(result.source);
           selectedId = id;
+        } else if (op === "addPage") {
+          const afterPageId = typeof args.afterPageId === "string" ? args.afterPageId : undefined;
+          const result = applyInsertPageTransform(source, parsed.doc, { afterPageId }, docPath);
+          if (!result.ok) {
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { applied: false },
+            );
+            return;
+          }
+          nextSource = formatFluxSource(result.source);
+          selectedId = result.selectedId;
+        } else if (op === "moveNode") {
+          const nodeId = typeof args.nodeId === "string" ? args.nodeId : "";
+          const fromContainerId = typeof args.fromContainerId === "string" ? args.fromContainerId : "";
+          const toContainerId = typeof args.toContainerId === "string" ? args.toContainerId : "";
+          const toIndex = typeof args.toIndex === "number" ? args.toIndex : 0;
+          const result = applyMoveNodeTransform(
+            source,
+            parsed.doc,
+            { nodeId, fromContainerId, toContainerId, toIndex },
+            docPath,
+          );
+          if (!result.ok) {
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { applied: false },
+            );
+            return;
+          }
+          nextSource = formatFluxSource(result.source);
+          selectedId = nodeId;
         } else {
           const toOptions = (): AddTransformOptions => {
             if (op === "addSection") {
@@ -2972,6 +3004,293 @@ function buildInspectorPayload(node: DocumentNode): Record<string, unknown> {
     textKind: isEditable ? (isHeading ? "heading" : "paragraph") : null,
     childCount: node.children?.length ?? 0,
   };
+}
+
+const INSERT_INDENT = "  ";
+
+function collectIdsFromDoc(doc: FluxDocument): Set<string> {
+  const ids = new Set<string>();
+  const visit = (node: DocumentNode) => {
+    ids.add(node.id);
+    node.children?.forEach(visit);
+  };
+  doc.body?.nodes?.forEach(visit);
+  return ids;
+}
+
+function nextId(prefix: string, ids: Set<string>): string {
+  let n = 1;
+  let candidate = `${prefix}${n}`;
+  while (ids.has(candidate)) {
+    n += 1;
+    candidate = `${prefix}${n}`;
+  }
+  ids.add(candidate);
+  return candidate;
+}
+
+function findBlockRange(source: string, blockName: string): { start: number; end: number; indent: string } | null {
+  const regex = new RegExp(`(^|\\n)([\\t ]*)${blockName}\\s*\\{`, "m");
+  const match = regex.exec(source);
+  if (!match || match.index == null) return null;
+  const indent = match[2] ?? "";
+  const braceIndex = source.indexOf("{", match.index + match[0].length - 1);
+  if (braceIndex === -1) return null;
+  const endIndex = findMatchingBrace(source, braceIndex);
+  if (endIndex === -1) return null;
+  return { start: braceIndex + 1, end: endIndex, indent };
+}
+
+function findMatchingBrace(source: string, openIndex: number): number {
+  let depth = 0;
+  let inString: string | null = null;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = openIndex; i < source.length; i += 1) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (inLineComment) {
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\" && next) {
+        i += 1;
+        continue;
+      }
+      if (ch === inString) inString = null;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = ch;
+      continue;
+    }
+    if (ch === "{") depth += 1;
+    if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function insertSnippet(source: string, index: number, indent: string, snippet: string): string {
+  const prefix = source.slice(0, index);
+  const suffix = source.slice(index);
+  const needsLeadingNewline = !prefix.endsWith("\n");
+  const indented = snippet
+    .split("\n")
+    .map((line) => (line.length ? indent + line : ""))
+    .join("\n");
+  const insertion = `${needsLeadingNewline ? "\n" : ""}${indented}\n${indent.slice(0, Math.max(0, indent.length - INSERT_INDENT.length))}`;
+  return prefix + insertion + suffix;
+}
+
+function applyInsertPageTransform(
+  source: string,
+  doc: FluxDocument,
+  { afterPageId }: { afterPageId?: string },
+  docPath: string,
+): { ok: true; source: string; selectedId: string } | { ok: false; diagnostic: EditDiagnostic } {
+  const ids = collectIdsFromDoc(doc);
+  const pageId = nextId("page", ids);
+  const sectionId = nextId("section", ids);
+  const pageNode: DocumentNode = {
+    id: pageId,
+    kind: "page",
+    props: {},
+    children: [{ id: sectionId, kind: "section", props: {}, children: [] }],
+  };
+  const snippet = printDocumentNode(pageNode, "");
+
+  let insertIndex = -1;
+  let childIndent = "";
+  if (afterPageId) {
+    const page = findNodeById(doc.body?.nodes ?? [], afterPageId);
+    if (page?.loc?.endLine && page.loc.endColumn) {
+      insertIndex = lineColumnToOffset(source, page.loc.endLine, page.loc.endColumn);
+      const indent = getLineIndent(source, page.loc.endLine);
+      childIndent = indent + INSERT_INDENT;
+    }
+  }
+  if (insertIndex < 0) {
+    const block = findBlockRange(source, "body");
+    if (!block) {
+      return {
+        ok: false,
+        diagnostic: buildDiagnosticFromMessage("No body block found", source, docPath, "fail"),
+      };
+    }
+    insertIndex = block.end;
+    childIndent = block.indent + INSERT_INDENT;
+  }
+
+  const nextSource = insertSnippet(source, insertIndex, childIndent, snippet);
+  return { ok: true, source: nextSource, selectedId: pageId };
+}
+
+type ContainerRef = { kind: "page" | "section"; id: string };
+
+function parseContainerId(raw: string): ContainerRef | null {
+  if (raw.startsWith("page:")) return { kind: "page", id: raw.slice("page:".length) };
+  if (raw.startsWith("section:")) return { kind: "section", id: raw.slice("section:".length) };
+  return raw ? { kind: "section", id: raw } : null;
+}
+
+function resolveSectionContainer(
+  source: string,
+  doc: FluxDocument,
+  container: ContainerRef,
+  docPath: string,
+  createIfMissing: boolean,
+): { source: string; doc: FluxDocument; sectionId: string } | { diagnostic: EditDiagnostic } {
+  if (container.kind === "section") {
+    const section = findNodeById(doc.body?.nodes ?? [], container.id);
+    if (!section || section.kind !== "section") {
+      return { diagnostic: buildDiagnosticFromMessage("Section container not found", source, docPath, "fail") };
+    }
+    return { source, doc, sectionId: section.id };
+  }
+  const page = findNodeById(doc.body?.nodes ?? [], container.id);
+  if (!page || page.kind !== "page") {
+    return { diagnostic: buildDiagnosticFromMessage("Page container not found", source, docPath, "fail") };
+  }
+  const section = page.children?.find((child) => child.kind === "section");
+  if (section) {
+    return { source, doc, sectionId: section.id };
+  }
+  if (!createIfMissing) {
+    return { diagnostic: buildDiagnosticFromMessage("Page has no sections", source, docPath, "fail") };
+  }
+  const ids = collectIdsFromDoc(doc);
+  const sectionId = nextId("section", ids);
+  const nextSection: DocumentNode = { id: sectionId, kind: "section", props: {}, children: [] };
+  const nextPage: DocumentNode = { ...page, children: [...(page.children ?? []), nextSection] };
+  const replaced = applyReplaceNodeTransform(source, doc, page.id, nextPage, docPath);
+  if (!replaced.ok) {
+    return { diagnostic: replaced.diagnostic };
+  }
+  const parsed = parseSource(replaced.source);
+  if (!parsed.doc || parsed.errors.length) {
+    return { diagnostic: buildDiagnosticFromMessage("Failed to create page section", source, docPath, "fail") };
+  }
+  return { source: replaced.source, doc: parsed.doc, sectionId };
+}
+
+function applyMoveNodeTransform(
+  source: string,
+  doc: FluxDocument,
+  {
+    nodeId,
+    fromContainerId,
+    toContainerId,
+    toIndex,
+  }: { nodeId: string; fromContainerId: string; toContainerId: string; toIndex: number },
+  docPath: string,
+): { ok: true; source: string } | { ok: false; diagnostic: EditDiagnostic } {
+  if (!nodeId) {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Missing node id", source, docPath, "fail") };
+  }
+  const moving = findNodeById(doc.body?.nodes ?? [], nodeId);
+  if (!moving || moving.kind === "page" || moving.kind === "section") {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Invalid move target", source, docPath, "fail") };
+  }
+  const fromRef = parseContainerId(fromContainerId);
+  const toRef = parseContainerId(toContainerId);
+  if (!fromRef || !toRef) {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Missing container id", source, docPath, "fail") };
+  }
+
+  const resolvedSource = resolveSectionContainer(source, doc, fromRef, docPath, false);
+  if ("diagnostic" in resolvedSource) return { ok: false, diagnostic: resolvedSource.diagnostic };
+
+  const resolvedTarget = resolveSectionContainer(
+    resolvedSource.source,
+    resolvedSource.doc,
+    toRef,
+    docPath,
+    true,
+  );
+  if ("diagnostic" in resolvedTarget) return { ok: false, diagnostic: resolvedTarget.diagnostic };
+
+  const sourceSection = findNodeById(resolvedTarget.doc.body?.nodes ?? [], resolvedSource.sectionId);
+  const targetSection = findNodeById(resolvedTarget.doc.body?.nodes ?? [], resolvedTarget.sectionId);
+  if (!sourceSection || sourceSection.kind !== "section" || !targetSection || targetSection.kind !== "section") {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Invalid containers", source, docPath, "fail") };
+  }
+
+  const targetIndex = Number.isFinite(toIndex) ? toIndex : 0;
+
+  if (sourceSection.id === targetSection.id) {
+    const children = [...(sourceSection.children ?? [])];
+    const fromIndex = children.findIndex((child) => child.id === nodeId);
+    if (fromIndex < 0) {
+      return { ok: false, diagnostic: buildDiagnosticFromMessage("Node not in container", source, docPath, "fail") };
+    }
+    const [moved] = children.splice(fromIndex, 1);
+    const insertIndex = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
+    const clamped = Math.max(0, Math.min(insertIndex, children.length));
+    children.splice(clamped, 0, moved);
+    const nextSection: DocumentNode = { ...sourceSection, children };
+    const result = applyReplaceNodeTransform(resolvedTarget.source, resolvedTarget.doc, sourceSection.id, nextSection, docPath);
+    if (!result.ok) {
+      return { ok: false, diagnostic: result.diagnostic };
+    }
+    return { ok: true, source: result.source };
+  }
+
+  const sourceChildren = [...(sourceSection.children ?? [])];
+  const fromIndex = sourceChildren.findIndex((child) => child.id === nodeId);
+  if (fromIndex < 0) {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Node not in source container", source, docPath, "fail") };
+  }
+  const [removed] = sourceChildren.splice(fromIndex, 1);
+  const nextSourceSection: DocumentNode = { ...sourceSection, children: sourceChildren };
+  const removeResult = applyReplaceNodeTransform(
+    resolvedTarget.source,
+    resolvedTarget.doc,
+    nextSourceSection.id,
+    nextSourceSection,
+    docPath,
+  );
+  if (!removeResult.ok) {
+    return { ok: false, diagnostic: removeResult.diagnostic };
+  }
+
+  const afterRemove = parseSource(removeResult.source);
+  if (!afterRemove.doc || afterRemove.errors.length) {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Failed to move node", source, docPath, "fail") };
+  }
+  const refreshedTarget = findNodeById(afterRemove.doc.body?.nodes ?? [], targetSection.id);
+  if (!refreshedTarget || refreshedTarget.kind !== "section") {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Target container missing", source, docPath, "fail") };
+  }
+  const targetChildren = [...(refreshedTarget.children ?? [])];
+  const clamped = Math.max(0, Math.min(targetIndex, targetChildren.length));
+  targetChildren.splice(clamped, 0, removed);
+  const nextTargetSection: DocumentNode = { ...refreshedTarget, children: targetChildren };
+  const insertResult = applyReplaceNodeTransform(removeResult.source, afterRemove.doc, nextTargetSection.id, nextTargetSection, docPath);
+  if (!insertResult.ok) {
+    return { ok: false, diagnostic: insertResult.diagnostic };
+  }
+  return { ok: true, source: insertResult.source };
 }
 
 function applySetTextTransform(
