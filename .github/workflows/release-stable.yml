@@ -50,7 +50,10 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
-        run: if pnpm install --frozen-lockfile; then
+        shell: bash
+        run: |
+          set -euo pipefail
+          if pnpm install --frozen-lockfile; then
             echo "lockfile ok"
           else
             echo "::warning::pnpm-lock.yaml out of date; regenerating…"
@@ -133,7 +136,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          git add -A -- version.json packages/*/package.json packages/*/dist packages/viewer/editor-dist
+          git add -A -- version.json pnpm-lock.yaml packages/*/package.json packages/*/dist packages/viewer/editor-dist
 
           if git diff --cached --quiet; then
             echo "No changes to commit."
