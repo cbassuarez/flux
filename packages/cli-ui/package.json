@@ -23,8 +23,8 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@flux-lang/brand": "^0.1.0",
-    "@flux-lang/cli-core": "^0.1.6",
+    "@flux-lang/brand": "workspace:^",
+    "@flux-lang/cli-core": "workspace:^",
     "chalk": "^5.4.1",
     "ink": "^4.4.1",
     "react": "^18.3.1"
