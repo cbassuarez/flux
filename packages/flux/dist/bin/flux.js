@@ -178,14 +178,25 @@ async function ensureInstalled(version) {
     await withLock(async () => {
         await fs.mkdir(installDir, { recursive: true });
         const packages = SELF_UPDATE_PACKAGES.map((name) => `${name}@${version}`);
-        const args = ["install", ...packages, "--no-audit", "--no-fund", "--prefix", installDir];
-        const { exitCode, stdout, stderr } = await spawnAsync("npm", args, { env: npmEnv() });
-        if (exitCode !== 0) {
-            const details = [stdout, stderr].map((chunk) => chunk.trim()).filter(Boolean).join("\n");
-            throw new Error(`Failed to install ${packages.join(", ")}.\n` +
-                `Command: npm ${args.join(" ")}\n` +
-                `${details || "No npm output captured."}`);
-        }
+        await withTempNpmUserConfig(async (userConfigPath) => {
+            const args = [
+                "install",
+                ...packages,
+                "--no-audit",
+                "--no-fund",
+                "--prefix",
+                installDir,
+                "--userconfig",
+                userConfigPath,
+            ];
+            const { exitCode, stdout, stderr } = await spawnAsync("npm", args, { env: npmEnv() });
+            if (exitCode !== 0) {
+                const details = [stdout, stderr].map((chunk) => chunk.trim()).filter(Boolean).join("\n");
+                throw new Error(`Failed to install ${packages.join(", ")}.\n` +
+                    `Command: npm ${args.join(" ")}\n` +
+                    `${details || "No npm output captured."}`);
+            }
+        });
     });
     const installedPkg = await loadPackageJsonFrom(cliPackageDir(installDir));
     if (!installedPkg?.bin?.flux) {
@@ -254,6 +265,18 @@ async function resolveTargetVersions(cfg, overrides, verbose) {
 }
 function npmEnv() {
     return { ...process.env, npm_config_update_notifier: "false" };
+}
+async function withTempNpmUserConfig(fn) {
+    await fs.mkdir(paths.cache, { recursive: true });
+    const tempDir = await fs.mkdtemp(path.join(paths.cache, "npm-"));
+    const userConfigPath = path.join(tempDir, "npmrc");
+    await fs.writeFile(userConfigPath, "always-auth=false\nregistry=https://registry.npmjs.org/\n");
+    try {
+        return await fn(userConfigPath);
+    }
+    finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+    }
 }
 async function withLock(fn) {
     await fs.mkdir(path.dirname(LOCK_PATH), { recursive: true });
