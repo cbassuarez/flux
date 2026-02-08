@@ -999,6 +999,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
             parsed.doc,
             { nodeId, fromContainerId, toContainerId, toIndex },
             docPath,
+            parseSource,
           );
           if (!result.ok) {
             sendTransform(
@@ -3147,6 +3148,7 @@ function applyInsertPageTransform(
 }
 
 type ContainerRef = { kind: "page" | "section"; id: string };
+type ParseSource = (source: string) => { doc: FluxDocument | null; errors: string[]; diagnostics: EditDiagnostics };
 
 function parseContainerId(raw: string): ContainerRef | null {
   if (raw.startsWith("page:")) return { kind: "page", id: raw.slice("page:".length) };
@@ -3160,6 +3162,7 @@ function resolveSectionContainer(
   container: ContainerRef,
   docPath: string,
   createIfMissing: boolean,
+  parseSource: ParseSource,
 ): { source: string; doc: FluxDocument; sectionId: string } | { diagnostic: EditDiagnostic } {
   if (container.kind === "section") {
     const section = findNodeById(doc.body?.nodes ?? [], container.id);
@@ -3204,6 +3207,7 @@ function applyMoveNodeTransform(
     toIndex,
   }: { nodeId: string; fromContainerId: string; toContainerId: string; toIndex: number },
   docPath: string,
+  parseSource: ParseSource,
 ): { ok: true; source: string } | { ok: false; diagnostic: EditDiagnostic } {
   if (!nodeId) {
     return { ok: false, diagnostic: buildDiagnosticFromMessage("Missing node id", source, docPath, "fail") };
@@ -3218,7 +3222,7 @@ function applyMoveNodeTransform(
     return { ok: false, diagnostic: buildDiagnosticFromMessage("Missing container id", source, docPath, "fail") };
   }
 
-  const resolvedSource = resolveSectionContainer(source, doc, fromRef, docPath, false);
+  const resolvedSource = resolveSectionContainer(source, doc, fromRef, docPath, false, parseSource);
   if ("diagnostic" in resolvedSource) return { ok: false, diagnostic: resolvedSource.diagnostic };
 
   const resolvedTarget = resolveSectionContainer(
@@ -3227,6 +3231,7 @@ function applyMoveNodeTransform(
     toRef,
     docPath,
     true,
+    parseSource,
   );
   if ("diagnostic" in resolvedTarget) return { ok: false, diagnostic: resolvedTarget.diagnostic };
 
