@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/cli",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "CLI tooling for the Flux score language",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",

@@ -2,7 +2,7 @@
   "name": "@flux-lang/vscode-flux",
   "displayName": "Flux Language Support",
   "publisher": "cbassuarez",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Language support for the Flux score language (syntax + diagnostics).",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",
