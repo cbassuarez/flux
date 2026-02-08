@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/render-html",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "HTML/CSS renderer for Flux RenderDocumentIR.",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",

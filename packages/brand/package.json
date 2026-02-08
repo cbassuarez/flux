@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/brand",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Shared Flux brand identity renderers and helpers.",
   "license": "MIT",
   "type": "module",
