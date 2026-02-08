@@ -55,15 +55,15 @@ jobs:
 
       - name: Build core + cli
         run: |
-          pnpm run build --workspace @flux-lang/core
-          pnpm run build --workspace @flux-lang/cli-core
-          pnpm run build --workspace @flux-lang/cli-ui
-          pnpm run build --workspace @flux-lang/cli
+          pnpm --filter @flux-lang/core run build
+          pnpm --filter @flux-lang/cli-core run build
+          pnpm --filter @flux-lang/cli-ui run build
+          pnpm --filter @flux-lang/cli run build
 
       - name: Test core + cli
         run: |
-          pnpm test --workspace @flux-lang/core
-          pnpm test --workspace @flux-lang/cli
+          pnpm --filter @flux-lang/core test
+          pnpm --filter @flux-lang/cli test
 
       - name: Release + self-update tests
         run: |
@@ -105,4 +105,4 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck extension
-        run: pnpm run typecheck --workspace @flux-lang/vscode-flux
+        run: pnpm --filter @flux-lang/vscode-flux run typecheck
