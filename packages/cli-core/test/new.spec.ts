@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseDocument } from "@flux-lang/core";
 import { newCommand } from "../src/commands/new.js";
+import type { TemplateName } from "../src/new/templates.js";
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -58,5 +59,33 @@ describe("cli-core newCommand", () => {
         resolveIncludes: true,
       }),
     ).not.toThrow();
+  });
+
+  it("generates templates that parse", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "flux-new-templates-"));
+    const templates: TemplateName[] = ["demo", "article", "spec", "zine", "paper", "blank"];
+
+    for (const template of templates) {
+      const outDir = join(cwd, template);
+      const result = await newCommand({ cwd, template, out: outDir });
+      expect(result.ok).toBe(true);
+      if (!result.ok || !result.data) {
+        continue;
+      }
+
+      const { docPath } = result.data;
+      const fluxText = await readFile(docPath, "utf8");
+
+      try {
+        parseDocument(fluxText, {
+          sourcePath: docPath,
+          docRoot: dirname(docPath),
+          resolveIncludes: true,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to parse ${docPath}: ${message}`);
+      }
+    }
   });
 });
