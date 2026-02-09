@@ -731,42 +731,7 @@ export default function EditorApp() {
     selectNode(activeFindItem.id);
   }, [activeFindItem, selectNode]);
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isTypingTarget =
-        !!target &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        setFindOpen(true);
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !isTypingTarget) {
-        event.preventDefault();
-        setPaletteOpen(true);
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        void handleSave();
-      }
-      if (!isTypingTarget && event.key === "]") {
-        event.preventDefault();
-        setInspectorVisible((prev) => !prev);
-      }
-      if (event.key === "Escape") {
-        setFindOpen(false);
-        setPaletteOpen(false);
-        setDiagnosticsOpen(false);
-        setAboutOpen(false);
-        setDocSettingsOpen(false);
-        setBuildInfoOpen(false);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
-
-  const handleTransform = useCallback(
+  const runTransform = useCallback(
     async (transform: EditorTransform | TransformRequest, successMessage?: string) => {
       if (runtimeState.mode === "playback") {
         runtimeActions.setMode("edit");
@@ -787,11 +752,21 @@ export default function EditorApp() {
     [docService, runtimeActions, runtimeState.mode],
   );
 
+  const handleTransform = useCallback(
+    (transform: TransformRequest, successMessage?: string) => runTransform(transform, successMessage),
+    [runTransform],
+  );
+
+  const handleEditorTransform = useCallback(
+    (transform: EditorTransform, successMessage?: string) => runTransform(transform, successMessage),
+    [runTransform],
+  );
+
   const applyTextContent = useCallback(
     (id: string, payload: { text?: string; richText?: JSONContent }) => {
-      void handleTransform({ type: "setTextNodeContent", id, ...payload });
+      void handleEditorTransform({ type: "setTextNodeContent", id, ...payload });
     },
-    [handleTransform],
+    [handleEditorTransform],
   );
 
   const [debouncedRichTextUpdate, flushRichTextUpdate] = useDebouncedCallback((id: string, richText: JSONContent) => {
@@ -813,9 +788,9 @@ export default function EditorApp() {
     (slotId: string, spec: SlotGeneratorSpec) => {
       const expr = buildGeneratorExpr(spec);
       const generator = expr ? wrapExpressionValue(expr) : (spec as unknown as Record<string, unknown>);
-      void handleTransform({ type: "setSlotGenerator", id: slotId, generator });
+      void handleEditorTransform({ type: "setSlotGenerator", id: slotId, generator });
     },
-    [handleTransform],
+    [handleEditorTransform],
   );
 
   const handlePreviewTransition = useCallback(
@@ -917,6 +892,16 @@ export default function EditorApp() {
     void handleTransform(buildAddSlotTransform(), "Slot inserted");
   }, [handleTransform]);
 
+  const handleDuplicateSelected = useCallback(() => {
+    if (!selectedId) return;
+    void handleTransform({ op: "duplicateNode", args: { id: selectedId } }, "Node duplicated");
+  }, [handleTransform, selectedId]);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (!selectedId) return;
+    void handleTransform({ op: "deleteNode", args: { id: selectedId } }, "Node deleted");
+  }, [handleTransform, selectedId]);
+
   const scrollPageIntoView = useCallback((pageId: string) => {
     const frameDoc = previewFrameRef.current?.contentDocument;
     if (!frameDoc) return;
@@ -972,6 +957,49 @@ export default function EditorApp() {
     await docService.saveDoc(doc.source);
     setSaveStatus("saved");
   }, [doc?.source, docService, docState.dirty, handleApplySource, sourceDirty]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget =
+        !!target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setFindOpen(true);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !isTypingTarget) {
+        event.preventDefault();
+        setPaletteOpen(true);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void handleSave();
+      }
+      if (!isTypingTarget && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        handleDuplicateSelected();
+      }
+      if (!isTypingTarget && (event.key === "Backspace" || event.key === "Delete")) {
+        event.preventDefault();
+        handleDeleteSelected();
+      }
+      if (!isTypingTarget && event.key === "]") {
+        event.preventDefault();
+        setInspectorVisible((prev) => !prev);
+      }
+      if (event.key === "Escape") {
+        setFindOpen(false);
+        setPaletteOpen(false);
+        setDiagnosticsOpen(false);
+        setAboutOpen(false);
+        setDocSettingsOpen(false);
+        setBuildInfoOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleDeleteSelected, handleDuplicateSelected, handleSave]);
 
   const handleResetLayout = useCallback(() => {
     setOutlineWidth(300);
@@ -1191,6 +1219,8 @@ export default function EditorApp() {
         runtimeState,
         runtimeActions,
         selectionId: selectedId,
+        handleDuplicate: handleDuplicateSelected,
+        handleDelete: handleDeleteSelected,
         handleSave,
         handleExportPdf,
         handleResetLayout,
@@ -1222,6 +1252,8 @@ export default function EditorApp() {
       runtimeActions,
       runtimeState,
       selectedId,
+      handleDuplicateSelected,
+      handleDeleteSelected,
       handleSave,
       handleExportPdf,
       handleResetLayout,
@@ -1641,7 +1673,7 @@ export default function EditorApp() {
                                     } as DocumentNode;
                                     delete (cleaned as any).refresh;
                                     delete (cleaned as any).transition;
-                                    void handleTransform({ type: "replaceNode", id: selectedNode.id, node: cleaned });
+                                    void handleEditorTransform({ type: "replaceNode", id: selectedNode.id, node: cleaned });
                                   }}
                                 >
                                   Fix
@@ -1690,7 +1722,9 @@ export default function EditorApp() {
                                 reducedMotion={runtimeState.reducedMotion}
                                 onLiteralChange={(textId, text) => applyTextContent(textId, { text })}
                                 onGeneratorChange={(spec) => applySlotGenerator(selectedNode.id, spec)}
-                                onPropsChange={(payload) => handleTransform({ type: "setSlotProps", id: selectedNode.id, ...payload })}
+                                onPropsChange={(payload) =>
+                                  handleEditorTransform({ type: "setSlotProps", id: selectedNode.id, ...payload })
+                                }
                                 onPreviewTransition={handlePreviewTransition}
                                 lockReset={docState.dirty || docState.isApplying}
                                 onDirty={() => docService.markDirtyDraft()}
@@ -1706,7 +1740,7 @@ export default function EditorApp() {
                                 onDirty={() => docService.markDirtyDraft()}
                                 onCommit={(value) => {
                                   if (captionTarget.kind === "prop") {
-                                    handleTransform({
+                                    handleEditorTransform({
                                       type: "setNodeProps",
                                       id: captionTarget.id,
                                       props: { caption: { kind: "LiteralValue", value } },

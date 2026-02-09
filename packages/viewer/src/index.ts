@@ -989,6 +989,30 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           }
           nextSource = formatFluxSource(result.source);
           selectedId = result.selectedId;
+        } else if (op === "deleteNode") {
+          const id = typeof args.id === "string" ? args.id : "";
+          const result = applyDeleteNodeTransform(source, parsed.doc, id, docPath);
+          if (!result.ok) {
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { applied: false },
+            );
+            return;
+          }
+          nextSource = formatFluxSource(result.source);
+          selectedId = result.selectedId ?? undefined;
+        } else if (op === "duplicateNode") {
+          const id = typeof args.id === "string" ? args.id : "";
+          const result = applyDuplicateNodeTransform(source, parsed.doc, id, docPath);
+          if (!result.ok) {
+            sendTransform(
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { applied: false },
+            );
+            return;
+          }
+          nextSource = formatFluxSource(result.source);
+          selectedId = result.selectedId;
         } else if (op === "moveNode") {
           const nodeId = typeof args.nodeId === "string" ? args.nodeId : "";
           const fromContainerId = typeof args.fromContainerId === "string" ? args.fromContainerId : "";
@@ -2756,6 +2780,20 @@ function findNodeById(nodes: DocumentNode[], id: string): DocumentNode | null {
   return null;
 }
 
+function findNodeWithParent(
+  nodes: DocumentNode[],
+  id: string,
+  parent: DocumentNode | null = null,
+): { node: DocumentNode; parent: DocumentNode | null; index: number } | null {
+  for (let index = 0; index < (nodes ?? []).length; index += 1) {
+    const node = nodes[index];
+    if (node.id === id) return { node, parent, index };
+    const child = findNodeWithParent(node.children ?? [], id, node);
+    if (child) return child;
+  }
+  return null;
+}
+
 type CanonicalDynamicValue = Extract<NodePropValue, { kind: "DynamicValue" }>;
 
 function normalizeEditTransformPayload(
@@ -3019,6 +3057,11 @@ function collectIdsFromDoc(doc: FluxDocument): Set<string> {
   return ids;
 }
 
+function nodeIdPrefix(kind: string): string {
+  if (kind === "inline_slot") return "inlineSlot";
+  return kind;
+}
+
 function nextId(prefix: string, ids: Set<string>): string {
   let n = 1;
   let candidate = `${prefix}${n}`;
@@ -3028,6 +3071,17 @@ function nextId(prefix: string, ids: Set<string>): string {
   }
   ids.add(candidate);
   return candidate;
+}
+
+function cloneNodeWithNewIds(node: DocumentNode, ids: Set<string>): DocumentNode {
+  const { loc, ...rest } = node as DocumentNode & { loc?: unknown };
+  const id = nextId(nodeIdPrefix(node.kind), ids);
+  const children = (node.children ?? []).map((child) => cloneNodeWithNewIds(child, ids));
+  return {
+    ...(rest as DocumentNode),
+    id,
+    children,
+  };
 }
 
 function findBlockRange(source: string, blockName: string): { start: number; end: number; indent: string } | null {
@@ -3145,6 +3199,93 @@ function applyInsertPageTransform(
 
   const nextSource = insertSnippet(source, insertIndex, childIndent, snippet);
   return { ok: true, source: nextSource, selectedId: pageId };
+}
+
+function applyReplaceBodyNodesTransform(
+  source: string,
+  nextNodes: DocumentNode[],
+  docPath: string,
+): { ok: true; source: string } | { ok: false; diagnostic: EditDiagnostic } {
+  const block = findBlockRange(source, "body");
+  if (!block) {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("No body block found", source, docPath, "fail") };
+  }
+  const childIndent = block.indent + INSERT_INDENT;
+  const printed = nextNodes.map((node) => printDocumentNode(node, childIndent)).join("\n");
+  const prefix = source.slice(0, block.start);
+  const suffix = source.slice(block.end);
+  const content = printed ? `\n${printed}\n${block.indent}` : `\n${block.indent}`;
+  return { ok: true, source: prefix + content + suffix };
+}
+
+function applyDeleteNodeTransform(
+  source: string,
+  doc: FluxDocument,
+  id: string,
+  docPath: string,
+): { ok: true; source: string; selectedId: string | null } | { ok: false; diagnostic: EditDiagnostic } {
+  if (!id) {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Missing node id", source, docPath, "fail") };
+  }
+  const found = findNodeWithParent(doc.body?.nodes ?? [], id);
+  if (!found) {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Node not found", source, docPath, "fail") };
+  }
+  if (found.node.kind === "document") {
+    return {
+      ok: false,
+      diagnostic: buildDiagnosticFromMessage("Cannot delete document root", source, docPath, "fail"),
+    };
+  }
+
+  if (!found.parent) {
+    const nodes = [...(doc.body?.nodes ?? [])];
+    nodes.splice(found.index, 1);
+    const nextSelection = nodes[found.index] ?? nodes[found.index - 1] ?? null;
+    const result = applyReplaceBodyNodesTransform(source, nodes, docPath);
+    if (!result.ok) return result;
+    return { ok: true, source: result.source, selectedId: nextSelection ? nextSelection.id : null };
+  }
+
+  const children = [...(found.parent.children ?? [])];
+  children.splice(found.index, 1);
+  const nextParent: DocumentNode = { ...found.parent, children };
+  const nextSelection = children[found.index] ?? children[found.index - 1] ?? found.parent;
+  const result = applyReplaceNodeTransform(source, doc, found.parent.id, nextParent, docPath);
+  if (!result.ok) return result;
+  return { ok: true, source: result.source, selectedId: nextSelection ? nextSelection.id : null };
+}
+
+function applyDuplicateNodeTransform(
+  source: string,
+  doc: FluxDocument,
+  id: string,
+  docPath: string,
+): { ok: true; source: string; selectedId: string } | { ok: false; diagnostic: EditDiagnostic } {
+  if (!id) {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Missing node id", source, docPath, "fail") };
+  }
+  const found = findNodeWithParent(doc.body?.nodes ?? [], id);
+  if (!found) {
+    return { ok: false, diagnostic: buildDiagnosticFromMessage("Node not found", source, docPath, "fail") };
+  }
+  const ids = collectIdsFromDoc(doc);
+  const clone = cloneNodeWithNewIds(found.node, ids);
+
+  if (!found.parent) {
+    const nodes = [...(doc.body?.nodes ?? [])];
+    nodes.splice(found.index + 1, 0, clone);
+    const result = applyReplaceBodyNodesTransform(source, nodes, docPath);
+    if (!result.ok) return result;
+    return { ok: true, source: result.source, selectedId: clone.id };
+  }
+
+  const children = [...(found.parent.children ?? [])];
+  children.splice(found.index + 1, 0, clone);
+  const nextParent: DocumentNode = { ...found.parent, children };
+  const result = applyReplaceNodeTransform(source, doc, found.parent.id, nextParent, docPath);
+  if (!result.ok) return result;
+  return { ok: true, source: result.source, selectedId: clone.id };
 }
 
 type ContainerRef = { kind: "page" | "section"; id: string };
