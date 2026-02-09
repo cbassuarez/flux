@@ -794,6 +794,26 @@ export async function startViewerServer(options) {
                         nextSource = formatFluxSource(result.source);
                         selectedId = result.selectedId;
                     }
+                    else if (op === "deleteNode") {
+                        const id = typeof args.id === "string" ? args.id : "";
+                        const result = applyDeleteNodeTransform(source, parsed.doc, id, docPath);
+                        if (!result.ok) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            return;
+                        }
+                        nextSource = formatFluxSource(result.source);
+                        selectedId = result.selectedId ?? undefined;
+                    }
+                    else if (op === "duplicateNode") {
+                        const id = typeof args.id === "string" ? args.id : "";
+                        const result = applyDuplicateNodeTransform(source, parsed.doc, id, docPath);
+                        if (!result.ok) {
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            return;
+                        }
+                        nextSource = formatFluxSource(result.source);
+                        selectedId = result.selectedId;
+                    }
                     else if (op === "moveNode") {
                         const nodeId = typeof args.nodeId === "string" ? args.nodeId : "";
                         const fromContainerId = typeof args.fromContainerId === "string" ? args.fromContainerId : "";
@@ -2486,6 +2506,17 @@ function findNodeById(nodes, id) {
     }
     return null;
 }
+function findNodeWithParent(nodes, id, parent = null) {
+    for (let index = 0; index < (nodes ?? []).length; index += 1) {
+        const node = nodes[index];
+        if (node.id === id)
+            return { node, parent, index };
+        const child = findNodeWithParent(node.children ?? [], id, node);
+        if (child)
+            return child;
+    }
+    return null;
+}
 function normalizeEditTransformPayload(payload, source, docPath) {
     if (!payload || typeof payload !== "object") {
         return {
@@ -2700,6 +2731,11 @@ function collectIdsFromDoc(doc) {
     doc.body?.nodes?.forEach(visit);
     return ids;
 }
+function nodeIdPrefix(kind) {
+    if (kind === "inline_slot")
+        return "inlineSlot";
+    return kind;
+}
 function nextId(prefix, ids) {
     let n = 1;
     let candidate = `${prefix}${n}`;
@@ -2709,6 +2745,16 @@ function nextId(prefix, ids) {
     }
     ids.add(candidate);
     return candidate;
+}
+function cloneNodeWithNewIds(node, ids) {
+    const { loc, ...rest } = node;
+    const id = nextId(nodeIdPrefix(node.kind), ids);
+    const children = (node.children ?? []).map((child) => cloneNodeWithNewIds(child, ids));
+    return {
+        ...rest,
+        id,
+        children,
+    };
 }
 function findBlockRange(source, blockName) {
     const regex = new RegExp(`(^|\\n)([\\t ]*)${blockName}\\s*\\{`, "m");
@@ -2822,6 +2868,76 @@ function applyInsertPageTransform(source, doc, { afterPageId }, docPath) {
     }
     const nextSource = insertSnippet(source, insertIndex, childIndent, snippet);
     return { ok: true, source: nextSource, selectedId: pageId };
+}
+function applyReplaceBodyNodesTransform(source, nextNodes, docPath) {
+    const block = findBlockRange(source, "body");
+    if (!block) {
+        return { ok: false, diagnostic: buildDiagnosticFromMessage("No body block found", source, docPath, "fail") };
+    }
+    const childIndent = block.indent + INSERT_INDENT;
+    const printed = nextNodes.map((node) => printDocumentNode(node, childIndent)).join("\n");
+    const prefix = source.slice(0, block.start);
+    const suffix = source.slice(block.end);
+    const content = printed ? `\n${printed}\n${block.indent}` : `\n${block.indent}`;
+    return { ok: true, source: prefix + content + suffix };
+}
+function applyDeleteNodeTransform(source, doc, id, docPath) {
+    if (!id) {
+        return { ok: false, diagnostic: buildDiagnosticFromMessage("Missing node id", source, docPath, "fail") };
+    }
+    const found = findNodeWithParent(doc.body?.nodes ?? [], id);
+    if (!found) {
+        return { ok: false, diagnostic: buildDiagnosticFromMessage("Node not found", source, docPath, "fail") };
+    }
+    if (found.node.kind === "document") {
+        return {
+            ok: false,
+            diagnostic: buildDiagnosticFromMessage("Cannot delete document root", source, docPath, "fail"),
+        };
+    }
+    if (!found.parent) {
+        const nodes = [...(doc.body?.nodes ?? [])];
+        nodes.splice(found.index, 1);
+        const nextSelection = nodes[found.index] ?? nodes[found.index - 1] ?? null;
+        const result = applyReplaceBodyNodesTransform(source, nodes, docPath);
+        if (!result.ok)
+            return result;
+        return { ok: true, source: result.source, selectedId: nextSelection ? nextSelection.id : null };
+    }
+    const children = [...(found.parent.children ?? [])];
+    children.splice(found.index, 1);
+    const nextParent = { ...found.parent, children };
+    const nextSelection = children[found.index] ?? children[found.index - 1] ?? found.parent;
+    const result = applyReplaceNodeTransform(source, doc, found.parent.id, nextParent, docPath);
+    if (!result.ok)
+        return result;
+    return { ok: true, source: result.source, selectedId: nextSelection ? nextSelection.id : null };
+}
+function applyDuplicateNodeTransform(source, doc, id, docPath) {
+    if (!id) {
+        return { ok: false, diagnostic: buildDiagnosticFromMessage("Missing node id", source, docPath, "fail") };
+    }
+    const found = findNodeWithParent(doc.body?.nodes ?? [], id);
+    if (!found) {
+        return { ok: false, diagnostic: buildDiagnosticFromMessage("Node not found", source, docPath, "fail") };
+    }
+    const ids = collectIdsFromDoc(doc);
+    const clone = cloneNodeWithNewIds(found.node, ids);
+    if (!found.parent) {
+        const nodes = [...(doc.body?.nodes ?? [])];
+        nodes.splice(found.index + 1, 0, clone);
+        const result = applyReplaceBodyNodesTransform(source, nodes, docPath);
+        if (!result.ok)
+            return result;
+        return { ok: true, source: result.source, selectedId: clone.id };
+    }
+    const children = [...(found.parent.children ?? [])];
+    children.splice(found.index + 1, 0, clone);
+    const nextParent = { ...found.parent, children };
+    const result = applyReplaceNodeTransform(source, doc, found.parent.id, nextParent, docPath);
+    if (!result.ok)
+        return result;
+    return { ok: true, source: result.source, selectedId: clone.id };
 }
 function parseContainerId(raw) {
     if (raw.startsWith("page:"))
