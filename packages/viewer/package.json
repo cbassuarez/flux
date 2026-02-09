@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/viewer",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "Local web viewer for Flux documents.",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",
