@@ -50,6 +50,12 @@
       <img alt="Release channel stable" src="./badges/generated/channel.flux.stable.light.svg">
     </picture>
   </a>
+  <a href="https://www.npmjs.com/package/@flux-lang/flux" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/channel.flux.canary.dark.svg">
+      <img alt="Release channel canary" src="./badges/generated/channel.flux.canary.light.svg">
+    </picture>
+  </a>
 </p>
 <!-- FLUX:BADGES:END -->
 

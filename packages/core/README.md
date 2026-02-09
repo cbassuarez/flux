@@ -14,6 +14,12 @@
       <img alt="@flux-lang/core stable channel" src="../../badges/generated/channel.core.stable.light.svg">
     </picture>
   </a>
+  <a href="https://www.npmjs.com/package/@flux-lang/core" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/channel.core.canary.dark.svg">
+      <img alt="@flux-lang/core canary channel" src="../../badges/generated/channel.core.canary.light.svg">
+    </picture>
+  </a>
   <a href="../../LICENSE">
 <picture>
       <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/license.dark.svg">

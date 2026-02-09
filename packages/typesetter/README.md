@@ -14,6 +14,12 @@
       <img alt="@flux-lang/typesetter stable channel" src="../../badges/generated/channel.typesetter.stable.light.svg">
     </picture>
   </a>
+  <a href="https://www.npmjs.com/package/@flux-lang/typesetter" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/channel.typesetter.canary.dark.svg">
+      <img alt="@flux-lang/typesetter canary channel" src="../../badges/generated/channel.typesetter.canary.light.svg">
+    </picture>
+  </a>
   <a href="../../LICENSE">
 <picture>
       <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/license.dark.svg">
