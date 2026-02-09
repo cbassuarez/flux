@@ -200,6 +200,84 @@ describe("editor API transforms", () => {
     }
   });
 
+  itNetwork("duplicates a node and selects the copy", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flux-edit-dup-"));
+    const docPath = await writeDoc(
+      tmpDir,
+      `
+        document {
+          meta { version = "0.2.0"; }
+          body {
+            page p1 {
+              section s1 {
+                text t1 { content = "Hello"; }
+                text t2 { content = "World"; }
+              }
+            }
+          }
+        }
+      `,
+    );
+
+    const server = await startViewerServer({ docPath });
+    try {
+      const res = await fetch(`${server.url}/api/edit/transform`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "duplicateNode", args: { id: "t1" } }),
+      });
+      expect(res.ok).toBe(true);
+      const payload = await res.json();
+      expect(payload.ok).toBe(true);
+      expect(payload.selectedId).toBeTruthy();
+      expect(payload.selectedId).not.toBe("t1");
+      const dupNode = findNodeById(payload.state?.doc?.body?.nodes ?? [], payload.selectedId);
+      expect(dupNode).not.toBeNull();
+      const updated = await fs.readFile(docPath, "utf8");
+      expect(updated).toContain(`text ${payload.selectedId}`);
+    } finally {
+      await server.close();
+    }
+  });
+
+  itNetwork("deletes a node and selects the next sibling", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flux-edit-delete-"));
+    const docPath = await writeDoc(
+      tmpDir,
+      `
+        document {
+          meta { version = "0.2.0"; }
+          body {
+            page p1 {
+              section s1 {
+                text t1 { content = "First"; }
+                text t2 { content = "Second"; }
+              }
+            }
+          }
+        }
+      `,
+    );
+
+    const server = await startViewerServer({ docPath });
+    try {
+      const res = await fetch(`${server.url}/api/edit/transform`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "deleteNode", args: { id: "t1" } }),
+      });
+      expect(res.ok).toBe(true);
+      const payload = await res.json();
+      expect(payload.ok).toBe(true);
+      expect(payload.selectedId).toBe("t2");
+      const updated = await fs.readFile(docPath, "utf8");
+      expect(updated).not.toContain("text t1");
+      expect(updated).toContain("text t2");
+    } finally {
+      await server.close();
+    }
+  });
+
   itNetwork("normalizes slot generator expression payloads and keeps them after reload", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flux-edit-slot-generator-"));
     const docPath = await writeDoc(
