@@ -19,6 +19,11 @@ function extractSlotInner(html: string, className: string): string | null {
   return match?.[1] ?? null;
 }
 
+function extractFigureBlock(html: string): string | null {
+  const match = html.match(/<figure[^>]*>[\s\S]*?<\/figure>/m);
+  return match?.[0] ?? null;
+}
+
 describe("slot structure", () => {
   it("renders slot children inside the slot wrapper", () => {
     const { html } = renderDoc(`
@@ -37,6 +42,7 @@ describe("slot structure", () => {
     const inner = extractSlotInner(html, "flux-slot");
     expect(inner).toBeTruthy();
     expect(inner).toContain('data-flux-src="/img.png"');
+    expect(inner).toMatch(/<img[^>]*class="flux-image"/);
     expect(html).not.toMatch(
       /flux-slot[^>]*>\s*<div class="flux-slot-inner"[^>]*>\s*<\/div>\s*<\/div>\s*<img[^>]*data-flux-src="\/img\.png"/,
     );
@@ -102,8 +108,9 @@ describe("slot structure", () => {
         }
       }
     `);
-    const inner = extractSlotInner(html, "flux-slot");
-    expect(inner).toBeTruthy();
-    expect(inner).toContain('data-flux-src="/figure.png"');
+    const figureBlock = extractFigureBlock(html);
+    expect(figureBlock).toBeTruthy();
+    expect(figureBlock).not.toMatch(/<figure[^>]*>\s*<img[^>]*class="flux-image"/);
+    expect(figureBlock).toMatch(/class="flux-slot-inner"[\s\S]*?<img[^>]*class="flux-image"/);
   });
 });
