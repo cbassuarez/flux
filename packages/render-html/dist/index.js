@@ -616,7 +616,7 @@ function renderNode(node, options, inlineContext = false, footnotes, inlineSlotC
     const attrs = buildAttrs(node, inlineContext);
     const styleAttr = buildInlineStyle(mergeInlineStyles(node, inlineContext));
     const renderChildren = (inline = childrenInline, context = footnotes, slotContext = inlineSlotContext) => node.children.map((child) => renderNode(child, options, inline, context, slotContext)).join("");
-    if (inlineSlotContext && inlineContext && isBlockLike(node.kind)) {
+    if (inlineSlotContext && inlineContext && isBlockLike(node.kind) && node.kind !== "slot") {
         return renderChildren(true, footnotes, inlineSlotContext);
     }
     switch (node.kind) {
