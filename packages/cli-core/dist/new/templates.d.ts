@@ -25,4 +25,5 @@ export interface TemplateDefinition {
     build(options: TemplateOptions): TemplateOutput;
 }
 export declare function getTemplate(name: string): TemplateDefinition | null;
+export declare function stripTrailingCommasInLists(text: string): string;
 //# sourceMappingURL=templates.d.ts.map

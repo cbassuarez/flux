@@ -223,13 +223,15 @@ function buildBaseDoc(options, bodyContent, extraBlocks = []) {
 }
 function buildBlankTemplate(options) {
     const body = [
-        "  body {",
+        "page main {",
+        "  section intro {",
         "    // Start building your document.",
-        "    text \"Title\" {",
-        "      style = Title;",
-        "      value = @meta.title;",
+        "    text title {",
+        "      style = \"Title\";",
+        "      content = @meta.title;",
         "    }",
         "  }",
+        "}",
     ].join("\n");
     return {
         mainFlux: buildBaseDoc(options, body, []),
@@ -427,7 +429,7 @@ function buildSpecTemplate(options) {
         "        [\"ID\", \"Requirement\", \"Priority\"],",
         "        [\"REQ-1\", \"Describe the core behavior\", \"P0\"],",
         "        [\"REQ-2\", \"Define error handling\", \"P1\"],",
-        "        [\"REQ-3\", \"Document limits and scale\", \"P1\"],",
+        "        [\"REQ-3\", \"Document limits and scale\", \"P1\"]",
         "      ];",
         "      header = true;",
         "    }",
@@ -540,7 +542,7 @@ function buildPaperTemplate(options) {
         "        [\"Step\", \"Description\"],",
         "        [\"1\", \"Collect input data\"],",
         "        [\"2\", \"Run the core algorithm\"],",
-        "        [\"3\", \"Evaluate outcomes\"],",
+        "        [\"3\", \"Evaluate outcomes\"]",
         "      ];",
         "      header = true;",
         "    }",
@@ -675,5 +677,73 @@ function indent(text, level) {
 }
 function escapeString(value) {
     return value.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
+}
+export function stripTrailingCommasInLists(text) {
+    let result = "";
+    let inString = false;
+    let inLineComment = false;
+    const findNextSignificantChar = (start) => {
+        for (let i = start; i < text.length; i += 1) {
+            const ch = text[i];
+            if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
+                continue;
+            }
+            if (ch === "/" && text[i + 1] === "/") {
+                i += 2;
+                for (; i < text.length; i += 1) {
+                    if (text[i] === "\n") {
+                        break;
+                    }
+                }
+                continue;
+            }
+            return ch;
+        }
+        return null;
+    };
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        if (inLineComment) {
+            result += ch;
+            if (ch === "\n") {
+                inLineComment = false;
+            }
+            continue;
+        }
+        if (inString) {
+            result += ch;
+            if (ch === "\\") {
+                if (i + 1 < text.length) {
+                    result += text[i + 1];
+                    i += 1;
+                }
+                continue;
+            }
+            if (ch === "\"") {
+                inString = false;
+            }
+            continue;
+        }
+        if (ch === "\"") {
+            inString = true;
+            result += ch;
+            continue;
+        }
+        if (ch === "/" && text[i + 1] === "/") {
+            inLineComment = true;
+            result += ch;
+            result += text[i + 1];
+            i += 1;
+            continue;
+        }
+        if (ch === ",") {
+            const next = findNextSignificantChar(i + 1);
+            if (next === "]") {
+                continue;
+            }
+        }
+        result += ch;
+    }
+    return result;
 }
 //# sourceMappingURL=templates.js.map

@@ -1,7 +1,7 @@
 import path from "node:path";
 import { errorResult, okResult } from "../types.js";
 import { ensureDir, pathExists, writeFileText } from "../fs.js";
-import { getTemplate } from "../new/templates.js";
+import { getTemplate, stripTrailingCommasInLists } from "../new/templates.js";
 export async function newCommand(options) {
     const template = getTemplate(options.template);
     if (!template) {
@@ -24,7 +24,8 @@ export async function newCommand(options) {
         live: normalized.live,
     });
     const files = [];
-    await writeFileText(output.docPath, built.mainFlux);
+    const sanitizedMainFlux = stripTrailingCommasInLists(built.mainFlux);
+    await writeFileText(output.docPath, sanitizedMainFlux);
     files.push(output.docPath);
     const readmePath = path.join(output.dir, "README.md");
     await writeFileText(readmePath, built.readme);
@@ -40,7 +41,8 @@ export async function newCommand(options) {
         files.push(chaptersDir);
         for (const chapter of built.chapters) {
             const chapterPath = path.join(chaptersDir, chapter.path);
-            await writeFileText(chapterPath, chapter.content);
+            const sanitizedChapter = stripTrailingCommasInLists(chapter.content);
+            await writeFileText(chapterPath, sanitizedChapter);
             files.push(chapterPath);
         }
     }
