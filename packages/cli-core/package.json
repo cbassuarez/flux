@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/cli-core",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "description": "Core command implementations for Flux CLI",
   "license": "MIT",
   "type": "module",
