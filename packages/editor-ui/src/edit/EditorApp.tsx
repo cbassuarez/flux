@@ -731,49 +731,6 @@ export default function EditorApp() {
     selectNode(activeFindItem.id);
   }, [activeFindItem, selectNode]);
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isTypingTarget =
-        !!target &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        setFindOpen(true);
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !isTypingTarget) {
-        event.preventDefault();
-        setPaletteOpen(true);
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        void handleSave();
-      }
-      if (!isTypingTarget && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
-        event.preventDefault();
-        handleDuplicateSelected();
-      }
-      if (!isTypingTarget && (event.key === "Backspace" || event.key === "Delete")) {
-        event.preventDefault();
-        handleDeleteSelected();
-      }
-      if (!isTypingTarget && event.key === "]") {
-        event.preventDefault();
-        setInspectorVisible((prev) => !prev);
-      }
-      if (event.key === "Escape") {
-        setFindOpen(false);
-        setPaletteOpen(false);
-        setDiagnosticsOpen(false);
-        setAboutOpen(false);
-        setDocSettingsOpen(false);
-        setBuildInfoOpen(false);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [handleDeleteSelected, handleDuplicateSelected, handleSave]);
-
   const runTransform = useCallback(
     async (transform: EditorTransform | TransformRequest, successMessage?: string) => {
       if (runtimeState.mode === "playback") {
@@ -1000,6 +957,49 @@ export default function EditorApp() {
     await docService.saveDoc(doc.source);
     setSaveStatus("saved");
   }, [doc?.source, docService, docState.dirty, handleApplySource, sourceDirty]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget =
+        !!target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setFindOpen(true);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !isTypingTarget) {
+        event.preventDefault();
+        setPaletteOpen(true);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void handleSave();
+      }
+      if (!isTypingTarget && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        handleDuplicateSelected();
+      }
+      if (!isTypingTarget && (event.key === "Backspace" || event.key === "Delete")) {
+        event.preventDefault();
+        handleDeleteSelected();
+      }
+      if (!isTypingTarget && event.key === "]") {
+        event.preventDefault();
+        setInspectorVisible((prev) => !prev);
+      }
+      if (event.key === "Escape") {
+        setFindOpen(false);
+        setPaletteOpen(false);
+        setDiagnosticsOpen(false);
+        setAboutOpen(false);
+        setDocSettingsOpen(false);
+        setBuildInfoOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleDeleteSelected, handleDuplicateSelected, handleSave]);
 
   const handleResetLayout = useCallback(() => {
     setOutlineWidth(300);
