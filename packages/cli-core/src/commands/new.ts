@@ -1,7 +1,7 @@
 import path from "node:path";
 import { errorResult, okResult, type CommandResult } from "../types.js";
 import { ensureDir, pathExists, writeFileText } from "../fs.js";
-import { getTemplate, type TemplateName, type TemplateOptions } from "../new/templates.js";
+import { getTemplate, stripTrailingCommasInLists, type TemplateName, type TemplateOptions } from "../new/templates.js";
 import type { FontFallbackOption, FontsPreset, PageSizeOption, ThemeOption } from "../config.js";
 
 export interface NewOptions {
@@ -52,7 +52,8 @@ export async function newCommand(options: NewOptions): Promise<CommandResult<New
   });
 
   const files: string[] = [];
-  await writeFileText(output.docPath, built.mainFlux);
+  const sanitizedMainFlux = stripTrailingCommasInLists(built.mainFlux);
+  await writeFileText(output.docPath, sanitizedMainFlux);
   files.push(output.docPath);
 
   const readmePath = path.join(output.dir, "README.md");
@@ -71,7 +72,8 @@ export async function newCommand(options: NewOptions): Promise<CommandResult<New
     files.push(chaptersDir);
     for (const chapter of built.chapters) {
       const chapterPath = path.join(chaptersDir, chapter.path);
-      await writeFileText(chapterPath, chapter.content);
+      const sanitizedChapter = stripTrailingCommasInLists(chapter.content);
+      await writeFileText(chapterPath, sanitizedChapter);
       files.push(chapterPath);
     }
   }
