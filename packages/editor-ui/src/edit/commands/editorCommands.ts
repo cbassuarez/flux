@@ -89,6 +89,8 @@ export type EditorCommandContext = {
   runtimeState: EditorRuntimeState;
   runtimeActions: EditorRuntimeActions;
   selectionId: string | null;
+  handleDuplicate: () => void;
+  handleDelete: () => void;
   handleSave: () => void;
   handleExportPdf: () => void;
   handleResetLayout: () => void;
@@ -271,14 +273,14 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       label: "Duplicate",
       shortcut: "⌘D",
       enabled: Boolean(ctx.selectionId),
-      run: () => {},
+      run: ctx.handleDuplicate,
     }),
     "edit.delete": make({
       id: "edit.delete",
       label: "Delete",
       shortcut: "⌫",
       enabled: Boolean(ctx.selectionId),
-      run: () => {},
+      run: ctx.handleDelete,
     }),
     "edit.find": make({
       id: "edit.find",
