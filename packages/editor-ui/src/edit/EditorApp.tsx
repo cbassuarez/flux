@@ -25,6 +25,7 @@ import {
 } from "./components/EditorShell";
 import { Button } from "./components/ui/Button";
 import { MenuBar } from "./components/MenuBar";
+import { EditorFooter } from "./components/EditorFooter";
 import { StatusBar } from "./components/StatusBar";
 import { monaco } from "./monaco";
 import {
@@ -428,6 +429,22 @@ export default function EditorApp() {
 
   const diagnosticsSummary = useMemo(() => extractDiagnosticsSummary(doc?.diagnostics), [doc?.diagnostics]);
   const diagnosticsItems = useMemo(() => extractDiagnosticsItems(doc?.diagnostics), [doc?.diagnostics]);
+  const footerSaveState = useMemo<"saved" | "dirty" | "error">(() => {
+    if (saveStatus === "error") return "error";
+    if (sourceDirty || docState.dirty) return "dirty";
+    return "saved";
+  }, [docState.dirty, saveStatus, sourceDirty]);
+  const footerModeLabel = useMemo(() => {
+    if (runtimeState.mode === "playback") return "Playback";
+    if (activeMode === "edit") return "Edit";
+    if (activeMode === "source") return "Source";
+    return "Preview";
+  }, [activeMode, runtimeState.mode]);
+  const playbackReadout = useMemo(() => {
+    if (runtimeState.mode !== "playback") return undefined;
+    const time = Number.isFinite(runtimeState.timeSec) ? runtimeState.timeSec : 0;
+    return `Step ${runtimeState.docstep} • t=${time.toFixed(1)}s`;
+  }, [runtimeState.docstep, runtimeState.mode, runtimeState.timeSec]);
   const previewSrc = useMemo(() => buildPreviewSrc(doc?.previewPath, doc?.revision), [doc?.previewPath, doc?.revision]);
 
   const syncPreviewOverlays = useCallback(() => {
@@ -1459,7 +1476,7 @@ export default function EditorApp() {
           />
         ) : null}
 
-        <main className="editor-body">
+          <main className="editor-body">
             {outlineVisible ? (
               <>
                 <OutlinePane className="editor-pane outline-pane" style={{ width: outlineWidth }}>
@@ -1743,6 +1760,16 @@ export default function EditorApp() {
               </>
             ) : null}
           </main>
+          <EditorFooter
+            docTitle={doc?.title ?? "Untitled"}
+            docPath={doc?.docPath}
+            saveState={footerSaveState}
+            modeLabel={footerModeLabel}
+            breadcrumb={breadcrumbLabel}
+            playbackReadout={playbackReadout}
+            diagnosticsSummary={{ errors: diagnosticsSummary.fail, warnings: diagnosticsSummary.warn }}
+            onOpenDiagnostics={() => setDiagnosticsOpen(true)}
+          />
 
           {diagnosticsOpen ? (
             <ModalShell title="Diagnostics" onClose={() => setDiagnosticsOpen(false)}>
