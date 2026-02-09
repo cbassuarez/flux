@@ -427,6 +427,8 @@ export default function EditorApp() {
     }
   }, [frameEntry]);
 
+  const sourceDirty = doc?.source ? sourceDraft !== doc.source : false;
+
   const diagnosticsSummary = useMemo(() => extractDiagnosticsSummary(doc?.diagnostics), [doc?.diagnostics]);
   const diagnosticsItems = useMemo(() => extractDiagnosticsItems(doc?.diagnostics), [doc?.diagnostics]);
   const footerSaveState = useMemo<"saved" | "dirty" | "error">(() => {
@@ -763,8 +765,6 @@ export default function EditorApp() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
-
-  const sourceDirty = doc?.source ? sourceDraft !== doc.source : false;
 
   const handleTransform = useCallback(
     async (transform: EditorTransform | TransformRequest, successMessage?: string) => {
