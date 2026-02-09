@@ -1,9 +1,3 @@
-export declare const FLUX_BADGE_BASE_CLASSES: string;
-export type FluxBadgeTheme = "light" | "dark" | "blueprint";
-export type FluxBadgeProps = {
-    className?: string;
-    theme?: FluxBadgeTheme;
-    version?: string;
-};
-export declare function FluxBadge({ className, theme, version }: FluxBadgeProps): import("react/jsx-runtime").JSX.Element;
+export { FLUX_BADGE_BASE_CLASSES, FluxBadge } from "./react/FluxBadge.js";
+export type { FluxBadgeProps } from "./react/FluxBadge.js";
 //# sourceMappingURL=flux-badge.d.ts.map

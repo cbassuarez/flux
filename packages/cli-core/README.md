@@ -1,5 +1,34 @@
 # @flux-lang/cli-core
 
+<!-- FLUX:BADGES:BEGIN -->
+<p>
+  <a href="https://www.npmjs.com/package/@flux-lang/cli-core" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/npm.cli-core.dark.svg">
+      <img alt="@flux-lang/cli-core version" src="../../badges/generated/npm.cli-core.light.svg">
+    </picture>
+  </a>
+  <a href="https://www.npmjs.com/package/@flux-lang/cli-core" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/channel.cli-core.stable.dark.svg">
+      <img alt="@flux-lang/cli-core stable channel" src="../../badges/generated/channel.cli-core.stable.light.svg">
+    </picture>
+  </a>
+  <a href="../../LICENSE">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/license.dark.svg">
+      <img alt="License" src="../../badges/generated/license.light.svg">
+    </picture>
+  </a>
+  <a href="https://github.com/cbassuarez/flux/commits/main" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/maintained.dark.svg">
+      <img alt="Maintained status" src="../../badges/generated/maintained.light.svg">
+    </picture>
+  </a>
+</p>
+<!-- FLUX:BADGES:END -->
+
 1) **What this package is**
    Core command implementations for the Flux CLI (parse/check/render/view/new/add and config helpers).
 

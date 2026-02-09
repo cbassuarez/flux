@@ -41,7 +41,7 @@ export type {
 } from "./badges.js";
 
 export { FLUX_BADGE_BASE_CLASSES, FluxBadge } from "./flux-badge.js";
-export type { FluxBadgeProps, FluxBadgeTheme } from "./flux-badge.js";
+export type { FluxBadgeProps } from "./flux-badge.js";
 
 export { renderBadgeSvg } from "./badge-svg.js";
 export type { BadgeSvgTheme, BadgeSvgOptions } from "./badge-svg.js";

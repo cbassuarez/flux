@@ -1,8 +1,33 @@
 # Flux VS Code Extension
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/cbassuarez.flux-language-support)](https://marketplace.visualstudio.com/items?itemName=cbassuarez.flux-language-support)
-[![VS Code Installs](https://img.shields.io/visual-studio-marketplace/i/cbassuarez.flux-language-support)](https://marketplace.visualstudio.com/items?itemName=cbassuarez.flux-language-support)
-[![Flux Spec](https://img.shields.io/badge/Flux-spec-00CDFE)](../../spec/overview.md)
-[![License: MIT](https://img.shields.io/github/license/cbassuarez/flux)](../../LICENSE)
+
+<!-- FLUX:BADGES:BEGIN -->
+<p>
+  <a href="https://www.npmjs.com/package/@flux-lang/vscode-flux" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/npm.vscode-flux.dark.svg">
+      <img alt="@flux-lang/vscode-flux version" src="../../badges/generated/npm.vscode-flux.light.svg">
+    </picture>
+  </a>
+  <a href="https://www.npmjs.com/package/@flux-lang/vscode-flux" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/channel.vscode-flux.stable.dark.svg">
+      <img alt="@flux-lang/vscode-flux stable channel" src="../../badges/generated/channel.vscode-flux.stable.light.svg">
+    </picture>
+  </a>
+  <a href="../../LICENSE">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/license.dark.svg">
+      <img alt="License" src="../../badges/generated/license.light.svg">
+    </picture>
+  </a>
+  <a href="https://github.com/cbassuarez/flux/commits/main" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/maintained.dark.svg">
+      <img alt="Maintained status" src="../../badges/generated/maintained.light.svg">
+    </picture>
+  </a>
+</p>
+<!-- FLUX:BADGES:END -->
 
 1) **What this package is**
    Language support for the Flux score language (syntax highlighting + diagnostics).

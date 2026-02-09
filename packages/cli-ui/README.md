@@ -1,5 +1,34 @@
 # @flux-lang/cli-ui
 
+<!-- FLUX:BADGES:BEGIN -->
+<p>
+  <a href="https://www.npmjs.com/package/@flux-lang/cli-ui" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/npm.cli-ui.dark.svg">
+      <img alt="@flux-lang/cli-ui version" src="../../badges/generated/npm.cli-ui.light.svg">
+    </picture>
+  </a>
+  <a href="https://www.npmjs.com/package/@flux-lang/cli-ui" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/channel.cli-ui.stable.dark.svg">
+      <img alt="@flux-lang/cli-ui stable channel" src="../../badges/generated/channel.cli-ui.stable.light.svg">
+    </picture>
+  </a>
+  <a href="../../LICENSE">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/license.dark.svg">
+      <img alt="License" src="../../badges/generated/license.light.svg">
+    </picture>
+  </a>
+  <a href="https://github.com/cbassuarez/flux/commits/main" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/maintained.dark.svg">
+      <img alt="Maintained status" src="../../badges/generated/maintained.light.svg">
+    </picture>
+  </a>
+</p>
+<!-- FLUX:BADGES:END -->
+
 1) **What this package is**
    Ink-based terminal UI for the Flux CLI.
 

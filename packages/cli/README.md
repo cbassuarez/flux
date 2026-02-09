@@ -1,5 +1,34 @@
 # @flux-lang/cli
 
+<!-- FLUX:BADGES:BEGIN -->
+<p>
+  <a href="https://www.npmjs.com/package/@flux-lang/cli" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/npm.cli.dark.svg">
+      <img alt="@flux-lang/cli version" src="../../badges/generated/npm.cli.light.svg">
+    </picture>
+  </a>
+  <a href="https://www.npmjs.com/package/@flux-lang/cli" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/channel.cli.stable.dark.svg">
+      <img alt="@flux-lang/cli stable channel" src="../../badges/generated/channel.cli.stable.light.svg">
+    </picture>
+  </a>
+  <a href="../../LICENSE">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/license.dark.svg">
+      <img alt="License" src="../../badges/generated/license.light.svg">
+    </picture>
+  </a>
+  <a href="https://github.com/cbassuarez/flux/commits/main" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/maintained.dark.svg">
+      <img alt="Maintained status" src="../../badges/generated/maintained.light.svg">
+    </picture>
+  </a>
+</p>
+<!-- FLUX:BADGES:END -->
+
 1) **What this package is**
    CLI tooling for the Flux score language. It ships the `flux` binary.
 

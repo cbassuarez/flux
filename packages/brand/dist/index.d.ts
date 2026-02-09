@@ -4,7 +4,7 @@ export type { BadgeKind, BadgeSize, BadgeTheme, BadgeReleaseChannel } from "./ba
 export { Badge, NpmBadge, ChannelBadge, CiBadge, LicenseBadge, DocsBadge, DiscordBadge, SecurityBadge, MaintainedBadge, fallbackBadgeValue, } from "./badges.js";
 export type { BadgeProps, NpmBadgeProps, ChannelBadgeProps, CiBadgeProps, LicenseBadgeProps, DocsBadgeProps, DiscordBadgeProps, SecurityBadgeProps, MaintainedBadgeProps, } from "./badges.js";
 export { FLUX_BADGE_BASE_CLASSES, FluxBadge } from "./flux-badge.js";
-export type { FluxBadgeProps, FluxBadgeTheme } from "./flux-badge.js";
+export type { FluxBadgeProps } from "./flux-badge.js";
 export { renderBadgeSvg } from "./badge-svg.js";
 export type { BadgeSvgTheme, BadgeSvgOptions } from "./badge-svg.js";
 export type FluxChannel = "stable" | "canary";

@@ -2,6 +2,7 @@ import { jsx as _jsx, Fragment as _Fragment, jsxs as _jsxs } from "react/jsx-run
 import { useMemo, useState } from "react";
 import { BADGE_ACCENTS, BADGE_FALLBACK_VALUE, BADGE_SIZE_TOKENS, BADGE_THEME_TOKENS, formatBadgeVersion, normalizeBadgeValue, } from "./badge-shared.js";
 import { getBadgeIconShapes } from "./badge-icons.js";
+import { FluxBadge } from "./flux-badge.js";
 function withAlpha(color, alpha) {
     if (!color.startsWith("#") || (color.length !== 7 && color.length !== 4)) {
         return color;
@@ -93,8 +94,12 @@ export function Badge({ kind, size = "md", theme = "auto", label, value, icon, h
     }
     return (_jsx("span", { className: joinClassName("flux-brand-badge", className), style: baseStyle, "aria-label": computedAria, title: computedTitle, children: contents }));
 }
-export function NpmBadge({ packageName, version, label, value, href, ...rest }) {
-    return (_jsx(Badge, { kind: "npm", label: label ?? packageName, value: value ?? formatBadgeVersion(version), href: href ?? `https://www.npmjs.com/package/${packageName}`, ...rest }));
+export function NpmBadge({ packageName, version, label, value, href, className, ...rest }) {
+    if (packageName === "@flux-lang/flux") {
+        // Guard the special package so callers keep the canonical FluxBadge rendering.
+        return _jsx(FluxBadge, { className: className, version: version ?? value });
+    }
+    return (_jsx(Badge, { kind: "npm", label: label ?? packageName, value: value ?? formatBadgeVersion(version), href: href ?? `https://www.npmjs.com/package/${packageName}`, className: className, ...rest }));
 }
 export function ChannelBadge({ channel, packageName, version, label, value, href, ...rest }) {
     return (_jsx(Badge, { kind: "channel", label: label ?? "Channel", value: value ?? formatBadgeVersion(version) ?? channel, href: href ?? (packageName ? `https://www.npmjs.com/package/${packageName}` : undefined), ...rest }));

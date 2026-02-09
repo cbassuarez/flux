@@ -1,67 +1,57 @@
 # Flux
 
+<!-- FLUX:BADGES:BEGIN -->
 <p>
   <a href="https://www.npmjs.com/package/@flux-lang/flux" target="_blank" rel="noreferrer">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/npm.flux.dark.svg">
-      <img alt="@flux-lang/flux npm version" src="./badges/generated/npm.flux.light.svg">
-    </picture>
-  </a>
-  <a href="https://www.npmjs.com/package/@flux-lang/flux" target="_blank" rel="noreferrer">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/channel.flux.stable.dark.svg">
-      <img alt="Release channel stable" src="./badges/generated/channel.flux.stable.light.svg">
-    </picture>
-  </a>
-  <a href="https://www.npmjs.com/package/@flux-lang/flux" target="_blank" rel="noreferrer">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/channel.flux.nightly.dark.svg">
-      <img alt="Release channel nightly" src="./badges/generated/channel.flux.nightly.light.svg">
-    </picture>
-  </a>
-  <a href="https://www.npmjs.com/package/@flux-lang/flux" target="_blank" rel="noreferrer">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/channel.flux.canary.dark.svg">
-      <img alt="Release channel canary" src="./badges/generated/channel.flux.canary.light.svg">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/flux-npm.dark.svg">
+      <img alt="@flux-lang/flux npm version" src="./badges/generated/flux-npm.light.svg">
     </picture>
   </a>
   <a href="https://github.com/cbassuarez/flux/actions/workflows/ci.yml" target="_blank" rel="noreferrer">
-    <picture>
+<picture>
       <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/ci.dark.svg">
       <img alt="CI status" src="./badges/generated/ci.light.svg">
     </picture>
   </a>
   <a href="./LICENSE">
-    <picture>
+<picture>
       <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/license.dark.svg">
       <img alt="License" src="./badges/generated/license.light.svg">
     </picture>
   </a>
   <a href="https://flux-lang.org/docs" target="_blank" rel="noreferrer">
-    <picture>
+<picture>
       <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/docs.dark.svg">
       <img alt="Docs" src="./badges/generated/docs.light.svg">
     </picture>
   </a>
   <a href="https://github.com/cbassuarez/flux/discussions" target="_blank" rel="noreferrer">
-    <picture>
+<picture>
       <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/discord.dark.svg">
       <img alt="Community" src="./badges/generated/discord.light.svg">
     </picture>
   </a>
   <a href="https://github.com/cbassuarez/flux/security/policy" target="_blank" rel="noreferrer">
-    <picture>
+<picture>
       <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/security.dark.svg">
       <img alt="Security policy" src="./badges/generated/security.light.svg">
     </picture>
   </a>
   <a href="https://github.com/cbassuarez/flux/commits/main" target="_blank" rel="noreferrer">
-    <picture>
+<picture>
       <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/maintained.dark.svg">
       <img alt="Maintained status" src="./badges/generated/maintained.light.svg">
     </picture>
   </a>
+  <a href="https://www.npmjs.com/package/@flux-lang/flux" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./badges/generated/channel.flux.stable.dark.svg">
+      <img alt="Release channel stable" src="./badges/generated/channel.flux.stable.light.svg">
+    </picture>
+  </a>
 </p>
+<!-- FLUX:BADGES:END -->
 
 ## Flux in one sentence
 Flux is a domain-specific language for evolving documents: a `.flux` file is parsed into a document AST, rendered deterministically across docsteps/time/seed, and projected into viewer/export outputs.

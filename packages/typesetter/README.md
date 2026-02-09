@@ -1,5 +1,34 @@
 # @flux-lang/typesetter
 
+<!-- FLUX:BADGES:BEGIN -->
+<p>
+  <a href="https://www.npmjs.com/package/@flux-lang/typesetter" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/npm.typesetter.dark.svg">
+      <img alt="@flux-lang/typesetter version" src="../../badges/generated/npm.typesetter.light.svg">
+    </picture>
+  </a>
+  <a href="https://www.npmjs.com/package/@flux-lang/typesetter" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/channel.typesetter.stable.dark.svg">
+      <img alt="@flux-lang/typesetter stable channel" src="../../badges/generated/channel.typesetter.stable.light.svg">
+    </picture>
+  </a>
+  <a href="../../LICENSE">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/license.dark.svg">
+      <img alt="License" src="../../badges/generated/license.light.svg">
+    </picture>
+  </a>
+  <a href="https://github.com/cbassuarez/flux/commits/main" target="_blank" rel="noreferrer">
+<picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../../badges/generated/maintained.dark.svg">
+      <img alt="Maintained status" src="../../badges/generated/maintained.light.svg">
+    </picture>
+  </a>
+</p>
+<!-- FLUX:BADGES:END -->
+
 1) **What this package is**
    Typesetting backends for Flux HTML rendering (PDF generation).
 

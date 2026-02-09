@@ -27,6 +27,14 @@ describe("badge web helpers", () => {
     expect(channel).toContain("stable");
   });
 
+  it("routes @flux-lang/flux npm helper calls through the special FluxBadge", () => {
+    const html = renderToStaticMarkup(<NpmBadge packageName="@flux-lang/flux" version="1.2.3" />);
+
+    expect(html).toContain(`class="${FLUX_BADGE_BASE_CLASSES}"`);
+    expect(html).toContain("@flux-lang/flux");
+    expect(html).toContain(">v1.2.3<");
+  });
+
   it("renders the canonical FluxBadge markup and base classes", () => {
     const html = renderToStaticMarkup(<FluxBadge version="1.2.3" />);
 

@@ -12,6 +12,7 @@ import {
   type BadgeTheme,
 } from "./badge-shared.js";
 import { getBadgeIconShapes } from "./badge-icons.js";
+import { FluxBadge } from "./flux-badge.js";
 
 export type BadgeProps = {
   kind: BadgeKind;
@@ -230,13 +231,19 @@ export type NpmBadgeProps = BaseWrapperProps & {
   href?: string;
 };
 
-export function NpmBadge({ packageName, version, label, value, href, ...rest }: NpmBadgeProps) {
+export function NpmBadge({ packageName, version, label, value, href, className, ...rest }: NpmBadgeProps) {
+  if (packageName === "@flux-lang/flux") {
+    // Guard the special package so callers keep the canonical FluxBadge rendering.
+    return <FluxBadge className={className} version={version ?? value} />;
+  }
+
   return (
     <Badge
       kind="npm"
       label={label ?? packageName}
       value={value ?? formatBadgeVersion(version)}
       href={href ?? `https://www.npmjs.com/package/${packageName}`}
+      className={className}
       {...rest}
     />
   );

@@ -22,7 +22,7 @@ export type NpmBadgeProps = BaseWrapperProps & {
     value?: string;
     href?: string;
 };
-export declare function NpmBadge({ packageName, version, label, value, href, ...rest }: NpmBadgeProps): import("react/jsx-runtime").JSX.Element;
+export declare function NpmBadge({ packageName, version, label, value, href, className, ...rest }: NpmBadgeProps): import("react/jsx-runtime").JSX.Element;
 export type ChannelBadgeProps = BaseWrapperProps & {
     channel: BadgeReleaseChannel;
     packageName?: string;
