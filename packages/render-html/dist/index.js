@@ -858,9 +858,12 @@ function renderImage(node, attrs, options, styleAttr = "") {
     return `<img class="${className}" ${attrs}${styleAttr} ${extraAttrs} src="${escapeAttr(resolvedSrc)}" alt="${escapeAttr(resolveString(node.props.alt))}">`;
 }
 function renderFigureMedia(node, options) {
-    const { src, assetId, raw } = resolveImageSource(node.props, options);
-    if (!src && !assetId && !raw)
+    const asset = node.props.asset;
+    const rawSrc = resolveString(node.props.src);
+    const hasAsset = asset && typeof asset === "object" && asset.kind === "asset";
+    if (!rawSrc && !hasAsset)
         return "";
+    const { src, assetId, raw } = resolveImageSource(node.props, options);
     const extraAttrs = [
         assetId ? `data-flux-asset-id="${escapeAttr(assetId)}"` : "",
         raw ? `data-flux-src="${escapeAttr(raw)}"` : "",
