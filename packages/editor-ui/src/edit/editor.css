@@ -1456,6 +1456,129 @@
   color: var(--editor-text-fg);
 }
 
+.editor-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--editor-space-3);
+  padding: 0 var(--editor-space-4);
+  height: 30px;
+  border-top: 1px solid var(--editor-line-hairline);
+  background: var(--editor-surface-panel);
+  font-size: 11px;
+  color: var(--editor-text-muted);
+}
+
+.footer-zone {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--editor-space-2);
+}
+
+.footer-left {
+  justify-content: flex-start;
+}
+
+.footer-center {
+  justify-content: center;
+  color: var(--editor-text-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footer-right {
+  justify-content: flex-end;
+}
+
+.footer-title,
+.footer-path,
+.footer-breadcrumb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.footer-title {
+  color: var(--editor-text-fg);
+  font-weight: 600;
+}
+
+.footer-path {
+  color: var(--editor-text-muted);
+  max-width: 220px;
+}
+
+.footer-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: var(--editor-radius-sm);
+  border: 1px solid var(--editor-line-hairline);
+  font-size: 11px;
+  color: var(--editor-text-fg);
+  background: transparent;
+}
+
+.footer-save-saved {
+  color: var(--editor-status-ok);
+}
+
+.footer-save-dirty {
+  color: var(--editor-accent);
+}
+
+.footer-save-error {
+  color: var(--editor-status-error);
+}
+
+.footer-breadcrumb {
+  max-width: 360px;
+}
+
+.footer-playback {
+  font-family: var(--editor-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--editor-text-fg);
+}
+
+.footer-diagnostics {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--editor-text-fg);
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--editor-space-2);
+  padding: 2px 6px;
+  border-radius: var(--editor-radius-sm);
+  cursor: pointer;
+}
+
+.footer-diagnostics:hover,
+.footer-diagnostics:focus-visible {
+  outline: none;
+  background: var(--editor-surface-hover);
+}
+
+.footer-diagnostics-item {
+  font-variant-numeric: tabular-nums;
+}
+
+.footer-shortcuts {
+  font-size: 10px;
+  color: var(--editor-text-muted);
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 900px) {
+  .footer-center {
+    display: none;
+  }
+}
+
 .status-pill {
   padding: 2px 10px;
   border-radius: 999px;
