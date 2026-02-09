@@ -996,8 +996,11 @@ function renderFigureMedia(
   node: RenderNodeIR,
   options: { assetUrl?: (assetId: string) => string; rawUrl?: (raw: string) => string },
 ): string {
+  const asset = node.props.asset;
+  const rawSrc = resolveString(node.props.src);
+  const hasAsset = asset && typeof asset === "object" && (asset as RenderAssetRef).kind === "asset";
+  if (!rawSrc && !hasAsset) return "";
   const { src, assetId, raw } = resolveImageSource(node.props, options);
-  if (!src && !assetId && !raw) return "";
   const extraAttrs = [
     assetId ? `data-flux-asset-id="${escapeAttr(assetId)}"` : "",
     raw ? `data-flux-src="${escapeAttr(raw)}"` : "",
