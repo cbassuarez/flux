@@ -699,7 +699,7 @@ function renderNode(
   const renderChildren = (inline = childrenInline, context = footnotes, slotContext = inlineSlotContext): string =>
     node.children.map((child) => renderNode(child, options, inline, context, slotContext)).join("");
 
-  if (inlineSlotContext && inlineContext && isBlockLike(node.kind)) {
+  if (inlineSlotContext && inlineContext && isBlockLike(node.kind) && node.kind !== "slot") {
     return renderChildren(true, footnotes, inlineSlotContext);
   }
 
