@@ -98,30 +98,43 @@ export function patchSlotText(outer: HTMLElement, text: string, inline: boolean)
   return targetOuter;
 }
 
-function renderSlotValue(container: HTMLElement, value: SlotValue) {
-  const doc = container.ownerDocument;
-  container.innerHTML = "";
-  if (value.kind === "text") {
-    container.textContent = sanitizeSlotText(value.text);
-    return;
+type SlotRenderResult = { fragment: DocumentFragment } | { empty: true } | { unrenderable: true };
+
+function renderSlotValue(doc: Document, value: SlotValue): SlotRenderResult {
+  switch (value.kind) {
+    case "text": {
+      const fragment = doc.createDocumentFragment();
+      fragment.appendChild(doc.createTextNode(sanitizeSlotText(value.text)));
+      return { fragment };
+    }
+    case "asset": {
+      const src = value.asset ? assetPreviewUrl(value.asset) : "";
+      if (!src) return { unrenderable: true };
+      const fragment = doc.createDocumentFragment();
+      const img = doc.createElement("img");
+      img.src = src;
+      img.alt = value.label ?? "";
+      img.className = "flux-slot-asset";
+      fragment.appendChild(img);
+      return { fragment };
+    }
+    default: {
+      const _exhaustive: never = value;
+      return { unrenderable: true };
+    }
   }
-  const src = value.asset ? assetPreviewUrl(value.asset) : "";
-  if (!src) return;
-  const img = doc.createElement("img");
-  img.src = src;
-  img.alt = value.label ?? "";
-  img.className = "flux-slot-asset";
-  container.appendChild(img);
 }
 
 export function patchSlotContent(outer: HTMLElement, value: SlotValue, inline: boolean): HTMLElement {
   const targetOuter = inline ? normalizeInlineSlotOuter(outer) : outer;
   const inner = ensureSlotInnerWrapper(targetOuter, inline);
-  if (value.kind === "text") {
-    inner.innerHTML = escapeHtml(sanitizeSlotText(value.text));
-    return targetOuter;
+  const doc = inner.ownerDocument;
+  const result = renderSlotValue(doc, value);
+  if ("fragment" in result) {
+    inner.replaceChildren(...Array.from(result.fragment.childNodes));
+  } else if ("empty" in result) {
+    inner.replaceChildren();
   }
-  renderSlotValue(inner, value);
   return targetOuter;
 }
 
@@ -179,6 +192,9 @@ export function patchSlotContentWithTransition(
     return;
   }
 
+  const renderResult = renderSlotValue(doc, value);
+  if ("unrenderable" in renderResult) return;
+
   clearSlotTransitionLayers(targetOuter);
   targetOuter.classList.add("flux-slot-transitioning");
 
@@ -204,7 +220,9 @@ export function patchSlotContentWithTransition(
 
   const toLayer = doc.createElement(inline ? "span" : "div");
   toLayer.className = "flux-slot-layer flux-slot-layer-to";
-  renderSlotValue(toLayer, value);
+  if ("fragment" in renderResult) {
+    toLayer.append(...Array.from(renderResult.fragment.childNodes));
+  }
 
   layer.appendChild(fromLayer);
   layer.appendChild(toLayer);

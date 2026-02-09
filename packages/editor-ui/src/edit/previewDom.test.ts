@@ -53,11 +53,11 @@ describe("preview dom slot patching", () => {
     patchSlotContent(outer, value, false);
 
     const img = outer.querySelector("img.flux-slot-asset") as HTMLImageElement | null;
-    expect(img?.getAttribute("src")).toBe("/assets/asset-1");
+    expect(img?.getAttribute("src")).toBe("assets/asset-1");
     expect(img?.getAttribute("alt")).toBe("Example asset");
   });
 
-  it("keeps empty slots free of injected content", () => {
+  it("unrenderable value does not clear existing content", () => {
     document.body.innerHTML = `<div data-flux-id="slot5" data-flux-kind="slot"><span>Placeholder</span></div>`;
     const outer = document.querySelector("[data-flux-id=\"slot5\"]") as HTMLElement;
     const value: SlotValue = { kind: "asset", asset: null, label: "" };
@@ -65,6 +65,26 @@ describe("preview dom slot patching", () => {
     patchSlotContent(outer, value, false);
 
     const inner = outer.querySelector("[data-flux-slot-inner]") as HTMLElement | null;
-    expect(inner?.innerHTML).toBe("");
+    expect(inner?.textContent).toBe("Placeholder");
+  });
+
+  it("base-path asset URLs resolve under /flux", () => {
+    document.head.innerHTML = `<base href="http://localhost/flux/preview">`;
+    document.body.innerHTML = `<div data-flux-id="slot6" data-flux-kind="slot"></div>`;
+    const outer = document.querySelector("[data-flux-id=\"slot6\"]") as HTMLElement;
+    const asset: AssetItem = {
+      id: "asset-1",
+      name: "Example",
+      kind: "image",
+      path: "/tmp/example.png",
+      tags: [],
+    };
+    const value: SlotValue = { kind: "asset", asset, label: "Example asset" };
+
+    patchSlotContent(outer, value, false);
+
+    const img = outer.querySelector("img.flux-slot-asset") as HTMLImageElement | null;
+    expect(img).not.toBeNull();
+    expect(new URL(img?.src ?? "").pathname).toBe("/flux/assets/asset-1");
   });
 });
