@@ -45,7 +45,6 @@ import {
   findFluxElement,
   patchSlotContent,
   patchSlotContentWithTransition,
-  sanitizeSlotText,
   setPreviewRootClass,
   clearSlotTransitionLayers,
   type ImageFrame,
@@ -79,6 +78,7 @@ import { EditorRuntimeProvider, useEditorRuntimeState } from "./runtimeContext";
 import { buildGeneratorExpr, hasEmptyValue, isChooseCycleSpec, promoteVariants, wrapExpressionValue } from "./generatorUtils";
 import { buildEditorCommands, type EditorCommand } from "./commands/editorCommands";
 import { getFluxVersionInfo } from "./versionInfo";
+import { assetPreviewUrl } from "./slotAssets";
 
 loader.config({ monaco });
 
@@ -474,14 +474,6 @@ export default function EditorApp() {
     }
   }, [doc?.index, showIds]);
 
-  const buildSlotPatch = useCallback((value: SlotValue) => {
-    if (value.kind === "asset") {
-      const src = value.asset ? assetPreviewUrl(value.asset) : "";
-      return { kind: "asset" as const, src, alt: value.label };
-    }
-    return { kind: "text" as const, text: sanitizeSlotText(value.text) };
-  }, []);
-
   const applySlotSnapshot = useCallback(() => {
     if (!doc?.index) return;
     const frameDoc = previewFrameRef.current?.contentDocument;
@@ -500,10 +492,10 @@ export default function EditorApp() {
       if (!slotEl) continue;
       ensureFluxAttributes(slotEl, entry.id, entry.node.kind);
       clearSlotTransitionLayers(slotEl);
-      patchSlotContent(slotEl, buildSlotPatch(value), entry.node.kind === "inline_slot");
+      patchSlotContent(slotEl, value, entry.node.kind === "inline_slot");
       slotPlaybackRef.current.set(entry.id, { bucket, eventIndex, value, hash });
     }
-  }, [buildSlotPatch, doc?.assetsIndex, doc?.index, runtimeInputs]);
+  }, [doc?.assetsIndex, doc?.index, runtimeInputs]);
 
   const applySlotPlaybackTick = useCallback(() => {
     if (!doc?.index) return;
@@ -527,16 +519,15 @@ export default function EditorApp() {
       if (!slotEl) continue;
       ensureFluxAttributes(slotEl, entry.id, entry.node.kind);
       const transition = (entry.node as any).transition as SlotTransitionSpec | undefined;
-      const patch = buildSlotPatch(state.value);
       if (!transition || transition.kind === "none" || transition.kind === "appear" || runtimeState.reducedMotion) {
-        patchSlotContent(slotEl, patch, entry.node.kind === "inline_slot");
+        patchSlotContent(slotEl, state.value, entry.node.kind === "inline_slot");
       } else {
-        patchSlotContentWithTransition(slotEl, patch, entry.node.kind === "inline_slot", transition, {
+        patchSlotContentWithTransition(slotEl, state.value, entry.node.kind === "inline_slot", transition, {
           reducedMotion: runtimeState.reducedMotion,
         });
       }
     }
-  }, [buildSlotPatch, doc?.assetsIndex, doc?.index, runtimeInputs, runtimeState.reducedMotion]);
+  }, [doc?.assetsIndex, doc?.index, runtimeInputs, runtimeState.reducedMotion]);
 
   const applyFrameToPreview = useCallback(
     (frame: ImageFrame) => {
@@ -826,23 +817,21 @@ export default function EditorApp() {
       }
 
       const inline = selectedEntry.node.kind === "inline_slot";
-      const patchNext = buildSlotPatch(payload.next);
-      const patchCurrent = buildSlotPatch(payload.current);
       const transition =
         runtimeState.reducedMotion || !payload.transition || payload.transition.kind === "none"
           ? { kind: "appear" }
           : payload.transition;
 
-      patchSlotContentWithTransition(slotEl, patchNext, inline, transition, { reducedMotion: runtimeState.reducedMotion });
+      patchSlotContentWithTransition(slotEl, payload.next, inline, transition, { reducedMotion: runtimeState.reducedMotion });
 
       const duration = getTransitionDurationMs(transition);
       const holdMs = 300;
       previewTransitionTimerRef.current = window.setTimeout(() => {
         clearSlotTransitionLayers(slotEl);
-        patchSlotContent(slotEl, patchCurrent, inline);
+        patchSlotContent(slotEl, payload.current, inline);
       }, duration + holdMs);
     },
-    [buildSlotPatch, runtimeState.mode, runtimeState.reducedMotion, selectedEntry],
+    [runtimeState.mode, runtimeState.reducedMotion, selectedEntry],
   );
 
   const commitFrame = useCallback(
@@ -1265,12 +1254,12 @@ export default function EditorApp() {
   useEffect(() => {
     if (runtimeState.mode !== "edit") return;
     applySlotSnapshot();
-  }, [applySlotSnapshot, runtimeInputs, runtimeState.mode]);
+  }, [applySlotSnapshot, doc?.revision, doc?.source, runtimeInputs, runtimeState.mode]);
 
   useEffect(() => {
     if (runtimeState.mode !== "playback") return;
     applySlotPlaybackTick();
-  }, [applySlotPlaybackTick, runtimeInputs, runtimeState.mode]);
+  }, [applySlotPlaybackTick, doc?.revision, doc?.source, runtimeInputs, runtimeState.mode]);
 
   useEffect(() => {
     syncSlotLabels();
@@ -3841,12 +3830,6 @@ const IGNORED_SLOT_PROP_KEYS = new Set([
   "href",
   "name",
 ]);
-
-function assetPreviewUrl(asset: AssetItem) {
-  if (asset.id) return `/assets/${encodeURIComponent(asset.id)}`;
-  if (asset.path) return `/asset?src=${encodeURIComponent(asset.path)}`;
-  return "";
-}
 
 function buildPreviewSrc(basePath?: string, revision?: number): string {
   if (typeof window === "undefined") return basePath ?? "/preview";

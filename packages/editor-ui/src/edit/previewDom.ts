@@ -1,13 +1,12 @@
+import type { SlotValue } from "./slotRuntime";
+import { assetPreviewUrl } from "./slotAssets";
+
 export type ImageFrame = {
   fit: "contain" | "cover";
   scale: number;
   offsetX: number;
   offsetY: number;
 };
-
-export type SlotPatch =
-  | { kind: "text"; text: string }
-  | { kind: "asset"; src: string; alt?: string };
 
 const SLOT_INNER_ATTR = "data-flux-slot-inner";
 
@@ -99,29 +98,30 @@ export function patchSlotText(outer: HTMLElement, text: string, inline: boolean)
   return targetOuter;
 }
 
-function renderSlotPatch(container: HTMLElement, patch: SlotPatch) {
+function renderSlotValue(container: HTMLElement, value: SlotValue) {
   const doc = container.ownerDocument;
   container.innerHTML = "";
-  if (patch.kind === "text") {
-    container.textContent = patch.text;
+  if (value.kind === "text") {
+    container.textContent = sanitizeSlotText(value.text);
     return;
   }
-  if (!patch.src) return;
+  const src = value.asset ? assetPreviewUrl(value.asset) : "";
+  if (!src) return;
   const img = doc.createElement("img");
-  img.src = patch.src;
-  img.alt = patch.alt ?? "";
+  img.src = src;
+  img.alt = value.label ?? "";
   img.className = "flux-slot-asset";
   container.appendChild(img);
 }
 
-export function patchSlotContent(outer: HTMLElement, patch: SlotPatch, inline: boolean): HTMLElement {
+export function patchSlotContent(outer: HTMLElement, value: SlotValue, inline: boolean): HTMLElement {
   const targetOuter = inline ? normalizeInlineSlotOuter(outer) : outer;
   const inner = ensureSlotInnerWrapper(targetOuter, inline);
-  if (patch.kind === "text") {
-    inner.innerHTML = escapeHtml(patch.text);
+  if (value.kind === "text") {
+    inner.innerHTML = escapeHtml(sanitizeSlotText(value.text));
     return targetOuter;
   }
-  renderSlotPatch(inner, patch);
+  renderSlotValue(inner, value);
   return targetOuter;
 }
 
@@ -154,19 +154,19 @@ export function clearSlotTransitionLayers(outer: HTMLElement) {
 
 export function patchSlotContentWithTransition(
   outer: HTMLElement,
-  patch: SlotPatch,
+  value: SlotValue,
   inline: boolean,
   transition: { kind: string; durationMs?: number; ease?: string; direction?: string } | null | undefined,
   options?: { reducedMotion?: boolean },
 ): void {
   if (!transition || transition.kind === "none" || transition.kind === "appear" || options?.reducedMotion) {
-    patchSlotContent(outer, patch, inline);
+    patchSlotContent(outer, value, inline);
     return;
   }
 
   const durationMs = Math.max(0, Number(transition.durationMs ?? 0));
   if (!durationMs) {
-    patchSlotContent(outer, patch, inline);
+    patchSlotContent(outer, value, inline);
     return;
   }
 
@@ -175,7 +175,7 @@ export function patchSlotContentWithTransition(
   const doc = outer.ownerDocument;
   const win = doc?.defaultView;
   if (!doc || !win) {
-    patchSlotContent(targetOuter, patch, inline);
+    patchSlotContent(targetOuter, value, inline);
     return;
   }
 
@@ -204,7 +204,7 @@ export function patchSlotContentWithTransition(
 
   const toLayer = doc.createElement(inline ? "span" : "div");
   toLayer.className = "flux-slot-layer flux-slot-layer-to";
-  renderSlotPatch(toLayer, patch);
+  renderSlotValue(toLayer, value);
 
   layer.appendChild(fromLayer);
   layer.appendChild(toLayer);
@@ -241,13 +241,13 @@ export function patchSlotContentWithTransition(
       ], { duration: durationMs, easing: "linear", fill: "forwards" }),
     );
   } else {
-    patchSlotContent(targetOuter, patch, inline);
+    patchSlotContent(targetOuter, value, inline);
     return;
   }
 
   const finalize = () => {
     clearSlotTransitionLayers(targetOuter);
-    patchSlotContent(targetOuter, patch, inline);
+    patchSlotContent(targetOuter, value, inline);
   };
 
   const timeout = win.setTimeout(finalize, durationMs + 30);
