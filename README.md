@@ -59,7 +59,6 @@
 </p>
 <!-- FLUX:BADGES:END -->
 
-## Flux in one sentence
 Flux is a domain-specific language for evolving documents: a `.flux` file is parsed into a document AST, rendered deterministically across docsteps/time/seed, and projected into viewer/export outputs.
 
 ## What you do with Flux
