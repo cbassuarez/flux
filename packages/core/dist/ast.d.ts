@@ -13,7 +13,7 @@ export interface FluxMeta {
     title?: string;
     author?: string;
     version: string;
-    [key: string]: string | undefined;
+    [key: string]: FluxValueLiteral | undefined;
 }
 export interface PageSize {
     width: number;

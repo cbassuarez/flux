@@ -40,4 +40,24 @@ describe("slot generator expression", () => {
     ]);
     expect(generator.expr).not.toEqual({ kind: "Literal", value: "nul" });
   });
+
+  it("ignores labels when emitting named variants", () => {
+    const spec: SlotGeneratorSpec = {
+      kind: "choose",
+      values: [
+        { label: "A", value: "test" },
+        { label: "B", value: "tester" },
+      ],
+    };
+    const expr = buildGeneratorExpr(spec);
+    expect(expr).not.toBeNull();
+    expect(expr).toMatchObject({
+      kind: "CallExpression",
+      callee: { kind: "Identifier", name: "choose" },
+      args: [
+        { kind: "Literal", value: "test" },
+        { kind: "Literal", value: "tester" },
+      ],
+    });
+  });
 });

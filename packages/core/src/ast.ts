@@ -18,7 +18,7 @@ export interface FluxMeta {
   title?: string;
   author?: string;
   version: string; // language version (semver), e.g. "0.1.0"
-  [key: string]: string | undefined;
+  [key: string]: FluxValueLiteral | undefined;
 }
 
 export interface PageSize {

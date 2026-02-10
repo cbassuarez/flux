@@ -995,6 +995,11 @@
   align-items: center;
 }
 
+.variant-fields {
+  display: grid;
+  gap: 4px;
+}
+
 .variant-actions {
   display: inline-flex;
   gap: 4px;

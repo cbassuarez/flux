@@ -76,8 +76,16 @@ import {
   type SlotValue,
 } from "./slotRuntime";
 import { EditorRuntimeProvider, useEditorRuntimeState } from "./runtimeContext";
-import { buildGeneratorExpr, hasEmptyValue, isChooseCycleSpec, promoteVariants, wrapExpressionValue } from "./generatorUtils";
+import {
+  buildGeneratorExpr,
+  hasEmptyValue,
+  isChooseCycleSpec,
+  promoteVariants,
+  readVariantValue,
+  wrapExpressionValue,
+} from "./generatorUtils";
 import { buildEditorCommands, type EditorCommand } from "./commands/editorCommands";
+import { applyEditorMetaToSource, readEditorSlotMeta } from "./editorMeta";
 import { getFluxVersionInfo } from "./versionInfo";
 import { assetPreviewUrl } from "./slotAssets";
 
@@ -131,6 +139,8 @@ export default function EditorApp() {
   const [sourceDraft, setSourceDraft] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [toast, setToast] = useState<Toast | null>(null);
+  const [slotDisplayNames, setSlotDisplayNames] = useState<Map<string, string>>(() => new Map());
+  const [slotVariantLabels, setSlotVariantLabels] = useState<Map<string, string[]>>(() => new Map());
   const [draggingAsset, setDraggingAsset] = useState<AssetItem | null>(null);
   const [draggingOutlineId, setDraggingOutlineId] = useState<string | null>(null);
   const [inspectorVisible, setInspectorVisible] = useState(() =>
@@ -155,6 +165,16 @@ export default function EditorApp() {
     }),
     [runtimeState.docstep, runtimeState.seed, runtimeState.timeSec],
   );
+
+  const slotIds = useMemo(() => {
+    const ids = new Set<string>();
+    doc?.index?.forEach((entry) => {
+      if (entry.node.kind === "slot" || entry.node.kind === "inline_slot") {
+        ids.add(entry.id);
+      }
+    });
+    return ids;
+  }, [doc?.index]);
 
   const editorRootRef = useRef<HTMLDivElement | null>(null);
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
@@ -229,6 +249,20 @@ export default function EditorApp() {
       setSourceDraft(doc.source);
     }
   }, [doc?.source, sourceDraft, docState.dirty]);
+
+  useEffect(() => {
+    if (!doc?.ast || !slotIds.size) {
+      if (!docState.dirty) {
+        setSlotDisplayNames(new Map());
+        setSlotVariantLabels(new Map());
+      }
+      return;
+    }
+    if (docState.dirty) return;
+    const { slotNames, slotVariantLabels } = readEditorSlotMeta(doc.ast.meta as Record<string, unknown>, slotIds);
+    setSlotDisplayNames(slotNames);
+    setSlotVariantLabels(slotVariantLabels);
+  }, [doc?.ast, docState.dirty, slotIds]);
 
   useEffect(() => {
     if (!toast) return;
@@ -654,8 +688,13 @@ export default function EditorApp() {
       node.children.forEach(walk);
     };
     outline.forEach(walk);
+    slotDisplayNames.forEach((name, id) => {
+      if (name.trim()) {
+        map.set(id, name);
+      }
+    });
     return map;
-  }, [outline]);
+  }, [outline, slotDisplayNames]);
 
   const breadcrumbs = useMemo(() => {
     if (!selectedEntry) return [] as string[];
@@ -784,13 +823,46 @@ export default function EditorApp() {
     [applyTextContent],
   );
 
+  const updateSlotDisplayName = useCallback((slotId: string, name: string) => {
+    setSlotDisplayNames((prev) => {
+      const next = new Map(prev);
+      if (name.trim()) {
+        next.set(slotId, name);
+      } else {
+        next.delete(slotId);
+      }
+      return next;
+    });
+  }, []);
+
+  const updateSlotVariantLabels = useCallback((slotId: string, labels: string[]) => {
+    setSlotVariantLabels((prev) => {
+      const next = new Map(prev);
+      const normalized = labels.map((label) => String(label ?? ""));
+      if (normalized.some((label) => label.trim() !== "")) {
+        next.set(slotId, normalized);
+      } else {
+        next.delete(slotId);
+      }
+      return next;
+    });
+  }, []);
+
   const applySlotGenerator = useCallback(
     (slotId: string, spec: SlotGeneratorSpec) => {
       const expr = buildGeneratorExpr(spec);
-      const generator = expr ? wrapExpressionValue(expr) : (spec as unknown as Record<string, unknown>);
+      if (!expr) {
+        const message = "Cannot serialize slot generator. Please revise the variants and try again.";
+        if (import.meta.env?.DEV) {
+          throw new Error(message);
+        }
+        setToast({ kind: "error", message });
+        return;
+      }
+      const generator = wrapExpressionValue(expr);
       void handleEditorTransform({ type: "setSlotGenerator", id: slotId, generator });
     },
-    [handleEditorTransform],
+    [handleEditorTransform, setToast],
   );
 
   const handlePreviewTransition = useCallback(
@@ -953,10 +1025,16 @@ export default function EditorApp() {
       return;
     }
     if (!doc?.source) return;
+    const nextSource = applyEditorMetaToSource({
+      source: doc.source,
+      slotNames: slotDisplayNames,
+      slotVariantLabels,
+      slotIds,
+    });
     setSaveStatus("saving");
-    await docService.saveDoc(doc.source);
+    await docService.saveDoc(nextSource);
     setSaveStatus("saved");
-  }, [doc?.source, docService, docState.dirty, handleApplySource, sourceDirty]);
+  }, [doc?.source, docService, docState.dirty, handleApplySource, slotDisplayNames, slotIds, slotVariantLabels, sourceDirty]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1720,6 +1798,10 @@ export default function EditorApp() {
                                 assets={doc?.assetsIndex ?? []}
                                 runtime={runtimeInputs}
                                 reducedMotion={runtimeState.reducedMotion}
+                                displayName={slotDisplayNames.get(selectedNode.id) ?? ""}
+                                variantLabels={slotVariantLabels.get(selectedNode.id) ?? []}
+                                onDisplayNameChange={(name) => updateSlotDisplayName(selectedNode.id, name)}
+                                onVariantLabelsChange={(labels) => updateSlotVariantLabels(selectedNode.id, labels)}
                                 onLiteralChange={(textId, text) => applyTextContent(textId, { text })}
                                 onGeneratorChange={(spec) => applySlotGenerator(selectedNode.id, spec)}
                                 onPropsChange={(payload) =>
@@ -2366,6 +2448,10 @@ function SlotInspector({
   assets,
   runtime,
   reducedMotion,
+  displayName,
+  variantLabels,
+  onDisplayNameChange,
+  onVariantLabelsChange,
   onLiteralChange,
   onGeneratorChange,
   onPropsChange,
@@ -2377,6 +2463,10 @@ function SlotInspector({
   assets: AssetItem[];
   runtime: EditorRuntimeInputs;
   reducedMotion: boolean;
+  displayName: string;
+  variantLabels: string[];
+  onDisplayNameChange: (name: string) => void;
+  onVariantLabelsChange: (labels: string[]) => void;
   onLiteralChange: (textId: string, text: string) => void;
   onGeneratorChange: (generator: SlotGeneratorSpec) => void;
   onPropsChange: (payload: { reserve?: string; fit?: string; refresh?: RefreshPolicy; transition?: SlotTransitionSpec }) => void;
@@ -2389,10 +2479,19 @@ function SlotInspector({
   const refreshPolicy = (node as any).refresh as RefreshPolicy | undefined;
   const transitionPolicy = (node as any).transition as SlotTransitionSpec | undefined;
   const [variants, setVariants] = useState<Array<string | null>>(() => {
-    if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") return [...baseSpec.values];
+    if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
+      return baseSpec.values.map((value) => {
+        const resolved = readVariantValue(value);
+        return resolved === undefined ? "" : resolved;
+      });
+    }
     if (baseSpec?.kind === "literal") return [baseSpec.value];
     return [];
   });
+  const normalizedVariantLabels = useMemo(
+    () => normalizeVariantLabels(variantLabels, variants.length),
+    [variantLabels, variants.length],
+  );
   const [tagsDraft, setTagsDraft] = useState<string[]>(() => (baseSpec?.kind === "assetsPick" ? baseSpec.tags : []));
   const [tagInput, setTagInput] = useState("");
   const [bankDraft, setBankDraft] = useState(() => (baseSpec?.kind === "assetsPick" ? baseSpec.bank ?? "" : ""));
@@ -2417,7 +2516,12 @@ function SlotInspector({
   useEffect(() => {
     if (lockReset || isFocused) return;
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
-      setVariants([...baseSpec.values]);
+      setVariants(
+        baseSpec.values.map((value) => {
+          const resolved = readVariantValue(value);
+          return resolved === undefined ? "" : resolved;
+        }),
+      );
     } else if (baseSpec?.kind === "literal") {
       setVariants([baseSpec.value]);
     } else {
@@ -2533,6 +2637,7 @@ function SlotInspector({
     const promotion = promoteVariants(baseSpec, variants);
     if (!promotion) return;
     setVariants(promotion.nextVariants);
+    onVariantLabelsChange([...normalizedVariantLabels, ""]);
     onGeneratorChange(promotion.nextSpec);
   };
 
@@ -2540,6 +2645,7 @@ function SlotInspector({
     onDirty?.();
     const next = variants.filter((_, idx) => idx !== index);
     setVariants(next);
+    onVariantLabelsChange(normalizedVariantLabels.filter((_, idx) => idx !== index));
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
       commitChooseCycleVariants(next);
     } else if (baseSpec?.kind === "literal") {
@@ -2555,6 +2661,10 @@ function SlotInspector({
     const [moving] = next.splice(index, 1);
     next.splice(target, 0, moving);
     setVariants(next);
+    const nextLabels = [...normalizedVariantLabels];
+    const [labelMoving] = nextLabels.splice(index, 1);
+    nextLabels.splice(target, 0, labelMoving);
+    onVariantLabelsChange(nextLabels);
     if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
       commitChooseCycleVariants(next);
     } else if (baseSpec?.kind === "literal") {
@@ -2583,6 +2693,19 @@ function SlotInspector({
       <div className="slot-panels">
         <div className="slot-panel">
           <div className="panel-title">Content</div>
+          <label className="field">
+            <span>Display name</span>
+            <input
+              className="input"
+              value={displayName}
+              onFocus={handleFocus}
+              onBlur={handleBlur}
+              onChange={(event) => {
+                onDirty?.();
+                onDisplayNameChange(event.target.value);
+              }}
+            />
+          </label>
           <div className="slot-current">
             <div className="slot-current-info">
               <div className="slot-current-value">{currentValue || "—"}</div>
@@ -2716,24 +2839,39 @@ function SlotInspector({
               <div className="variant-list">
                 {variants.map((value, index) => (
                   <div key={index} className="variant-row">
-                    <input
-                      className="input"
-                      data-testid={`inspector-field:slot-variant-${index}`}
-                      value={value ?? ""}
-                      onFocus={handleFocus}
-                      onBlur={(event) => {
-                        handleBlur();
-                        handleVariantCommit(index, event.target.value);
-                      }}
-                      onChange={(event) => handleVariantChange(index, event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          handleVariantCommit(index, event.currentTarget.value);
-                          event.currentTarget.blur();
-                        }
-                      }}
-                    />
+                    <div className="variant-fields">
+                      <input
+                        className="input"
+                        data-testid={`inspector-field:slot-variant-${index}`}
+                        value={value ?? ""}
+                        onFocus={handleFocus}
+                        onBlur={(event) => {
+                          handleBlur();
+                          handleVariantCommit(index, event.target.value);
+                        }}
+                        onChange={(event) => handleVariantChange(index, event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            handleVariantCommit(index, event.currentTarget.value);
+                            event.currentTarget.blur();
+                          }
+                        }}
+                      />
+                      <input
+                        className="input input-quiet"
+                        placeholder="Label"
+                        value={normalizedVariantLabels[index] ?? ""}
+                        onFocus={handleFocus}
+                        onBlur={handleBlur}
+                        onChange={(event) => {
+                          onDirty?.();
+                          const nextLabels = [...normalizedVariantLabels];
+                          nextLabels[index] = event.target.value;
+                          onVariantLabelsChange(nextLabels);
+                        }}
+                      />
+                    </div>
                     <div className="variant-actions">
                       <Button
                         type="button"
@@ -2886,6 +3024,12 @@ function SlotInspector({
       </div>
     </div>
   );
+}
+
+function normalizeVariantLabels(labels: string[] | undefined, count: number): string[] {
+  const base = Array.isArray(labels) ? [...labels] : [];
+  if (base.length >= count) return base.slice(0, count);
+  return [...base, ...Array.from({ length: count - base.length }, () => "")];
 }
 
 function RefreshEditor({
@@ -3636,10 +3780,14 @@ function describeGenerator(spec: SlotGeneratorSpec | null): { label: string; val
   if (!spec) return [];
   if (spec.kind === "literal") return [{ label: "kind", value: "literal" }, { label: "value", value: spec.value }];
   if (spec.kind === "choose" || spec.kind === "cycle") {
+    const values = spec.values
+      .map((value) => readVariantValue(value))
+      .filter((value): value is string | null => value !== undefined)
+      .map((value) => (value === null ? "null" : value));
     return [
       { label: "kind", value: spec.kind },
       { label: "count", value: String(spec.values.length) },
-      { label: "values", value: spec.values.join(" · ") || "—" },
+      { label: "values", value: values.join(" · ") || "—" },
     ];
   }
   if (spec.kind === "assetsPick") {
@@ -3655,9 +3803,13 @@ function describeGenerator(spec: SlotGeneratorSpec | null): { label: string; val
     ];
   }
   if (spec.kind === "at") {
+    const values = spec.values
+      .map((value) => readVariantValue(value))
+      .filter((value): value is string | null => value !== undefined)
+      .map((value) => (value === null ? "null" : value));
     return [
       { label: "kind", value: "at" },
-      { label: "values", value: spec.values.join(" · ") || "—" },
+      { label: "values", value: values.join(" · ") || "—" },
     ];
   }
   if (spec.kind === "every") {
