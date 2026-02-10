@@ -598,8 +598,8 @@ class Parser {
         while (!this.check(TokenType.RBrace) && !this.isAtEnd()) {
             const key = this.parseKeyPath("Expected meta field name");
             this.consume(TokenType.Equals, "Expected '=' after meta field name");
-            const valueTok = this.consume(TokenType.String, "Expected string value for meta field");
-            meta[key] = String(valueTok.value);
+            const value = this.parseValueLiteral();
+            meta[key] = value;
             this.consumeOptional(TokenType.Semicolon);
         }
         this.consume(TokenType.RBrace, "Expected '}' after meta block");

@@ -7,14 +7,16 @@ export type EditorRuntimeInputs = {
   docstep: number;
 };
 
+export type SlotVariantValue = string | null | { label?: string; value: string | null };
+
 export type SlotGeneratorSpec =
   | { kind: "literal"; value: string | null }
-  | { kind: "choose"; values: Array<string | null> }
-  | { kind: "cycle"; values: Array<string | null>; period?: number }
+  | { kind: "choose"; values: Array<SlotVariantValue> }
+  | { kind: "cycle"; values: Array<SlotVariantValue>; period?: number }
   | { kind: "assetsPick"; tags: string[]; bank?: string }
   | { kind: "poisson"; ratePerSec: number }
-  | { kind: "at"; times: number[]; values: Array<string | null> }
-  | { kind: "every"; amount: number; unit?: string; values?: Array<string | null> }
+  | { kind: "at"; times: number[]; values: Array<SlotVariantValue> }
+  | { kind: "every"; amount: number; unit?: string; values?: Array<SlotVariantValue> }
   | { kind: "unknown"; summary: string };
 
 export type TransitionEase = "in" | "out" | "inOut" | "linear";

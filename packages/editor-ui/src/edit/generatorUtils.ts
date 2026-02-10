@@ -1,15 +1,28 @@
-import type { SlotGeneratorSpec } from "./slotRuntime";
+import type { SlotGeneratorSpec, SlotVariantValue } from "./slotRuntime";
 
 export function normalizeVariantLiteralValue(value: string | null): string | null {
   if (value === "null") return null;
   return value;
 }
 
-export function makeVariantPlaceholder(values: Array<string | null>, nextIndex: number): string {
+export function readVariantValue(value: SlotVariantValue): string | null | undefined {
+  if (value && typeof value === "object") {
+    if ("value" in value) {
+      return normalizeVariantLiteralValue(value.value ?? null);
+    }
+    return undefined;
+  }
+  return normalizeVariantLiteralValue(value);
+}
+
+export function makeVariantPlaceholder(values: Array<SlotVariantValue>, nextIndex: number): string {
   const base = `variant_${nextIndex + 1}`;
   let candidate = base;
   let suffix = 2;
-  while (values.includes(candidate)) {
+  const normalized = values
+    .map((value) => readVariantValue(value))
+    .filter((value): value is string | null => value !== undefined);
+  while (normalized.includes(candidate)) {
     candidate = `${base}_${suffix}`;
     suffix += 1;
   }
@@ -18,8 +31,8 @@ export function makeVariantPlaceholder(values: Array<string | null>, nextIndex: 
 
 export function promoteVariants(
   baseSpec: SlotGeneratorSpec | null | undefined,
-  variants: Array<string | null>,
-): { nextSpec: SlotGeneratorSpec; nextVariants: Array<string | null> } | null {
+  variants: Array<SlotVariantValue>,
+): { nextSpec: SlotGeneratorSpec; nextVariants: Array<SlotVariantValue> } | null {
   if (baseSpec?.kind === "choose" || baseSpec?.kind === "cycle") {
     const placeholder = makeVariantPlaceholder(variants, variants.length);
     const nextVariants = [...variants, placeholder];
@@ -42,7 +55,7 @@ export function isChooseCycleSpec(
 
 export function hasEmptyValue(spec: SlotGeneratorSpec | null | undefined): boolean {
   if (!isChooseCycleSpec(spec)) return false;
-  return spec.values.some((value) => value === "");
+  return spec.values.some((value) => readVariantValue(value) === "");
 }
 
 export function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
@@ -50,10 +63,12 @@ export function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
     return { kind: "Literal", value: normalizeVariantLiteralValue(spec.value) };
   }
   if (spec.kind === "choose" || spec.kind === "cycle") {
+    const values = spec.values.map((value) => readVariantValue(value));
+    if (values.some((value) => value === undefined)) return null;
     return {
       kind: "CallExpression",
       callee: { kind: "Identifier", name: spec.kind },
-      args: spec.values.map((value) => ({ kind: "Literal", value: normalizeVariantLiteralValue(value) })),
+      args: values.map((value) => ({ kind: "Literal", value })),
     };
   }
   if (spec.kind === "assetsPick") {
@@ -75,22 +90,26 @@ export function buildGeneratorExpr(spec: SlotGeneratorSpec): any | null {
     };
   }
   if (spec.kind === "at") {
+    const values = spec.values.map((value) => readVariantValue(value));
+    if (values.some((value) => value === undefined)) return null;
     return {
       kind: "CallExpression",
       callee: { kind: "Identifier", name: "at" },
       args: [
         ...spec.times.map((time) => ({ kind: "Literal", value: time })),
-        ...spec.values.map((value) => ({ kind: "Literal", value: normalizeVariantLiteralValue(value) })),
+        ...values.map((value) => ({ kind: "Literal", value })),
       ],
     };
   }
   if (spec.kind === "every") {
+    const values = (spec.values ?? []).map((value) => readVariantValue(value));
+    if (values.some((value) => value === undefined)) return null;
     return {
       kind: "CallExpression",
       callee: { kind: "Identifier", name: "every" },
       args: [
         { kind: "Literal", value: spec.amount },
-        ...(spec.values ?? []).map((value) => ({ kind: "Literal", value: normalizeVariantLiteralValue(value) })),
+        ...values.map((value) => ({ kind: "Literal", value })),
       ],
     };
   }

@@ -888,7 +888,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
           if (!result.ok) {
             sendTransform(
-              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]), error: result.error ?? result.diagnostic.message },
               { applied: false },
             );
             return;
@@ -914,7 +914,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
           if (!result.ok) {
             sendTransform(
-              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]), error: result.error ?? result.diagnostic.message },
               { applied: false },
             );
             return;
@@ -937,7 +937,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
           if (!result.ok) {
             sendTransform(
-              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]), error: result.error ?? result.diagnostic.message },
               { applied: false },
             );
             return;
@@ -957,7 +957,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
           const result = applyReplaceNodeTransform(source, parsed.doc, id, node, docPath);
           if (!result.ok) {
             sendTransform(
-              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) },
+              { ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]), error: result.error ?? result.diagnostic.message },
               { applied: false },
             );
             return;
@@ -1131,7 +1131,7 @@ export async function startViewerServer(options: ViewerServerOptions): Promise<V
         } catch (err) {
           const error = err as Error;
           if (!res.headersSent && !res.writableEnded) {
-            const message = err instanceof ReadJsonError ? err.message : "Transform request failed";
+            const message = err instanceof ReadJsonError ? err.message : error?.message ?? "Transform request failed";
             logEvent("handler error", { error: String(error?.message ?? error) });
             sendJson(
               res,
@@ -3552,7 +3552,7 @@ function applyReplaceNodeTransform(
   id: string,
   replacement: DocumentNode,
   docPath: string,
-): { ok: true; source: string } | { ok: false; diagnostic: EditDiagnostic } {
+): { ok: true; source: string } | { ok: false; diagnostic: EditDiagnostic; error?: string } {
   if (!id) {
     return {
       ok: false,
@@ -3611,12 +3611,87 @@ function applyReplaceNodeTransform(
       ),
     };
   }
+  const invalidProp = findInvalidProp(replacement);
+  if (invalidProp) {
+    const error = `Unsupported prop shape for node '${invalidProp.nodeId}' prop '${invalidProp.propKey}'.`;
+    if (process.env.NODE_ENV !== "production") {
+      throw new Error(error);
+    }
+    return {
+      ok: false,
+      error,
+      diagnostic: buildDiagnosticFromMessage(error, source, docPath, "fail"),
+    };
+  }
   const startIndex = lineColumnToOffset(source, loc.line, loc.column);
   const endIndexExclusive = Math.min(source.length, lineColumnToOffset(source, loc.endLine, loc.endColumn) + 1);
   const indent = getLineIndent(source, loc.line);
   const printed = printDocumentNode(replacement, indent);
   const nextSource = source.slice(0, startIndex) + printed + source.slice(endIndexExclusive);
   return { ok: true, source: nextSource };
+}
+
+type PropValidationError = {
+  nodeId: string;
+  propKey: string;
+  reason: string;
+};
+
+function findInvalidProp(node: DocumentNode): PropValidationError | null {
+  const props = node.props ?? {};
+  for (const [key, value] of Object.entries(props)) {
+    if (value === undefined) continue;
+    const reason = validateNodePropValue(value);
+    if (reason) {
+      return { nodeId: node.id, propKey: key, reason };
+    }
+  }
+  for (const child of node.children ?? []) {
+    const childError = findInvalidProp(child);
+    if (childError) return childError;
+  }
+  return null;
+}
+
+function validateNodePropValue(value: unknown): string | null {
+  if (!value || typeof value !== "object") {
+    return "Expected a NodePropValue";
+  }
+  const record = value as Record<string, unknown>;
+  if (record.kind === "LiteralValue") {
+    return isSerializableLiteral(record.value) ? null : "LiteralValue contains unsupported data";
+  }
+  if (record.kind === "DynamicValue") {
+    return isSerializableExpr(record.expr) ? null : "DynamicValue contains unsupported expression";
+  }
+  return "Unsupported value kind";
+}
+
+function isSerializableLiteral(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.every((item) => isSerializableLiteral(item));
+  }
+  return (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value == null
+  );
+}
+
+function isSerializableExpr(expr: unknown): boolean {
+  if (!expr || typeof expr !== "object") return false;
+  const kind = (expr as Record<string, unknown>).kind;
+  return (
+    kind === "Literal" ||
+    kind === "Identifier" ||
+    kind === "ListExpression" ||
+    kind === "MemberExpression" ||
+    kind === "CallExpression" ||
+    kind === "NeighborsCallExpression" ||
+    kind === "UnaryExpression" ||
+    kind === "BinaryExpression"
+  );
 }
 
 function replaceContentLiteral(block: string, text: string): string | null {

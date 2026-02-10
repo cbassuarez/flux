@@ -166,6 +166,49 @@ describe("editor API transforms", () => {
     }
   });
 
+  itNetwork("rejects unsupported slot generator shapes", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flux-edit-invalid-"));
+    const originalSource = `
+        document {
+          meta { version = "0.2.0"; }
+          body {
+            page p1 {
+              slot s1 { }
+            }
+          }
+        }
+      `;
+    const docPath = await writeDoc(tmpDir, originalSource);
+
+    const server = await startViewerServer({ docPath });
+    try {
+      const res = await fetch(`${server.url}/api/edit/transform`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "replaceNode",
+          args: {
+            id: "s1",
+            node: {
+              id: "s1",
+              kind: "slot",
+              props: { data: { kind: "LiteralValue", value: { label: "A" } } },
+              children: [],
+            },
+          },
+        }),
+      });
+      expect(res.ok).toBe(true);
+      const payload = await res.json();
+      expect(payload.ok).toBe(false);
+      expect(payload.error ?? "").toMatch(/Unsupported prop shape/);
+      const updated = await fs.readFile(docPath, "utf8");
+      expect(updated).toBe(originalSource);
+    } finally {
+      await server.close();
+    }
+  });
+
   itNetwork("rejects setText for unknown id without writing", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flux-edit-missing-"));
     const originalSource = `
