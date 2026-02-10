@@ -1,6 +1,6 @@
 {
   "name": "@flux-lang/flux",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "description": "Global Flux launcher that keeps @flux-lang/cli up to date and cached",
   "license": "MIT",
   "author": "Sebastian Suarez-Solis",

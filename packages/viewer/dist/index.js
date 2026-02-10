@@ -709,7 +709,7 @@ export async function startViewerServer(options) {
                         const merged = { ...node, props: { ...(node.props ?? {}), ...wrapLiteralProps(props) } };
                         const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
                         if (!result.ok) {
-                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]), error: result.error ?? result.diagnostic.message }, { applied: false });
                             return;
                         }
                         nextSource = formatFluxSource(result.source);
@@ -734,7 +734,7 @@ export async function startViewerServer(options) {
                         const merged = { ...node, props: nextProps };
                         const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
                         if (!result.ok) {
-                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]), error: result.error ?? result.diagnostic.message }, { applied: false });
                             return;
                         }
                         nextSource = formatFluxSource(result.source);
@@ -752,7 +752,7 @@ export async function startViewerServer(options) {
                         const merged = { ...node, props: nextProps };
                         const result = applyReplaceNodeTransform(source, parsed.doc, id, merged, docPath);
                         if (!result.ok) {
-                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]), error: result.error ?? result.diagnostic.message }, { applied: false });
                             return;
                         }
                         nextSource = formatFluxSource(result.source);
@@ -767,7 +767,7 @@ export async function startViewerServer(options) {
                         }
                         const result = applyReplaceNodeTransform(source, parsed.doc, id, node, docPath);
                         if (!result.ok) {
-                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]) }, { applied: false });
+                            sendTransform({ ok: false, diagnostics: buildDiagnosticsBundle([result.diagnostic]), error: result.error ?? result.diagnostic.message }, { applied: false });
                             return;
                         }
                         nextSource = formatFluxSource(result.source);
@@ -918,7 +918,7 @@ export async function startViewerServer(options) {
                 catch (err) {
                     const error = err;
                     if (!res.headersSent && !res.writableEnded) {
-                        const message = err instanceof ReadJsonError ? err.message : "Transform request failed";
+                        const message = err instanceof ReadJsonError ? err.message : error?.message ?? "Transform request failed";
                         logEvent("handler error", { error: String(error?.message ?? error) });
                         sendJson(res, {
                             ok: false,
@@ -3166,12 +3166,76 @@ function applyReplaceNodeTransform(source, doc, id, replacement, docPath) {
             diagnostic: buildDiagnosticFromMessage(`Missing source span for node '${id}'.`, source, docPath, "fail"),
         };
     }
+    const invalidProp = findInvalidProp(replacement);
+    if (invalidProp) {
+        const error = `Unsupported prop shape for node '${invalidProp.nodeId}' prop '${invalidProp.propKey}'.`;
+        if (process.env.NODE_ENV !== "production") {
+            throw new Error(error);
+        }
+        return {
+            ok: false,
+            error,
+            diagnostic: buildDiagnosticFromMessage(error, source, docPath, "fail"),
+        };
+    }
     const startIndex = lineColumnToOffset(source, loc.line, loc.column);
     const endIndexExclusive = Math.min(source.length, lineColumnToOffset(source, loc.endLine, loc.endColumn) + 1);
     const indent = getLineIndent(source, loc.line);
     const printed = printDocumentNode(replacement, indent);
     const nextSource = source.slice(0, startIndex) + printed + source.slice(endIndexExclusive);
     return { ok: true, source: nextSource };
+}
+function findInvalidProp(node) {
+    const props = node.props ?? {};
+    for (const [key, value] of Object.entries(props)) {
+        if (value === undefined)
+            continue;
+        const reason = validateNodePropValue(value);
+        if (reason) {
+            return { nodeId: node.id, propKey: key, reason };
+        }
+    }
+    for (const child of node.children ?? []) {
+        const childError = findInvalidProp(child);
+        if (childError)
+            return childError;
+    }
+    return null;
+}
+function validateNodePropValue(value) {
+    if (!value || typeof value !== "object") {
+        return "Expected a NodePropValue";
+    }
+    const record = value;
+    if (record.kind === "LiteralValue") {
+        return isSerializableLiteral(record.value) ? null : "LiteralValue contains unsupported data";
+    }
+    if (record.kind === "DynamicValue") {
+        return isSerializableExpr(record.expr) ? null : "DynamicValue contains unsupported expression";
+    }
+    return "Unsupported value kind";
+}
+function isSerializableLiteral(value) {
+    if (Array.isArray(value)) {
+        return value.every((item) => isSerializableLiteral(item));
+    }
+    return (typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean" ||
+        value == null);
+}
+function isSerializableExpr(expr) {
+    if (!expr || typeof expr !== "object")
+        return false;
+    const kind = expr.kind;
+    return (kind === "Literal" ||
+        kind === "Identifier" ||
+        kind === "ListExpression" ||
+        kind === "MemberExpression" ||
+        kind === "CallExpression" ||
+        kind === "NeighborsCallExpression" ||
+        kind === "UnaryExpression" ||
+        kind === "BinaryExpression");
 }
 function replaceContentLiteral(block, text) {
     const contentRegex = /(content\s*=\s*)(\"(?:\\.|[^"])*\"|'(?:\\.|[^'])*')/s;
