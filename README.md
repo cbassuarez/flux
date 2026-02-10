@@ -1,4 +1,5 @@
-# Flux
+# Flux 
+*procedurally evolving documents*
 
 <!-- FLUX:BADGES:BEGIN -->
 <p>
