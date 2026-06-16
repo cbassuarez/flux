@@ -3473,6 +3473,7 @@ function CommandPalette({
   return (
     <Command.Dialog
       className="command-root"
+      label="Command palette"
       open={open}
       onOpenChange={onOpenChange}
       overlayClassName="cmdk-overlay"
