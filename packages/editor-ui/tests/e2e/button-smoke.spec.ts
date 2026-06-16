@@ -37,8 +37,10 @@ const MENU_LABELS = ["File", "Edit", "Insert", "Format", "View", "Runtime", "Win
 const ENABLED_ITEM = ".menubar-content .menubar-item:not(.menubar-subtrigger):not([data-disabled])";
 
 async function openMenu(page: Page, label: string): Promise<void> {
-  await page.locator(".menubar-trigger", { hasText: label }).first().click();
-  await page.locator(".menubar-content").first().waitFor({ state: "visible" });
+  // `force` so the sweep keeps working even while the app re-renders (e.g. once
+  // playback is running) and Playwright would otherwise wait for DOM stability.
+  await page.locator(".menubar-trigger", { hasText: label }).first().click({ force: true });
+  await page.locator(".menubar-content").first().waitFor({ state: "visible", timeout: 5000 });
 }
 
 async function enabledItemLabels(page: Page, menu: string): Promise<string[]> {
@@ -60,10 +62,26 @@ test("every enabled menu command runs without crashing or erroring", async ({ pa
     const text = msg.text();
     if (!isIgnorable(text)) failures.push(`${active}: console.error: ${text}`);
   });
-  // Auto-dismiss native prompts (Set Seed / Jump Time) and auto-close popups
-  // (Export PDF) so the sweep doesn't hang.
+  // Auto-dismiss native prompts (Set Seed / Jump Time), auto-close popups
+  // (Export PDF / external links), and consume downloads (Export HTML) so the
+  // sweep doesn't hang waiting on them.
   page.on("dialog", (dialog) => void dialog.dismiss().catch(() => {}));
   context.on("page", (popup) => void popup.close().catch(() => {}));
+  page.on("download", (download) => void download.cancel().catch(() => {}));
+
+  // Run one command in isolation with a hard cap, so a single slow/hanging
+  // command surfaces as a failure rather than stalling the whole sweep.
+  const withCap = async <T>(work: Promise<T>, ms: number): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout>;
+    const cap = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`exceeded ${ms}ms`)), ms);
+    });
+    try {
+      return await Promise.race([work, cap]);
+    } finally {
+      clearTimeout(timer!);
+    }
+  };
 
   const docPath = await readDocPath();
   await page.goto(`/edit?file=${encodeURIComponent(docPath)}`);
@@ -82,12 +100,17 @@ test("every enabled menu command runs without crashing or erroring", async ({ pa
     for (const label of labels) {
       active = `${menu} › ${label}`;
       try {
-        await openMenu(page, menu);
-        await page
-          .locator(ENABLED_ITEM)
-          .filter({ has: page.locator(".menubar-label", { hasText: label }) })
-          .first()
-          .click({ timeout: 5000 });
+        await withCap(
+          (async () => {
+            await openMenu(page, menu);
+            await page
+              .locator(ENABLED_ITEM)
+              .filter({ has: page.locator(".menubar-label", { hasText: label }) })
+              .first()
+              .click({ force: true, timeout: 5000 });
+          })(),
+          12_000,
+        );
       } catch (err) {
         failures.push(`${active}: click failed: ${(err as Error).message}`);
         await page.keyboard.press("Escape").catch(() => {});

@@ -111,6 +111,18 @@
   justify-self: end;
 }
 
+.menubar-planned-badge {
+  justify-self: end;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--muted);
+  color: var(--muted);
+  opacity: 0.8;
+}
+
 .menubar-checkbox {
   grid-template-columns: 16px auto 1fr auto;
 }

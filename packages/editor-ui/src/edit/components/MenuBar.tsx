@@ -302,14 +302,19 @@ function MenuItemRenderer({
 
   return (
     <Menubar.Item
-      className="menubar-item"
+      className={`menubar-item${command.planned ? " menubar-item-planned" : ""}`}
       disabled={!command.enabled}
+      title={command.planned ? "Planned — not implemented yet" : undefined}
       onSelect={() => {
         if (command.enabled) command.run();
       }}
     >
       <span className="menubar-label">{command.label}</span>
-      {command.shortcut ? <span className="menubar-shortcut">{command.shortcut}</span> : null}
+      {command.planned ? (
+        <span className="menubar-planned-badge">Soon</span>
+      ) : command.shortcut ? (
+        <span className="menubar-shortcut">{command.shortcut}</span>
+      ) : null}
     </Menubar.Item>
   );
 }

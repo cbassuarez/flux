@@ -122,6 +122,7 @@ export default function EditorApp() {
   const [outlineVisible, setOutlineVisible] = useState(true);
     const [showStatusBar, setShowStatusBar] = useState(true);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [previewZoom, setPreviewZoom] = useState(1);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [docSettingsOpen, setDocSettingsOpen] = useState(false);
   const [buildInfoOpen, setBuildInfoOpen] = useState(false);
@@ -161,6 +162,7 @@ export default function EditorApp() {
   const editorRootRef = useRef<HTMLDivElement | null>(null);
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
   const previewWrapRef = useRef<HTMLDivElement | null>(null);
+  const previewZoomRef = useRef(1);
   const richEditorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const monacoEditorRef = useRef<any>(null);
@@ -629,6 +631,8 @@ export default function EditorApp() {
   const handlePreviewLoad = useCallback(() => {
     const frame = previewFrameRef.current;
     if (!frame?.contentWindow) return;
+    // Re-apply the current preview zoom after each (re)load.
+    frame.style.zoom = String(previewZoomRef.current);
     frame.contentWindow.postMessage({ type: "flux-debug", enabled: debugSlots }, "*");
     if (selectedId) {
       frame.contentWindow.postMessage({ type: "flux-highlight", nodeId: selectedId }, "*");
@@ -1063,6 +1067,112 @@ export default function EditorApp() {
     }
   }, []);
 
+  const handleExportHtml = useCallback(async () => {
+    try {
+      const [renderRes, cssRes] = await Promise.all([fetch("/api/render"), fetch("/render.css")]);
+      const render = (await renderRes.json()) as { html?: string };
+      const css = cssRes.ok ? await cssRes.text() : "";
+      const html =
+        `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n` +
+        `<title>Flux Document</title>\n<style>\n${css}\n</style>\n</head>\n<body>\n` +
+        `${render.html ?? ""}\n</body>\n</html>\n`;
+      const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "flux-document.html";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setToast({ kind: "success", message: "Exported HTML." });
+    } catch {
+      setToast({ kind: "error", message: "HTML export failed." });
+    }
+  }, []);
+
+  const handleRevert = useCallback(async () => {
+    if (isSourceEditorDirty || docState.dirty) {
+      if (typeof window !== "undefined" && !window.confirm("Revert to the last saved version? Unsaved changes will be lost.")) {
+        return;
+      }
+    }
+    setIsSourceEditorDirty(false);
+    setSaveStatus("saving");
+    try {
+      await docService.loadDoc();
+      setSaveStatus("saved");
+      setToast({ kind: "success", message: "Reverted to saved version." });
+    } catch {
+      setSaveStatus("error");
+      setToast({ kind: "error", message: "Revert failed." });
+    }
+  }, [docService, docState.dirty, isSourceEditorDirty]);
+
+  const openDocs = useCallback(() => {
+    if (!window.open("https://flux-lang.org/docs", "_blank", "noopener")) {
+      setToast({ kind: "error", message: "Couldn't open Docs — allow pop-ups for this site." });
+    }
+  }, []);
+
+  const reportIssue = useCallback(() => {
+    if (!window.open("https://github.com/cbassuarez/flux/issues/new", "_blank", "noopener")) {
+      setToast({ kind: "error", message: "Couldn't open the issue tracker — allow pop-ups for this site." });
+    }
+  }, []);
+
+  const applyWritingLayout = useCallback(() => {
+    setOutlineVisible(true);
+    setInspectorVisible(false);
+    setAssetPanelOpen(false);
+    setDiagnosticsOpen(false);
+  }, []);
+
+  const applyDebugLayout = useCallback(() => {
+    setOutlineVisible(true);
+    setInspectorVisible(true);
+    setAssetPanelOpen(true);
+    setDiagnosticsOpen(true);
+  }, []);
+
+  // Preview zoom. Applied to the iframe via the CSS `zoom` property and re-applied
+  // on each preview (re)load through previewZoomRef / handlePreviewLoad.
+  useEffect(() => {
+    previewZoomRef.current = previewZoom;
+    const frame = previewFrameRef.current;
+    if (frame) frame.style.zoom = String(previewZoom);
+  }, [previewZoom]);
+
+  const zoomIn = useCallback(() => setPreviewZoom((z) => clamp(Math.round((z + 0.1) * 100) / 100, 0.25, 3)), []);
+  const zoomOut = useCallback(() => setPreviewZoom((z) => clamp(Math.round((z - 0.1) * 100) / 100, 0.25, 3)), []);
+
+  const fitWidth = useCallback(() => {
+    const wrap = previewWrapRef.current;
+    const docEl = previewFrameRef.current?.contentDocument?.documentElement;
+    if (!wrap || !docEl) {
+      setPreviewZoom(1);
+      return;
+    }
+    const natural = docEl.scrollWidth / (previewZoomRef.current || 1);
+    if (natural > 0) setPreviewZoom(clamp((wrap.clientWidth - 24) / natural, 0.25, 3));
+  }, []);
+
+  const fitPage = useCallback(() => {
+    const wrap = previewWrapRef.current;
+    const docEl = previewFrameRef.current?.contentDocument?.documentElement;
+    if (!wrap || !docEl) {
+      setPreviewZoom(1);
+      return;
+    }
+    const z = previewZoomRef.current || 1;
+    const naturalW = docEl.scrollWidth / z;
+    const naturalH = docEl.scrollHeight / z;
+    if (naturalW > 0 && naturalH > 0) {
+      setPreviewZoom(
+        clamp(Math.min((wrap.clientWidth - 24) / naturalW, (wrap.clientHeight - 24) / naturalH), 0.25, 3),
+      );
+    }
+  }, []);
+
   const handleCopyId = useCallback(async (id: string) => {
     try {
       await navigator.clipboard.writeText(id);
@@ -1258,8 +1368,18 @@ export default function EditorApp() {
         handleDuplicate: handleDuplicateSelected,
         handleDelete: handleDeleteSelected,
         handleSave,
+        handleRevert,
         handleExportPdf,
+        handleExportHtml,
         handleResetLayout,
+        applyWritingLayout,
+        applyDebugLayout,
+        zoomIn,
+        zoomOut,
+        fitWidth,
+        fitPage,
+        openDocs,
+        reportIssue,
         handleInsertPage,
         handleInsertSection,
         handleInsertParagraph,
@@ -1291,8 +1411,18 @@ export default function EditorApp() {
       handleDuplicateSelected,
       handleDeleteSelected,
       handleSave,
+      handleRevert,
       handleExportPdf,
+      handleExportHtml,
       handleResetLayout,
+      applyWritingLayout,
+      applyDebugLayout,
+      zoomIn,
+      zoomOut,
+      fitWidth,
+      fitPage,
+      openDocs,
+      reportIssue,
       handleInsertPage,
       handleInsertSection,
       handleInsertParagraph,

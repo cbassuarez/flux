@@ -79,6 +79,12 @@ export type EditorCommand = {
   run: () => void;
   palette?: boolean;
   group?: string;
+  /**
+   * A real feature that isn't built yet. Rendered visibly but disabled with a
+   * "planned" affordance, so the menu signals intent rather than looking broken.
+   * Every command must either be runnable (a non-trivial `run`) or `planned`.
+   */
+  planned?: boolean;
 };
 
 export type EditorCommandContext = {
@@ -92,8 +98,18 @@ export type EditorCommandContext = {
   handleDuplicate: () => void;
   handleDelete: () => void;
   handleSave: () => void;
+  handleRevert: () => void;
   handleExportPdf: () => void;
+  handleExportHtml: () => void;
   handleResetLayout: () => void;
+  applyWritingLayout: () => void;
+  applyDebugLayout: () => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  fitWidth: () => void;
+  fitPage: () => void;
+  openDocs: () => void;
+  reportIssue: () => void;
   handleInsertPage: () => void;
   handleInsertSection: () => void;
   handleInsertParagraph: () => void;
@@ -132,6 +148,7 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       enabled: false,
       run: () => {},
       palette: false,
+      planned: true,
     }),
     "app.shortcuts": make({
       id: "app.shortcuts",
@@ -150,15 +167,15 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
     "app.openDocs": make({
       id: "app.openDocs",
       label: "Open Docs",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.openDocs,
       palette: false,
     }),
     "app.reportIssue": make({
       id: "app.reportIssue",
       label: "Report Issue",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.reportIssue,
       palette: false,
     }),
     "file.new": make({
@@ -166,18 +183,21 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       label: "New",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "file.open": make({
       id: "file.open",
       label: "Open…",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "file.openRecent": make({
       id: "file.openRecent",
       label: "Open Recent",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "file.save": make({
       id: "file.save",
@@ -192,12 +212,14 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       label: "Save As…",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "file.revert": make({
       id: "file.revert",
       label: "Revert to Saved",
-      enabled: false,
-      run: () => {},
+      enabled: ctx.isSourceEditorDirty || ctx.docState.dirty,
+      run: ctx.handleRevert,
+      group: "File",
     }),
     "file.settings": make({
       id: "file.settings",
@@ -218,18 +240,21 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       label: "Export PNG",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "file.exportHtml": make({
       id: "file.exportHtml",
       label: "Export HTML",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.handleExportHtml,
+      group: "File",
     }),
     "file.close": make({
       id: "file.close",
       label: "Close Document",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "edit.undo": make({
       id: "edit.undo",
@@ -253,6 +278,7 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       shortcut: "⌘X",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "edit.copy": make({
       id: "edit.copy",
@@ -260,6 +286,7 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       shortcut: "⌘C",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "edit.paste": make({
       id: "edit.paste",
@@ -267,6 +294,7 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       shortcut: "⌘V",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "edit.duplicate": make({
       id: "edit.duplicate",
@@ -353,6 +381,7 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       enabled: false,
       run: () => {},
       group: "Insert",
+      planned: true,
     }),
     "format.applyStyle": make({
       id: "format.applyStyle",
@@ -360,6 +389,7 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       enabled: false,
       run: () => {},
       group: "Format",
+      planned: true,
     }),
     "format.tokens": make({
       id: "format.tokens",
@@ -367,6 +397,7 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       enabled: false,
       run: () => {},
       group: "Format",
+      planned: true,
     }),
     "format.styles": make({
       id: "format.styles",
@@ -374,6 +405,7 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       enabled: false,
       run: () => {},
       group: "Format",
+      planned: true,
     }),
     "view.toggleOutline": make({
       id: "view.toggleOutline",
@@ -409,50 +441,58 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       enabled: false,
       run: () => {},
       palette: false,
+      planned: true,
     }),
     "view.zoomIn": make({
       id: "view.zoomIn",
       label: "Zoom In",
       shortcut: "⌘+",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.zoomIn,
+      group: "View",
     }),
     "view.zoomOut": make({
       id: "view.zoomOut",
       label: "Zoom Out",
       shortcut: "⌘-",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.zoomOut,
+      group: "View",
     }),
     "view.fitWidth": make({
       id: "view.fitWidth",
       label: "Fit Width",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.fitWidth,
+      group: "View",
     }),
     "view.fitPage": make({
       id: "view.fitPage",
       label: "Fit Page",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.fitPage,
+      group: "View",
     }),
     "view.toggleGuides": make({
       id: "view.toggleGuides",
       label: "Toggle Guides",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "view.toggleGrid": make({
       id: "view.toggleGrid",
       label: "Toggle Grid",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "view.toggleRulers": make({
       id: "view.toggleRulers",
       label: "Toggle Rulers",
       enabled: false,
       run: () => {},
+      planned: true,
     }),
     "view.previewMode": make({
       id: "view.previewMode",
@@ -556,15 +596,15 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
     "window.writingLayout": make({
       id: "window.writingLayout",
       label: "Writing Layout",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.applyWritingLayout,
       palette: false,
     }),
     "window.debugLayout": make({
       id: "window.debugLayout",
       label: "Debug Layout",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.applyDebugLayout,
       palette: false,
     }),
     "window.focusMode": make({
@@ -577,15 +617,15 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
     "help.docs": make({
       id: "help.docs",
       label: "Docs",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.openDocs,
       palette: false,
     }),
     "help.troubleshooting": make({
       id: "help.troubleshooting",
       label: "Troubleshooting",
-      enabled: false,
-      run: () => {},
+      enabled: true,
+      run: ctx.openDocs,
       palette: false,
     }),
     "help.buildInfo": make({
