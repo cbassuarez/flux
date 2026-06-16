@@ -80,6 +80,7 @@ import { buildGeneratorExpr, hasEmptyValue, isChooseCycleSpec, promoteVariants, 
 import { buildEditorCommands, type EditorCommand } from "./commands/editorCommands";
 import { getFluxVersionInfo } from "./versionInfo";
 import { assetPreviewUrl } from "./slotAssets";
+import { pickSourceForSave } from "./saveRouting";
 
 loader.config({ monaco });
 
@@ -129,6 +130,7 @@ export default function EditorApp() {
   const [showIds, setShowIds] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [sourceDraft, setSourceDraft] = useState("");
+  const [isSourceEditorDirty, setIsSourceEditorDirty] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [toast, setToast] = useState<Toast | null>(null);
   const [draggingAsset, setDraggingAsset] = useState<AssetItem | null>(null);
@@ -162,6 +164,8 @@ export default function EditorApp() {
   const richEditorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const monacoEditorRef = useRef<any>(null);
+  const sourceModelSubscriptionRef = useRef<{ dispose: () => void } | null>(null);
+  const suppressSourceDirtyRef = useRef(false);
   const pointerRef = useRef({ x: 0, y: 0 });
   const previewSelectedRef = useRef<HTMLElement | null>(null);
   const previewHoveredRef = useRef<HTMLElement | null>(null);
@@ -222,13 +226,32 @@ export default function EditorApp() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!doc?.source) return;
-    if (docState.dirty) return;
-    if (sourceDraft.trim() === "" || sourceDraft === doc.source) {
-      setSourceDraft(doc.source);
+  const setSourceDraftFromCanonical = useCallback((nextSource: string) => {
+    setSourceDraft(nextSource);
+    const editor = monacoEditorRef.current;
+    if (!editor) return;
+    if (editor.getValue() === nextSource) return;
+    suppressSourceDirtyRef.current = true;
+    try {
+      editor.setValue(nextSource);
+    } finally {
+      suppressSourceDirtyRef.current = false;
     }
-  }, [doc?.source, sourceDraft, docState.dirty]);
+  }, []);
+
+  useEffect(() => {
+    if (!doc) return;
+    if (isSourceEditorDirty) return;
+    setSourceDraftFromCanonical(doc.source);
+  }, [doc?.revision, doc?.source, isSourceEditorDirty, setSourceDraftFromCanonical]);
+
+  useEffect(
+    () => () => {
+      sourceModelSubscriptionRef.current?.dispose();
+      sourceModelSubscriptionRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!toast) return;
@@ -427,15 +450,15 @@ export default function EditorApp() {
     }
   }, [frameEntry]);
 
-  const sourceDirty = doc?.source ? sourceDraft !== doc.source : false;
+  const hasUnsavedChanges = isSourceEditorDirty || docState.dirty;
 
   const diagnosticsSummary = useMemo(() => extractDiagnosticsSummary(doc?.diagnostics), [doc?.diagnostics]);
   const diagnosticsItems = useMemo(() => extractDiagnosticsItems(doc?.diagnostics), [doc?.diagnostics]);
   const footerSaveState = useMemo<"saved" | "dirty" | "error">(() => {
     if (saveStatus === "error") return "error";
-    if (sourceDirty || docState.dirty) return "dirty";
+    if (hasUnsavedChanges) return "dirty";
     return "saved";
-  }, [docState.dirty, saveStatus, sourceDirty]);
+  }, [hasUnsavedChanges, saveStatus]);
   const footerModeLabel = useMemo(() => {
     if (runtimeState.mode === "playback") return "Playback";
     if (activeMode === "edit") return "Edit";
@@ -920,18 +943,21 @@ export default function EditorApp() {
     scrollPageIntoView(selectedId);
   }, [doc?.index, scrollPageIntoView, selectedId]);
 
-  const handleApplySource = useCallback(async () => {
-    if (!sourceDirty) return;
+  const handleApplySource = useCallback(async (sourceToApply?: string) => {
+    const nextSource = sourceToApply ?? sourceDraft;
+    if (!isSourceEditorDirty && sourceToApply === undefined) return;
     setSaveStatus("saving");
-    const result = await docService.applyTransform({ type: "setSource", source: sourceDraft }, { pushHistory: false });
+    const result = await docService.applyTransform({ type: "setSource", source: nextSource }, { pushHistory: false });
     if (result.ok) {
+      setIsSourceEditorDirty(false);
+      setSourceDraftFromCanonical(result.nextSource);
       setSaveStatus("saved");
       setToast({ kind: "success", message: "Source applied" });
     } else {
       setSaveStatus("error");
       setToast({ kind: "error", message: result.error ?? "Source apply failed" });
     }
-  }, [docService, sourceDraft, sourceDirty]);
+  }, [docService, isSourceEditorDirty, sourceDraft, setSourceDraftFromCanonical]);
 
   const handleSetActiveMode = useCallback(
     (mode: "preview" | "edit" | "source") => {
@@ -944,19 +970,24 @@ export default function EditorApp() {
   );
 
   const handleSave = useCallback(async () => {
-    if (!sourceDirty && !docState.dirty) {
+    if (!hasUnsavedChanges) {
       setToast({ kind: "info", message: "No changes to save." });
       return;
     }
-    if (sourceDirty) {
-      await handleApplySource();
+    if (!doc?.source) return;
+    const decision = pickSourceForSave({
+      isSourceEditorDirty,
+      sourceDraft,
+      docSource: doc.source,
+    });
+    if (decision.mode === "applySource") {
+      await handleApplySource(decision.source);
       return;
     }
-    if (!doc?.source) return;
     setSaveStatus("saving");
-    await docService.saveDoc(doc.source);
+    await docService.saveDoc(decision.source);
     setSaveStatus("saved");
-  }, [doc?.source, docService, docState.dirty, handleApplySource, sourceDirty]);
+  }, [doc?.source, docService, handleApplySource, hasUnsavedChanges, isSourceEditorDirty, sourceDraft]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1024,7 +1055,12 @@ export default function EditorApp() {
   }, []);
 
   const handleExportPdf = useCallback(() => {
-    setToast({ kind: "info", message: "PDF export is not available yet." });
+    // The viewer serves a typesetter-rendered PDF at /api/pdf; open it directly
+    // rather than claiming the feature is unavailable.
+    const win = window.open("/api/pdf", "_blank", "noopener");
+    if (!win) {
+      setToast({ kind: "error", message: "Couldn't open the PDF — allow pop-ups for this site." });
+    }
   }, []);
 
   const handleCopyId = useCallback(async (id: string) => {
@@ -1215,7 +1251,7 @@ export default function EditorApp() {
         docState,
         undo: () => void docService.undo(),
         redo: () => void docService.redo(),
-        sourceDirty,
+        isSourceEditorDirty,
         runtimeState,
         runtimeActions,
         selectionId: selectedId,
@@ -1248,7 +1284,7 @@ export default function EditorApp() {
     [
       docState,
       docService,
-      sourceDirty,
+      isSourceEditorDirty,
       runtimeActions,
       runtimeState,
       selectedId,
@@ -1491,15 +1527,15 @@ export default function EditorApp() {
         />
         {showStatusBar ? (
           <StatusBar
-            canSave={sourceDirty || docState.dirty}
+            canSave={hasUnsavedChanges}
             onSave={handleSave}
             onUndo={() => void docService.undo()}
             onRedo={() => void docService.redo()}
-            saveLabel={renderSaveStatus(saveStatus, sourceDirty)}
+            saveLabel={renderSaveStatus(saveStatus, hasUnsavedChanges)}
             fileName={getFileName(doc?.docPath)}
             docTitle={doc?.title ?? "Flux Document"}
             revisionLabel={doc?.revision != null ? `rev ${doc.revision}` : "rev —"}
-            dirty={sourceDirty || docState.dirty}
+            dirty={hasUnsavedChanges}
             onOpenDocSettings={() => setDocSettingsOpen(true)}
             diagnosticsCount={diagnosticsSummary.warn + diagnosticsSummary.fail}
             onOpenDiagnostics={() => setDiagnosticsOpen(true)}
@@ -1596,10 +1632,15 @@ export default function EditorApp() {
                       <div className="pane-header">
                         <div className="pane-title">Source</div>
                         <div className="pane-actions">
-                          <span className={`status-pill ${sourceDirty ? "status-dirty" : "status-saved"}`}>
-                            {sourceDirty ? "Unsaved" : "Clean"}
+                          <span className={`status-pill ${isSourceEditorDirty ? "status-dirty" : "status-saved"}`}>
+                            {isSourceEditorDirty ? "Unsaved" : "Clean"}
                           </span>
-                          <Button variant="ghost" size="sm" onClick={handleApplySource} disabled={!sourceDirty || docState.isApplying}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void handleApplySource()}
+                            disabled={!isSourceEditorDirty || docState.isApplying}
+                          >
                             Apply
                           </Button>
                         </div>
@@ -1610,7 +1651,6 @@ export default function EditorApp() {
                           language="plaintext"
                           theme="vs-dark"
                           value={sourceDraft}
-                          onChange={(value) => setSourceDraft(value ?? "")}
                           options={{
                             minimap: { enabled: false },
                             fontSize: 12,
@@ -1620,6 +1660,12 @@ export default function EditorApp() {
                           onMount={(editor, monacoInstance) => {
                             monacoRef.current = monacoInstance;
                             monacoEditorRef.current = editor;
+                            sourceModelSubscriptionRef.current?.dispose();
+                            sourceModelSubscriptionRef.current = editor.onDidChangeModelContent(() => {
+                              if (suppressSourceDirtyRef.current) return;
+                              setSourceDraft(editor.getValue());
+                              setIsSourceEditorDirty(true);
+                            });
                             updateMonacoMarkers();
                           }}
                         />

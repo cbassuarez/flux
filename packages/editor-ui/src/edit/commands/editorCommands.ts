@@ -85,7 +85,7 @@ export type EditorCommandContext = {
   docState: DocServiceState;
   undo: () => void;
   redo: () => void;
-  sourceDirty: boolean;
+  isSourceEditorDirty: boolean;
   runtimeState: EditorRuntimeState;
   runtimeActions: EditorRuntimeActions;
   selectionId: string | null;
@@ -183,7 +183,7 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
       id: "file.save",
       label: "Save",
       shortcut: "⌘S",
-      enabled: ctx.sourceDirty || ctx.docState.dirty,
+      enabled: ctx.isSourceEditorDirty || ctx.docState.dirty,
       run: ctx.handleSave,
       group: "File",
     }),
