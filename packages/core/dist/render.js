@@ -18,30 +18,36 @@ export function createDocumentRuntime(doc, options = {}) {
     });
     const counterRegistry = buildCounterRegistry(body);
     const nodeCache = new Map();
-    let legacySnapshot = null;
-    let legacySnapshotDocstep = null;
-    const getLegacySnapshot = () => {
-        if (!doc.grids?.length)
+    // The kernel runtime evolves params/cells across docsteps and events. It is
+    // persistent (stepped by the delta to the requested docstep) rather than
+    // recreated on every render, so live ticking is O(1) per frame and event
+    // state survives between renders.
+    const hasRuntimeBehavior = Boolean(doc.grids?.length || doc.rules?.length);
+    let kernelRuntime = null;
+    let lastRuntimeError = null;
+    const syncKernelToDocstep = () => {
+        if (!hasRuntimeBehavior)
             return null;
-        if (legacySnapshot && legacySnapshotDocstep === docstep) {
-            return legacySnapshot;
-        }
-        const runtime = createRuntime(doc, { clock: "manual" });
-        let snap = runtime.snapshot();
-        if (docstep > 0) {
+        if (!kernelRuntime)
+            kernelRuntime = createRuntime(doc, { clock: "manual" });
+        // Going backwards (e.g. reset/scrub) rebuilds from a clean state; this also
+        // discards any applied event state, which is the intended reset semantics.
+        if (kernelRuntime.docstep > docstep)
+            kernelRuntime.reset();
+        while (kernelRuntime.docstep < docstep) {
             try {
-                for (let i = 0; i < docstep; i += 1) {
-                    snap = runtime.step();
-                }
+                kernelRuntime.step();
             }
-            catch {
-                snap = runtime.snapshot();
+            catch (error) {
+                // Best-effort evolution: keep the last good state and remember the
+                // error instead of silently freezing with no diagnostic.
+                lastRuntimeError = error;
+                break;
             }
         }
-        legacySnapshot = snap;
-        legacySnapshotDocstep = docstep;
-        return legacySnapshot;
+        return kernelRuntime;
     };
+    const getLegacySnapshot = () => syncKernelToDocstep()?.snapshot() ?? null;
     const render = () => {
         const snap = getLegacySnapshot();
         const params = snap?.params ?? baseParams;
@@ -83,6 +89,16 @@ export function createDocumentRuntime(doc, options = {}) {
         docstep += amount;
         return render();
     };
+    const applyEvent = (event) => {
+        const kernel = syncKernelToDocstep();
+        if (kernel) {
+            kernel.applyEvent(event);
+            // An event rule may request a docstep advance; keep the document runtime's
+            // docstep in sync with the kernel so the next render reflects it.
+            docstep = kernel.docstep;
+        }
+        return render();
+    };
     return {
         get doc() {
             return doc;
@@ -96,9 +112,13 @@ export function createDocumentRuntime(doc, options = {}) {
         get docstep() {
             return docstep;
         },
+        get lastError() {
+            return lastRuntimeError;
+        },
         render,
         tick,
         step,
+        applyEvent,
     };
 }
 export function renderDocument(doc, options = {}) {
@@ -131,9 +151,13 @@ export function createDocumentRuntimeIR(doc, options = {}) {
         get docstep() {
             return runtime.docstep;
         },
+        get lastError() {
+            return runtime.lastError;
+        },
         render: () => toIr(runtime.render()),
         tick: (seconds) => toIr(runtime.tick(seconds)),
         step: (n) => toIr(runtime.step(n)),
+        applyEvent: (event) => toIr(runtime.applyEvent(event)),
     };
 }
 export function renderDocumentIR(doc, options = {}) {

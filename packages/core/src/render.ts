@@ -17,7 +17,7 @@ import type {
   TransitionSpec,
 } from "./ast.js";
 import { computeGridLayout } from "./layout.js";
-import { createRuntime, type RuntimeSnapshot } from "./runtime.js";
+import { createRuntime, type Runtime, type RuntimeEvent, type RuntimeSnapshot } from "./runtime.js";
 
 export type RenderValue =
   | string
@@ -207,9 +207,13 @@ export interface DocumentRuntime {
   readonly seed: number;
   readonly time: number;
   readonly docstep: number;
+  /** The last error thrown while evolving the kernel, if any (best-effort). */
+  readonly lastError: Error | null;
   render(): RenderDocument;
   tick(seconds: number): RenderDocument;
   step(n?: number): RenderDocument;
+  /** Deliver an input/transport/sensor event and re-render. */
+  applyEvent(event: RuntimeEvent): RenderDocument;
 }
 
 export interface DocumentRuntimeIR {
@@ -217,9 +221,11 @@ export interface DocumentRuntimeIR {
   readonly seed: number;
   readonly time: number;
   readonly docstep: number;
+  readonly lastError: Error | null;
   render(): RenderDocumentIR;
   tick(seconds: number): RenderDocumentIR;
   step(n?: number): RenderDocumentIR;
+  applyEvent(event: RuntimeEvent): RenderDocumentIR;
 }
 
 export type AssetResolver = (bank: AssetBank, options: { cwd?: string }) => string[];
@@ -285,29 +291,34 @@ export function createDocumentRuntime(doc: FluxDocument, options: RenderOptions 
   const counterRegistry = buildCounterRegistry(body);
   const nodeCache = new Map<string, NodeCacheEntry>();
 
-  let legacySnapshot: RuntimeSnapshot | null = null;
-  let legacySnapshotDocstep: number | null = null;
+  // The kernel runtime evolves params/cells across docsteps and events. It is
+  // persistent (stepped by the delta to the requested docstep) rather than
+  // recreated on every render, so live ticking is O(1) per frame and event
+  // state survives between renders.
+  const hasRuntimeBehavior = Boolean(doc.grids?.length || doc.rules?.length);
+  let kernelRuntime: Runtime | null = null;
+  let lastRuntimeError: Error | null = null;
 
-  const getLegacySnapshot = (): RuntimeSnapshot | null => {
-    if (!doc.grids?.length) return null;
-    if (legacySnapshot && legacySnapshotDocstep === docstep) {
-      return legacySnapshot;
-    }
-    const runtime = createRuntime(doc, { clock: "manual" });
-    let snap = runtime.snapshot();
-    if (docstep > 0) {
+  const syncKernelToDocstep = (): Runtime | null => {
+    if (!hasRuntimeBehavior) return null;
+    if (!kernelRuntime) kernelRuntime = createRuntime(doc, { clock: "manual" });
+    // Going backwards (e.g. reset/scrub) rebuilds from a clean state; this also
+    // discards any applied event state, which is the intended reset semantics.
+    if (kernelRuntime.docstep > docstep) kernelRuntime.reset();
+    while (kernelRuntime.docstep < docstep) {
       try {
-        for (let i = 0; i < docstep; i += 1) {
-          snap = runtime.step();
-        }
-      } catch {
-        snap = runtime.snapshot();
+        kernelRuntime.step();
+      } catch (error) {
+        // Best-effort evolution: keep the last good state and remember the
+        // error instead of silently freezing with no diagnostic.
+        lastRuntimeError = error as Error;
+        break;
       }
     }
-    legacySnapshot = snap;
-    legacySnapshotDocstep = docstep;
-    return legacySnapshot;
+    return kernelRuntime;
   };
+
+  const getLegacySnapshot = (): RuntimeSnapshot | null => syncKernelToDocstep()?.snapshot() ?? null;
 
   const render = (): RenderDocument => {
     const snap = getLegacySnapshot();
@@ -357,6 +368,17 @@ export function createDocumentRuntime(doc: FluxDocument, options: RenderOptions 
     return render();
   };
 
+  const applyEvent = (event: RuntimeEvent): RenderDocument => {
+    const kernel = syncKernelToDocstep();
+    if (kernel) {
+      kernel.applyEvent(event);
+      // An event rule may request a docstep advance; keep the document runtime's
+      // docstep in sync with the kernel so the next render reflects it.
+      docstep = kernel.docstep;
+    }
+    return render();
+  };
+
   return {
     get doc() {
       return doc;
@@ -370,9 +392,13 @@ export function createDocumentRuntime(doc: FluxDocument, options: RenderOptions 
     get docstep() {
       return docstep;
     },
+    get lastError() {
+      return lastRuntimeError;
+    },
     render,
     tick,
     step,
+    applyEvent,
   };
 }
 
@@ -410,9 +436,13 @@ export function createDocumentRuntimeIR(doc: FluxDocument, options: RenderOption
     get docstep() {
       return runtime.docstep;
     },
+    get lastError() {
+      return runtime.lastError;
+    },
     render: () => toIr(runtime.render()),
     tick: (seconds: number) => toIr(runtime.tick(seconds)),
     step: (n?: number) => toIr(runtime.step(n)),
+    applyEvent: (event: RuntimeEvent) => toIr(runtime.applyEvent(event)),
   };
 }
 

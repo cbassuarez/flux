@@ -261,6 +261,25 @@ export async function startViewerServer(options) {
         clearInterval(keepAliveTimer);
         keepAliveTimer = null;
     };
+    // Deliver an interaction event to the runtime, re-render, and push the
+    // resulting slot patches to connected viewers. Mirrors a tick, but driven by
+    // input rather than the clock.
+    const applyViewerEvent = (event) => {
+        if (!runtime || current.errors.length)
+            return false;
+        const nextIr = runtime.applyEvent(event);
+        const nextRender = renderHtml(nextIr, renderOptions);
+        const slotPatches = diffSlotPatches(lastSlotMap, nextRender.slots);
+        lastSlotMap = nextRender.slots;
+        current = {
+            ...current,
+            ir: nextIr,
+            render: nextRender,
+        };
+        lastPatchPayload = buildPatchPayload(slotPatches, nextIr.slotMeta);
+        broadcastPatchUpdate(lastPatchPayload);
+        return true;
+    };
     const tick = () => {
         if (!running)
             return;
@@ -967,6 +986,35 @@ export async function startViewerServer(options) {
             }
             if (url.pathname === "/api/patches") {
                 sendJson(res, lastPatchPayload, buildHeaders);
+                return;
+            }
+            if (url.pathname === "/api/event" && req.method === "POST") {
+                let payload;
+                try {
+                    payload = await readJson(req);
+                }
+                catch (err) {
+                    if (err instanceof ReadJsonError) {
+                        res.writeHead(err.status, { "Content-Type": "application/json; charset=utf-8" });
+                        res.end(JSON.stringify({ ok: false, error: err.message }));
+                        return;
+                    }
+                    throw err;
+                }
+                if (typeof payload?.type !== "string" || payload.type.length === 0) {
+                    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+                    res.end(JSON.stringify({ ok: false, error: "event requires a non-empty 'type' string" }));
+                    return;
+                }
+                const event = {
+                    type: payload.type,
+                    source: typeof payload.source === "string" ? payload.source : undefined,
+                    location: payload.location,
+                    payload: payload.payload,
+                    timestamp: typeof payload.timestamp === "number" ? payload.timestamp : Date.now(),
+                };
+                const applied = applyViewerEvent(event);
+                sendJson(res, { ok: applied, docstep: current.ir.docstep, time: current.ir.time }, buildHeaders);
                 return;
             }
             if (url.pathname === "/api/stream" || url.pathname === "/api/events") {

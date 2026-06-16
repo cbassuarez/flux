@@ -1,4 +1,5 @@
 import type { AssetBank, FluxDocument, FluxMeta, RefreshPolicy } from "./ast.js";
+import { type RuntimeEvent } from "./runtime.js";
 export type RenderValue = string | number | boolean | null | RenderValue[] | {
     [key: string]: RenderValue;
 } | RenderAssetRef;
@@ -142,18 +143,24 @@ export interface DocumentRuntime {
     readonly seed: number;
     readonly time: number;
     readonly docstep: number;
+    /** The last error thrown while evolving the kernel, if any (best-effort). */
+    readonly lastError: Error | null;
     render(): RenderDocument;
     tick(seconds: number): RenderDocument;
     step(n?: number): RenderDocument;
+    /** Deliver an input/transport/sensor event and re-render. */
+    applyEvent(event: RuntimeEvent): RenderDocument;
 }
 export interface DocumentRuntimeIR {
     readonly doc: FluxDocument;
     readonly seed: number;
     readonly time: number;
     readonly docstep: number;
+    readonly lastError: Error | null;
     render(): RenderDocumentIR;
     tick(seconds: number): RenderDocumentIR;
     step(n?: number): RenderDocumentIR;
+    applyEvent(event: RuntimeEvent): RenderDocumentIR;
 }
 export type AssetResolver = (bank: AssetBank, options: {
     cwd?: string;

@@ -39,6 +39,60 @@ describe("viewer server", () => {
     expect(tick2.ir.time).toBeCloseTo(1, 4);
   });
 
+  itNetwork("applies input events and patches the affected slot", async () => {
+    const source = `
+      document {
+        meta { version = "0.2.0"; }
+        state { param score : int [0, 999] @ 0; }
+        body {
+          page p1 {
+            slot s1 {
+              reserve = fixed(120, 40, px);
+              refresh = docstep;
+              text t1 { content = @"score " + score; }
+            }
+          }
+        }
+        rule bump(mode = event, on = "click") {
+          when true then { score = score + 10; advanceDocstep(); }
+        }
+        runtime { eventsApply = "immediate"; }
+      }
+    `;
+
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flux-viewer-evt-"));
+    const docPath = path.join(tmpDir, "doc.flux");
+    await fs.writeFile(docPath, source);
+
+    // No wallclock ticking: the docstep should only move because of the event.
+    const server = await startViewerServer({ docPath, seed: 1, advanceTime: false });
+
+    try {
+      const postEvent = (type: string) =>
+        fetch(`${server.url}/api/event`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type }),
+        }).then((r) => r.json() as Promise<{ ok: boolean; docstep: number }>);
+
+      const clickRes = await postEvent("click");
+      expect(clickRes.ok).toBe(true);
+      expect(clickRes.docstep).toBe(1); // event rule called advanceDocstep()
+
+      const patches = (await (await fetch(`${server.url}/api/patches`)).json()) as {
+        slotPatches?: Record<string, string>;
+      };
+      const slotHtml = Object.values(patches.slotPatches ?? {}).join("");
+      expect(slotHtml).toContain("score 10");
+
+      // An event with no matching rule must not advance the docstep.
+      const hoverRes = await postEvent("hover");
+      expect(hoverRes.docstep).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
   itNetwork("streams slot patches over SSE", async () => {
     const source = `
       document {
