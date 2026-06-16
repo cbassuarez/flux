@@ -1,4 +1,11 @@
-import type { FluxDocument, FluxExpr, FluxRule, FluxStmt } from "../ast.js";
+import type {
+    EventsApplyPolicy,
+    FluxDocument,
+    FluxExpr,
+    FluxRule,
+    FluxStmt,
+    RuleBranch,
+} from "../ast.js";
 import type {
     FluxEvent,
     GridRuntimeState,
@@ -73,81 +80,155 @@ export function initRuntimeState(doc: FluxDocument): RuntimeState {
 
 /**
  * Run a single docstep:
- * - Evaluates all mode=docstep rules in document order.
+ * - Flushes any param/cell writes deferred from prior event handling.
+ * - Evaluates all mode=docstep rules in document order (multi-branch).
  * - Applies their effects in a second "commit" phase (last-writer wins).
  */
 export function runDocstepOnce(doc: FluxDocument, prev: RuntimeState): RuntimeState {
-    const paramWrites = new Map<string, unknown>();
-    const cellWrites = new Map<string, Partial<RuntimeCellState>>();
+    // Flush writes deferred from event handling before this docstep evaluates.
+    const base = flushPending(prev);
+
+    const writes = newWriteCollector();
+    const control: Control = { advanceRequested: false };
 
     const docstepRules = (doc.rules ?? []).filter((rule) => rule.mode === "docstep");
-
     for (const rule of docstepRules) {
-        if (rule.scope?.grid) {
-            // Grid-scoped rule: run once per cell
-            const gridId = rule.scope.grid;
-            const gridState = prev.grids[gridId];
-            if (!gridState) continue;
-
-            const { rows, cols, cells } = gridState;
-
-            for (let r = 0; r < rows; r++) {
-                for (let c = 0; c < cols; c++) {
-                    const idx = r * cols + c;
-                    const cell = cells[idx];
-
-                    const neighbors = buildNeighborsNamespace(prev, gridId, r, c);
-                    const ctx: EvalContext = {
-                        params: prev.params,
-                        cell,
-                        neighbors,
-                    };
-
-                    const cond = evalExpr(rule.condition, ctx);
-                    if (typeof cond !== "boolean") {
-                        throw new Error(
-                            `Docstep rule '${rule.name}' condition did not evaluate to a boolean (got ${typeof cond})`,
-                        );
-                    }
-
-                    if (cond) {
-                        applyStatements(rule.thenBranch, ctx, gridId, r, c, paramWrites, cellWrites);
-                    }
-                }
-            }
-        } else {
-            // Doc-scoped rule: run once, no cell/neighbors
-            const ctx: EvalContext = {
-                params: prev.params,
-            };
-
-            const cond = evalExpr(rule.condition, ctx);
-            if (typeof cond !== "boolean") {
-                throw new Error(
-                    `Docstep rule '${rule.name}' condition did not evaluate to a boolean (got ${typeof cond})`,
-                );
-            }
-
-            if (cond) {
-                applyStatements(rule.thenBranch, ctx, undefined, undefined, undefined, paramWrites, cellWrites);
-            }
-        }
+        runRule(rule, base, writes, control);
     }
 
-    return applyWrites(prev, paramWrites, cellWrites);
+    return commitWrites(base, writes, { advanceDocstep: true });
 }
 
 /**
- * Event handling is reserved for a later kernel milestone.
- * For now it is a documented no-op.
+ * Apply an event to the runtime: run all `mode=event` rules whose `onEventType`
+ * matches the event, then apply their effects according to the document's
+ * `runtime.eventsApply` policy:
+ *   - "immediate":                    cell + param writes applied now.
+ *   - "deferred":                     cell + param writes deferred to next docstep.
+ *   - "cellImmediateParamsDeferred":  cells now, params next docstep (default).
+ *
+ * If a matching rule calls `advanceDocstep()`, a docstep is run after the
+ * event's immediate writes are applied (which also flushes the deferred ones).
  */
 export function handleEvent(
-    _doc: FluxDocument,
+    doc: FluxDocument,
     state: RuntimeState,
-    _event: FluxEvent,
+    event: FluxEvent,
 ): RuntimeState {
-    // v0.1 runtime kernel: event rules are not executed yet.
-    return state;
+    const eventRules = (doc.rules ?? []).filter(
+        (rule) => rule.mode === "event" && eventTypeMatches(rule, event),
+    );
+
+    const writes = newWriteCollector();
+    const control: Control = { advanceRequested: false };
+
+    for (const rule of eventRules) {
+        runRule(rule, state, writes, control, event);
+    }
+
+    const policy: EventsApplyPolicy =
+        doc.runtime?.eventsApply ?? "cellImmediateParamsDeferred";
+
+    let next = applyEventWrites(state, writes, policy);
+
+    // A rule-requested advance runs a full docstep, flushing deferred writes.
+    if (control.advanceRequested) {
+        next = runDocstepOnce(doc, next);
+    }
+
+    return next;
+}
+
+function eventTypeMatches(rule: FluxRule, event: FluxEvent): boolean {
+    // No declared type matches any event; otherwise require an exact match.
+    return rule.onEventType == null || rule.onEventType === event.type;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           Rule execution / writes                          */
+/* -------------------------------------------------------------------------- */
+
+interface WriteCollector {
+    paramWrites: Map<string, unknown>;
+    cellWrites: Map<string, Partial<RuntimeCellState>>;
+}
+
+interface Control {
+    advanceRequested: boolean;
+}
+
+function newWriteCollector(): WriteCollector {
+    return { paramWrites: new Map(), cellWrites: new Map() };
+}
+
+/**
+ * Run one rule over its scope. Grid-scoped rules evaluate once per cell with a
+ * `cell`/`neighbors` context; doc-scoped rules evaluate once.
+ */
+function runRule(
+    rule: FluxRule,
+    prev: RuntimeState,
+    writes: WriteCollector,
+    control: Control,
+    event?: FluxEvent,
+): void {
+    if (rule.scope?.grid) {
+        const gridId = rule.scope.grid;
+        const gridState = prev.grids[gridId];
+        if (!gridState) return;
+
+        const { rows, cols, cells } = gridState;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const cell = cells[r * cols + c];
+                const ctx: EvalContext = {
+                    params: prev.params,
+                    cell,
+                    neighbors: buildNeighborsNamespace(prev, gridId, r, c),
+                    locals: {},
+                    event,
+                };
+                runBranches(rule, ctx, gridId, r, c, writes, control);
+            }
+        }
+    } else {
+        const ctx: EvalContext = { params: prev.params, locals: {}, event };
+        runBranches(rule, ctx, undefined, undefined, undefined, writes, control);
+    }
+}
+
+/**
+ * Evaluate a rule's branches in order: the first branch whose condition is true
+ * runs its body; if none match, the optional else branch runs.
+ */
+function runBranches(
+    rule: FluxRule,
+    ctx: EvalContext,
+    gridId: string | undefined,
+    row: number | undefined,
+    col: number | undefined,
+    writes: WriteCollector,
+    control: Control,
+): void {
+    const branches: RuleBranch[] =
+        rule.branches?.length ? rule.branches : [{ condition: rule.condition, thenBranch: rule.thenBranch }];
+
+    for (const branch of branches) {
+        const cond = evalExpr(branch.condition, ctx);
+        if (typeof cond !== "boolean") {
+            throw new Error(
+                `Rule '${rule.name}' condition did not evaluate to a boolean (got ${typeof cond})`,
+            );
+        }
+        if (cond) {
+            applyStatements(branch.thenBranch, ctx, gridId, row, col, writes, control);
+            return;
+        }
+    }
+
+    if (rule.elseBranch) {
+        applyStatements(rule.elseBranch, ctx, gridId, row, col, writes, control);
+    }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -158,6 +239,10 @@ interface EvalContext {
     params: Record<string, number | boolean | string>;
     cell?: RuntimeCellState;
     neighbors?: NeighborsNamespace;
+    /** Local `let` bindings, scoped to a single rule/branch evaluation. */
+    locals?: Record<string, unknown>;
+    /** The triggering event, available to `event`-mode rules. */
+    event?: FluxEvent;
 }
 
 function applyStatements(
@@ -166,17 +251,30 @@ function applyStatements(
     gridId: string | undefined,
     row: number | undefined,
     col: number | undefined,
-    paramWrites: Map<string, unknown>,
-    cellWrites: Map<string, Partial<RuntimeCellState>>,
+    writes: WriteCollector,
+    control: Control,
 ): void {
     for (const stmt of statements) {
         switch (stmt.kind) {
             case "AssignmentStatement":
-                handleAssignment(stmt, ctx, gridId, row, col, paramWrites, cellWrites);
+                handleAssignment(stmt, ctx, gridId, row, col, writes);
                 break;
-            // v0.1 kernel: ignore other statement kinds (let, advanceDocstep, etc.)
-            default:
+            case "LetStatement":
+                // Bind a local for the remainder of this rule/branch evaluation.
+                (ctx.locals ??= {})[stmt.name] = evalExpr(stmt.value, ctx);
                 break;
+            case "AdvanceDocstepStatement":
+                control.advanceRequested = true;
+                break;
+            case "ExpressionStatement":
+                // Evaluated for completeness; the v0.1 calculus has no side effects
+                // outside of assignments, so the result is discarded.
+                evalExpr(stmt.expr, ctx);
+                break;
+            default: {
+                const _exhaustive: never = stmt;
+                void _exhaustive;
+            }
         }
     }
 }
@@ -187,8 +285,7 @@ function handleAssignment(
     gridId: string | undefined,
     row: number | undefined,
     col: number | undefined,
-    paramWrites: Map<string, unknown>,
-    cellWrites: Map<string, Partial<RuntimeCellState>>,
+    writes: WriteCollector,
 ): void {
     if (stmt.kind !== "AssignmentStatement") return;
 
@@ -197,7 +294,7 @@ function handleAssignment(
 
     if (target.kind === "Identifier") {
         // Param assignment
-        paramWrites.set(target.name, value);
+        writes.paramWrites.set(target.name, value);
         return;
     }
 
@@ -207,13 +304,13 @@ function handleAssignment(
         target.object.name === "cell"
     ) {
         if (!gridId || row === undefined || col === undefined) {
-            throw new Error("cell.* assignment is only allowed in grid-scoped docstep rules");
+            throw new Error("cell.* assignment is only allowed in grid-scoped rules");
         }
 
         const key = makeCellKey(gridId, row, col);
-        const existing = cellWrites.get(key) ?? {};
+        const existing = writes.cellWrites.get(key) ?? {};
         (existing as any)[target.property] = value;
-        cellWrites.set(key, existing);
+        writes.cellWrites.set(key, existing);
         return;
     }
 
@@ -224,53 +321,134 @@ function makeCellKey(gridId: string, row: number, col: number): string {
     return `${gridId}:${row}:${col}`;
 }
 
-function applyWrites(
-    prev: RuntimeState,
+/** Clone the grids of a state into a fresh, mutable structure. */
+function cloneGrids(prev: RuntimeState): Record<string, GridRuntimeState> {
+    const grids: Record<string, GridRuntimeState> = {};
+    for (const [gridId, gridState] of Object.entries(prev.grids)) {
+        grids[gridId] = {
+            name: gridState.name ?? gridId,
+            rows: gridState.rows,
+            cols: gridState.cols,
+            cells: gridState.cells.map((cell) => ({ ...cell })),
+        };
+    }
+    return grids;
+}
+
+function applyParamWrites(
+    params: Record<string, number | boolean | string>,
     paramWrites: Map<string, unknown>,
-    cellWrites: Map<string, Partial<RuntimeCellState>>,
-): RuntimeState {
-    // Clone params
-    const params: Record<string, number | boolean | string> = { ...prev.params };
+): void {
     for (const [name, value] of paramWrites) {
         params[name] = value as number | boolean | string;
     }
+}
 
-    // Clone grids and cells
-    const grids: Record<string, GridRuntimeState> = {};
-    for (const [gridId, gridState] of Object.entries(prev.grids)) {
-        const rows = gridState.rows;
-        const cols = gridState.cols;
-        const cells: RuntimeCellState[] = gridState.cells.map((cell) => ({ ...cell }));
-
-        grids[gridId] = {
-            name: (gridState as any).name ?? gridId,
-            rows,
-            cols,
-            cells,
-        };
-    }
-
-    // Apply cell patches (last writer wins)
+function applyCellWrites(
+    grids: Record<string, GridRuntimeState>,
+    cellWrites: Map<string, Partial<RuntimeCellState>>,
+): void {
     for (const [key, patch] of cellWrites) {
         const [gridId, rowStr, colStr] = key.split(":");
-        const r = Number(rowStr);
-        const c = Number(colStr);
         const grid = grids[gridId];
         if (!grid) continue;
-
-        const idx = r * grid.cols + c;
+        const idx = Number(rowStr) * grid.cols + Number(colStr);
         const cell = grid.cells[idx];
         if (!cell) continue;
-
         Object.assign(cell, patch);
+    }
+}
+
+/** Apply collected writes immediately and (optionally) advance the docstep. */
+function commitWrites(
+    prev: RuntimeState,
+    writes: WriteCollector,
+    options: { advanceDocstep: boolean },
+): RuntimeState {
+    const params = { ...prev.params };
+    applyParamWrites(params, writes.paramWrites);
+
+    const grids = cloneGrids(prev);
+    applyCellWrites(grids, writes.cellWrites);
+
+    return {
+        doc: prev.doc,
+        docstepIndex: prev.docstepIndex + (options.advanceDocstep ? 1 : 0),
+        params,
+        grids,
+        runtimeConfig: prev.runtimeConfig,
+    };
+}
+
+/**
+ * Apply event-rule writes under the given policy. Deferred writes are stashed on
+ * the returned state and flushed at the start of the next docstep. Does not
+ * advance the docstep on its own.
+ */
+function applyEventWrites(
+    prev: RuntimeState,
+    writes: WriteCollector,
+    policy: EventsApplyPolicy,
+): RuntimeState {
+    const paramsImmediate = policy === "immediate";
+    const cellsImmediate = policy === "immediate" || policy === "cellImmediateParamsDeferred";
+
+    const params = { ...prev.params };
+    const grids = cloneGrids(prev);
+
+    const pendingParamWrites: Record<string, number | boolean | string> = {
+        ...(prev.pendingParamWrites ?? {}),
+    };
+    const pendingCellWrites: Record<string, Partial<RuntimeCellState>> = {
+        ...(prev.pendingCellWrites ?? {}),
+    };
+
+    if (paramsImmediate) {
+        applyParamWrites(params, writes.paramWrites);
+    } else {
+        for (const [name, value] of writes.paramWrites) {
+            pendingParamWrites[name] = value as number | boolean | string;
+        }
+    }
+
+    if (cellsImmediate) {
+        applyCellWrites(grids, writes.cellWrites);
+    } else {
+        for (const [key, patch] of writes.cellWrites) {
+            pendingCellWrites[key] = { ...(pendingCellWrites[key] ?? {}), ...patch };
+        }
     }
 
     return {
         doc: prev.doc,
-        docstepIndex: prev.docstepIndex + 1,
+        docstepIndex: prev.docstepIndex,
         params,
         grids,
         runtimeConfig: prev.runtimeConfig,
+        pendingParamWrites,
+        pendingCellWrites,
+    };
+}
+
+/** Merge any deferred event writes into a fresh state, clearing the queues. */
+function flushPending(prev: RuntimeState): RuntimeState {
+    const hasPending =
+        (prev.pendingParamWrites && Object.keys(prev.pendingParamWrites).length > 0) ||
+        (prev.pendingCellWrites && Object.keys(prev.pendingCellWrites).length > 0);
+    if (!hasPending) return prev;
+
+    const params = { ...prev.params, ...prev.pendingParamWrites };
+    const grids = cloneGrids(prev);
+    applyCellWrites(grids, new Map(Object.entries(prev.pendingCellWrites ?? {})));
+
+    return {
+        doc: prev.doc,
+        docstepIndex: prev.docstepIndex,
+        params,
+        grids,
+        runtimeConfig: prev.runtimeConfig,
+        pendingParamWrites: {},
+        pendingCellWrites: {},
     };
 }
 
@@ -347,6 +525,10 @@ function evalExpr(expr: FluxExpr, ctx: EvalContext): unknown {
 }
 
 function evalIdentifier(name: string, ctx: EvalContext): unknown {
+    // Local `let` bindings shadow everything else for the current evaluation.
+    if (ctx.locals && Object.prototype.hasOwnProperty.call(ctx.locals, name)) {
+        return ctx.locals[name];
+    }
     if (name === "cell") {
         if (!ctx.cell) {
             throw new Error("'cell' is not defined in this context");
@@ -358,6 +540,12 @@ function evalIdentifier(name: string, ctx: EvalContext): unknown {
             throw new Error("'neighbors' is not defined in this context");
         }
         return ctx.neighbors;
+    }
+    if (name === "event") {
+        if (!ctx.event) {
+            throw new Error("'event' is only defined in event-mode rules");
+        }
+        return ctx.event;
     }
     return ctx.params[name];
 }

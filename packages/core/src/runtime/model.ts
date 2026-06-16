@@ -166,5 +166,19 @@ export interface RuntimeState {
      * This mirrors FluxDocument.runtime and is not interpreted here.
      */
     runtimeConfig?: FluxRuntimeConfig;
+
+    /**
+     * Param writes produced by event rules under a deferred apply policy.
+     * They are flushed into `params` at the start of the next docstep.
+     * Keyed by param name, last-writer-wins.
+     */
+    pendingParamWrites?: Record<string, number | boolean | string>;
+
+    /**
+     * Cell writes produced by event rules under a fully-deferred apply policy.
+     * Flushed into the grids at the start of the next docstep. Keyed by
+     * `${gridId}:${row}:${col}`.
+     */
+    pendingCellWrites?: Record<string, Partial<RuntimeCellState>>;
 }
 

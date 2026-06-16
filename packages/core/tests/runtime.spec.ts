@@ -80,7 +80,7 @@ describe("Flux runtime v0.1", () => {
         expect(next.runtimeConfig).toEqual(initialState.runtimeConfig);
     });
 
-    it("handleEvent is a no-op placeholder in v0.1", () => {
+    it("handleEvent leaves state observably unchanged when no event rules match", () => {
         const event: FluxEvent = {
             type: "click",
             gridName: "main",
@@ -90,8 +90,10 @@ describe("Flux runtime v0.1", () => {
 
         const next = handleEvent(doc, initialState, event);
 
-        // For now, handleEvent does not change the state.
-        expect(next).toEqual(initialState);
+        // No event rules in this document, so nothing should change.
+        expect(next.docstepIndex).toBe(initialState.docstepIndex);
+        expect(next.params).toEqual(initialState.params);
+        expect(next.grids).toEqual(initialState.grids);
     });
 });
 
