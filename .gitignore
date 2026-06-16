@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# OS / editor junk
+.DS_Store
+*~
+
+# Build / tool caches (note: package dist/ is intentionally tracked)
+*.tsbuildinfo
+.vite/
+.turbo/
+coverage/
+
+# Compiled config outputs (source is vite.config.ts)
+packages/*/vite.config.js
+packages/*/vite.config.d.ts
+
+# Test / run artifacts
+test-results/
+playwright-report/
+out/
+
+# Viewer atomic-write temp files
+*.flux.*.tmp
+
+# Logs / env
+*.log
+.env
+.env.local
