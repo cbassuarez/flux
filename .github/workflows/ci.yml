@@ -64,6 +64,8 @@ jobs:
           pnpm --filter @flux-lang/cli-core run build
           pnpm --filter @flux-lang/cli-ui run build
           pnpm --filter @flux-lang/cli run build
+          # the self-update test imports @flux-lang/flux's built dist
+          pnpm --filter @flux-lang/flux run build
 
       - name: Test core + cli
         run: |
