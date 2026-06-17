@@ -71,6 +71,20 @@ jobs:
       - name: Compile release scripts
         run: pnpm -w exec tsc -p scripts/release/tsconfig.json
 
+      # Write the auth token to the project .npmrc so pnpm publish reliably
+      # picks it up (setup-node's userconfig isn't always honored by pnpm).
+      - name: Configure npm auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}"
+            echo "registry=https://registry.npmjs.org/"
+            echo "always-auth=true"
+          } >> .npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
