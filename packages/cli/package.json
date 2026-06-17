@@ -29,7 +29,8 @@
     "@flux-lang/brand": "workspace:^",
     "@flux-lang/core": "workspace:^",
     "@flux-lang/cli-core": "workspace:^",
-    "@flux-lang/cli-ui": "workspace:^"
+    "@flux-lang/cli-ui": "workspace:^",
+    "@flux-lang/viewer": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
