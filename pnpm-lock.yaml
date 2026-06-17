@@ -56,6 +56,9 @@ importers:
       '@flux-lang/core':
         specifier: workspace:^
         version: link:../core
+      '@flux-lang/viewer':
+        specifier: workspace:^
+        version: link:../viewer
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
