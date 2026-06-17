@@ -125,6 +125,9 @@ export type EditorCommandContext = {
   toggleAssets: () => void;
   toggleDiagnostics: () => void;
   toggleStatusBar: () => void;
+  toggleGuides: () => void;
+  toggleGrid: () => void;
+  toggleRulers: () => void;
   enterFocusMode: () => void;
   openAbout: () => void;
   openDocSettings: () => void;
@@ -475,24 +478,24 @@ export function buildEditorCommands(ctx: EditorCommandContext): Record<EditorCom
     }),
     "view.toggleGuides": make({
       id: "view.toggleGuides",
-      label: "Toggle Guides",
-      enabled: false,
-      run: () => {},
-      planned: true,
+      label: "Guides",
+      enabled: true,
+      run: ctx.toggleGuides,
+      palette: false,
     }),
     "view.toggleGrid": make({
       id: "view.toggleGrid",
-      label: "Toggle Grid",
-      enabled: false,
-      run: () => {},
-      planned: true,
+      label: "Grid",
+      enabled: true,
+      run: ctx.toggleGrid,
+      palette: false,
     }),
     "view.toggleRulers": make({
       id: "view.toggleRulers",
-      label: "Toggle Rulers",
-      enabled: false,
-      run: () => {},
-      planned: true,
+      label: "Rulers",
+      enabled: true,
+      run: ctx.toggleRulers,
+      palette: false,
     }),
     "view.previewMode": make({
       id: "view.previewMode",

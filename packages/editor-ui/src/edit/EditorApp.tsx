@@ -123,6 +123,9 @@ export default function EditorApp() {
     const [showStatusBar, setShowStatusBar] = useState(true);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [showGuides, setShowGuides] = useState(false);
+  const [showGrid, setShowGrid] = useState(false);
+  const [showRulers, setShowRulers] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [docSettingsOpen, setDocSettingsOpen] = useState(false);
   const [buildInfoOpen, setBuildInfoOpen] = useState(false);
@@ -1053,6 +1056,9 @@ export default function EditorApp() {
   const toggleAssets = useCallback(() => setAssetPanelOpen((prev) => !prev), []);
   const toggleDiagnostics = useCallback(() => setDiagnosticsOpen((prev) => !prev), []);
   const toggleStatusBar = useCallback(() => setShowStatusBar((prev) => !prev), []);
+  const toggleGuides = useCallback(() => setShowGuides((prev) => !prev), []);
+  const toggleGrid = useCallback(() => setShowGrid((prev) => !prev), []);
+  const toggleRulers = useCallback(() => setShowRulers((prev) => !prev), []);
   const enterFocusMode = useCallback(() => {
     setOutlineVisible(false);
     setInspectorVisible(false);
@@ -1395,6 +1401,9 @@ export default function EditorApp() {
         toggleAssets,
         toggleDiagnostics,
         toggleStatusBar,
+        toggleGuides,
+        toggleGrid,
+        toggleRulers,
         enterFocusMode,
         openAbout: () => setAboutOpen(true),
         openDocSettings: () => setDocSettingsOpen(true),
@@ -1438,6 +1447,9 @@ export default function EditorApp() {
       toggleAssets,
       toggleDiagnostics,
       toggleStatusBar,
+      toggleGuides,
+      toggleGrid,
+      toggleRulers,
       enterFocusMode,
       handleCopyDiagnosticsSummary,
     ],
@@ -1651,6 +1663,9 @@ export default function EditorApp() {
             "view.toggleAssets": assetPanelOpen,
             "view.toggleDiagnostics": diagnosticsOpen,
             "view.showStatusBar": showStatusBar,
+            "view.toggleGuides": showGuides,
+            "view.toggleGrid": showGrid,
+            "view.toggleRulers": showRulers,
           }}
           brandInfo={fluxVersionInfo}
           onBrandVersionClick={() => editorCommands["help.buildInfo"]?.run()}
@@ -1743,6 +1758,19 @@ export default function EditorApp() {
                       sandbox="allow-same-origin allow-scripts allow-forms allow-downloads"
                       onLoad={handlePreviewLoad}
                     />
+                    {showGrid || showGuides || showRulers ? (
+                      <div
+                        className={[
+                          "preview-overlay",
+                          showGrid ? "is-grid" : "",
+                          showGuides ? "is-guides" : "",
+                          showRulers ? "is-rulers" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        aria-hidden="true"
+                      />
+                    ) : null}
                   </div>
                 </div>
               </div>

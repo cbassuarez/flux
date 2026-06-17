@@ -492,6 +492,68 @@
   background: var(--editor-surface-paper);
 }
 
+/* Layout aids overlaid on the preview (View ▸ Guides / Grid / Rulers). */
+.preview-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.preview-overlay.is-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--editor-accent, #2b4c7e) 22%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--editor-accent, #2b4c7e) 22%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.preview-overlay.is-guides::before,
+.preview-overlay.is-guides::after {
+  content: "";
+  position: absolute;
+  background: color-mix(in srgb, var(--editor-accent, #2b4c7e) 55%, transparent);
+}
+.preview-overlay.is-guides::before {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-0.5px);
+}
+.preview-overlay.is-guides::after {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-0.5px);
+}
+
+/* Rulers: a tick strip along the top and left edges. */
+.preview-overlay.is-rulers {
+  --ruler-bg: color-mix(in srgb, var(--editor-surface-paper, #fff) 80%, var(--editor-accent, #2b4c7e));
+  --ruler-tick: color-mix(in srgb, var(--editor-accent, #2b4c7e) 45%, transparent);
+}
+.preview-overlay.is-rulers::before,
+.preview-overlay.is-rulers::after {
+  content: "";
+  position: absolute;
+  background-color: var(--ruler-bg);
+}
+.preview-overlay.is-rulers::before {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 14px;
+  background-image: repeating-linear-gradient(to right, var(--ruler-tick) 0 1px, transparent 1px 8px);
+}
+.preview-overlay.is-rulers::after {
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 14px;
+  background-image: repeating-linear-gradient(to bottom, var(--ruler-tick) 0 1px, transparent 1px 8px);
+}
+
 .pane-header {
   display: flex;
   align-items: center;
