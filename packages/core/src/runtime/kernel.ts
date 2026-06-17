@@ -511,8 +511,7 @@ function evalExpr(expr: FluxExpr, ctx: EvalContext): unknown {
             return evalMember(expr.object, expr.property, ctx);
 
         case "CallExpression":
-            // v0.1 kernel: no generic function calls are supported at runtime.
-            throw new Error("Call expressions are not supported in the v0.1 runtime kernel");
+            return evalCall(expr, ctx);
 
         case "NeighborsCallExpression":
             return evalNeighborsCall(expr, ctx);
@@ -636,6 +635,61 @@ function evalMember(objectExpr: FluxExpr, property: string, ctx: EvalContext): u
         throw new Error(`Cannot read property '${property}' of null/undefined`);
     }
     return obj[property];
+}
+
+/**
+ * Deterministic math standard library available to rule expressions. All
+ * functions are pure, so the runtime stays reproducible across runs.
+ */
+function evalCall(
+    expr: Extract<FluxExpr, { kind: "CallExpression" }>,
+    ctx: EvalContext,
+): unknown {
+    if (expr.callee.kind !== "Identifier") {
+        throw new Error("Only named function calls are supported in rule expressions");
+    }
+    const name = expr.callee.name;
+    const args = expr.args.map((arg) => {
+        if (arg.kind === "NamedArg") {
+            throw new Error(`Function '${name}' does not take named arguments`);
+        }
+        return Number(evalExpr(arg, ctx));
+    });
+
+    switch (name) {
+        case "min":
+            return Math.min(...args);
+        case "max":
+            return Math.max(...args);
+        case "abs":
+            return Math.abs(args[0]);
+        case "floor":
+            return Math.floor(args[0]);
+        case "ceil":
+            return Math.ceil(args[0]);
+        case "round":
+            return Math.round(args[0]);
+        case "sign":
+            return Math.sign(args[0]);
+        case "sqrt":
+            return Math.sqrt(args[0]);
+        case "pow":
+            return Math.pow(args[0], args[1]);
+        case "mod": {
+            const [a, b] = args;
+            return ((a % b) + b) % b; // floored modulo (handles negatives)
+        }
+        case "clamp": {
+            const [x, lo, hi] = args;
+            return Math.min(Math.max(x, lo), hi);
+        }
+        case "lerp": {
+            const [a, b, t] = args;
+            return a + (b - a) * t;
+        }
+        default:
+            throw new Error(`Unknown function '${name}' in rule expression`);
+    }
 }
 
 function evalNeighborsCall(

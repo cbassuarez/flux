@@ -15,6 +15,28 @@ function setup(src: string) {
 }
 
 describe("kernel: docstep rule calculus", () => {
+  it("provides a deterministic math stdlib to rule expressions", () => {
+    const { doc, state } = setup(`
+      document {
+        state {
+          param level : float [0, 100] @ 80;
+          param decayed : float [0, 100] @ 0;
+          param bounded : float [0, 100] @ 0;
+        }
+        rule maths(mode = docstep) {
+          when true then {
+            decayed = max(0, level - 95);
+            bounded = clamp(level * 2, 0, 100);
+          }
+        }
+      }
+    `);
+
+    const next = runDocstepOnce(doc, state);
+    expect(next.params.decayed).toBe(0); // max(0, 80-95) = 0
+    expect(next.params.bounded).toBe(100); // clamp(160, 0, 100) = 100
+  });
+
   it("evaluates `let` bindings within a docstep rule", () => {
     const { doc, state } = setup(`
       document {
