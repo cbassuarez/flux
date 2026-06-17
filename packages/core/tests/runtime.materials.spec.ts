@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createRuntime, parseDocument } from "../src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const heroPath = path.join(__dirname, "..", "..", "..", "examples", "hero-test-doc.flux");
+const heroPath = path.join(__dirname, "fixtures", "legacy-hero.flux");
 const heroSource = readFileSync(heroPath, "utf8");
 const simpleSource = `
 document {

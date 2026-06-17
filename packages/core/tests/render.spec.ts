@@ -203,7 +203,7 @@ describe("Flux render IR v0.2", () => {
   });
 
   it("renders legacy v0.1 examples into a default body", () => {
-    const heroPath = path.join(__dirname, "..", "..", "..", "examples", "hero-test-doc.flux");
+    const heroPath = path.join(__dirname, "fixtures", "legacy-hero.flux");
     const heroSource = readFileSync(heroPath, "utf8");
     const doc = parseDocument(heroSource);
     const rendered = renderDocument(doc, { seed: 0, docstep: 1 });
