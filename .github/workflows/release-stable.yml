@@ -68,37 +68,6 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Check dist freshness (self-heal + tiny logs)
-        id: dist
-        shell: bash
-        run: |
-          set -euo pipefail
-          export GIT_PAGER=cat
-          git config --global core.pager cat
-
-          # Make globs safe: if packages/*/dist doesn't match, it disappears.
-          shopt -s nullglob
-
-          # Use real directories (shell-expanded), not git glob-magic.
-          DIST_DIRS=(packages/*/dist packages/viewer/editor-dist)
-
-          if [ ${#DIST_DIRS[@]} -eq 0 ]; then
-            echo "::warning::No dist directories found; skipping dist sync."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          CHANGED="$(git status --porcelain=v1 --untracked-files=all -- "${DIST_DIRS[@]}")"
-          if [ -n "$CHANGED" ]; then
-            echo "dist changes detected; staging…"
-            echo "$CHANGED" | head -n 80
-            echo "...(truncated)"
-            git add -A -- "${DIST_DIRS[@]}"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Compile release scripts
         run: pnpm -w exec tsc -p scripts/release/tsconfig.json
 
@@ -140,7 +109,10 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          git add -A -- version.json pnpm-lock.yaml packages/*/package.json packages/*/dist packages/viewer/editor-dist
+          # dist/ is no longer tracked (rebuilt by the build; npm packs it from
+          # disk via each package's "files"). Only version + lockfile + manifests
+          # change in a release commit.
+          git add -A -- version.json pnpm-lock.yaml packages/*/package.json
 
           if git diff --cached --quiet; then
             echo "No changes to commit."
